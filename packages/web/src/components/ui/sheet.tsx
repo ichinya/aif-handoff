@@ -1,0 +1,88 @@
+import * as React from "react";
+import { cn } from "@/lib/utils";
+import { X } from "lucide-react";
+
+interface SheetProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  children: React.ReactNode;
+}
+
+function Sheet({ open, onOpenChange, children }: SheetProps) {
+  // Close on Escape
+  React.useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onOpenChange(false);
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [open, onOpenChange]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50">
+      <div
+        className="fixed inset-0 bg-black/85 backdrop-blur-[1px]"
+        onClick={() => onOpenChange(false)}
+      />
+      {children}
+    </div>
+  );
+}
+
+function SheetContent({
+  className,
+  children,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div
+      className={cn(
+        "fixed inset-y-0 right-0 z-50 w-full max-w-lg border-l border-border bg-card p-6 shadow-[0_0_0_1px_rgba(255,255,255,0.03)] transition-transform duration-200",
+        className
+      )}
+      {...props}
+    >
+      {children}
+    </div>
+  );
+}
+
+function SheetHeader({
+  className,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div
+      className={cn("flex flex-col space-y-2 mb-6", className)}
+      {...props}
+    />
+  );
+}
+
+function SheetTitle({
+  className,
+  ...props
+}: React.HTMLAttributes<HTMLHeadingElement>) {
+  return (
+    <h2
+      className={cn("text-lg font-semibold", className)}
+      {...props}
+    />
+  );
+}
+
+function SheetClose({ onClose }: { onClose: () => void }) {
+  return (
+    <button
+      className="absolute right-4 top-4 rounded-sm opacity-70 transition-opacity hover:opacity-100"
+      onClick={onClose}
+    >
+      <X className="h-4 w-4" />
+    </button>
+  );
+}
+
+export { Sheet, SheetContent, SheetHeader, SheetTitle, SheetClose };

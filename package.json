@@ -1,0 +1,26 @@
+{
+  "name": "aif-handoff",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "test": "turbo test",
+    "coverage": "turbo test -- --coverage",
+    "db:setup": "mkdir -p data && cd packages/shared && DATABASE_URL=../../data/aif.sqlite drizzle-kit push",
+    "db:push": "turbo db:push --filter=@aif/shared"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^3.2.4",
+    "eslint": "^9.23.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "globals": "^16.0.0",
+    "turbo": "^2.5.0",
+    "typescript-eslint": "^8.28.0",
+    "typescript": "^5.8.0"
+  },
+  "packageManager": "npm@10.9.0"
+}

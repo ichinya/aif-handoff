@@ -1,0 +1,26 @@
+{
+  "name": "@aif/agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.ts",
+    "test": "vitest run",
+    "coverage": "vitest run --coverage",
+    "lint": "eslint \"src/**/*.ts\"",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@aif/shared": "*",
+    "@anthropic-ai/claude-agent-sdk": "^0.1.0",
+    "node-cron": "^3.0.3"
+  },
+  "devDependencies": {
+    "@types/node-cron": "^3.0.11",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.1.0"
+  }
+}

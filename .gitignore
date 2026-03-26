@@ -1,0 +1,61 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Turborepo
+.turbo/
+
+# Database
+data/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Testing
+coverage/
+
+# Vite
+*.local
+
+# Playwright
+.playwright-mcp/
+
+# Claude Code
+.claude/settings.local.json
+
+# Codex
+.codex/
+
+# AI Factory (keep tracked files, ignore generated)
+.ai-factory/skill-context/
+
+# HTML docs (generated)
+docs-html/
+
+# Misc
+.data
+.projects

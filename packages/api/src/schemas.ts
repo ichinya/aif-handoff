@@ -1,0 +1,56 @@
+import { z } from "zod";
+import { TASK_EVENTS, TASK_STATUSES } from "@aif/shared";
+
+const taskAttachmentSchema = z.object({
+  name: z.string().min(1).max(500),
+  mimeType: z.string().max(200),
+  size: z.number().int().min(0).max(10_000_000),
+  content: z.string().max(2_000_000).nullable(),
+});
+
+export const createProjectSchema = z.object({
+  name: z.string().min(1, "Name is required").max(200),
+  rootPath: z.string().min(1, "Root path is required"),
+});
+
+export const createTaskSchema = z.object({
+  projectId: z.string().min(1, "Project ID is required"),
+  title: z.string().min(1, "Title is required").max(500),
+  description: z.string().default(""),
+  attachments: z.array(taskAttachmentSchema).max(10).default([]),
+  priority: z.number().int().min(0).max(5).default(0),
+  autoMode: z.boolean().default(true),
+});
+
+export const updateTaskSchema = z.object({
+  title: z.string().min(1).max(500).optional(),
+  description: z.string().optional(),
+  attachments: z.array(taskAttachmentSchema).max(10).optional(),
+  priority: z.number().int().min(0).max(5).optional(),
+  autoMode: z.boolean().optional(),
+  plan: z.string().nullable().optional(),
+  implementationLog: z.string().nullable().optional(),
+  reviewComments: z.string().nullable().optional(),
+  agentActivityLog: z.string().nullable().optional(),
+  blockedReason: z.string().nullable().optional(),
+  blockedFromStatus: z.enum(TASK_STATUSES).nullable().optional(),
+  retryAfter: z.string().nullable().optional(),
+  retryCount: z.number().int().min(0).optional(),
+});
+
+export const taskEventSchema = z.object({
+  event: z.enum(TASK_EVENTS),
+});
+
+export const createTaskCommentSchema = z.object({
+  message: z.string().min(1, "Comment message is required").max(20_000),
+  attachments: z.array(taskAttachmentSchema).max(10).default([]),
+});
+
+export const reorderTaskSchema = z.object({
+  position: z.number(),
+});
+
+export const broadcastTaskSchema = z.object({
+  type: z.enum(["task:updated", "task:moved"]).default("task:updated"),
+});

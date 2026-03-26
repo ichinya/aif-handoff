@@ -1,0 +1,117 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap");
+@import "tailwindcss";
+
+@theme {
+  --color-background: #0a0a0a;
+  --color-foreground: #fafafa;
+  --color-card: #101010;
+  --color-card-foreground: #fafafa;
+  --color-popover: #111111;
+  --color-popover-foreground: #fafafa;
+  --color-primary: #10b981;
+  --color-primary-foreground: #0a0a0a;
+  --color-secondary: #141414;
+  --color-secondary-foreground: #fafafa;
+  --color-muted: #141414;
+  --color-muted-foreground: #6b7280;
+  --color-accent: #171717;
+  --color-accent-foreground: #fafafa;
+  --color-destructive: #ef4444;
+  --color-destructive-foreground: #fafafa;
+  --color-border: #2a2a2a;
+  --color-input: #2a2a2a;
+  --color-ring: #10b981;
+  --radius: 0rem;
+}
+
+:root.light {
+  --color-background: #f7faf8;
+  --color-foreground: #0b1220;
+  --color-card: #ffffff;
+  --color-card-foreground: #0b1220;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #0b1220;
+  --color-primary: #0f766e;
+  --color-primary-foreground: #ecfeff;
+  --color-secondary: #e8eeea;
+  --color-secondary-foreground: #0b1220;
+  --color-muted: #e7eeea;
+  --color-muted-foreground: #334155;
+  --color-accent: #e3efe9;
+  --color-accent-foreground: #0b1220;
+  --color-destructive: #dc2626;
+  --color-destructive-foreground: #fafafa;
+  --color-border: #b7c4bc;
+  --color-input: #b7c4bc;
+  --color-ring: #0f766e;
+}
+
+body {
+  margin: 0;
+  font-family:
+    "IBM Plex Mono",
+    system-ui,
+    -apple-system,
+    sans-serif;
+  color: var(--color-foreground);
+  background:
+    radial-gradient(65% 45% at 50% -10%, rgb(16 185 129 / 13%) 0%, rgb(16 185 129 / 0%) 100%),
+    linear-gradient(to right, rgb(255 255 255 / 2%) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(255 255 255 / 2%) 1px, transparent 1px),
+    var(--color-background);
+  background-size: auto, 28px 28px, 28px 28px, auto;
+}
+
+:root.light body {
+  background:
+    radial-gradient(65% 45% at 50% -10%, rgb(15 118 110 / 10%) 0%, rgb(15 118 110 / 0%) 100%),
+    linear-gradient(to right, rgb(15 23 42 / 6%) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(15 23 42 / 6%) 1px, transparent 1px),
+    var(--color-background);
+}
+
+.app-pattern-bg {
+  background:
+    radial-gradient(65% 45% at 50% -10%, rgb(16 185 129 / 13%) 0%, rgb(16 185 129 / 0%) 100%),
+    linear-gradient(to right, rgb(255 255 255 / 2%) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(255 255 255 / 2%) 1px, transparent 1px),
+    var(--color-background);
+  background-size: auto, 28px 28px, 28px 28px, auto;
+}
+
+:root.light .app-pattern-bg {
+  background:
+    radial-gradient(72% 52% at 50% -10%, rgb(15 118 110 / 11%) 0%, rgb(15 118 110 / 0%) 100%),
+    linear-gradient(to right, rgb(15 23 42 / 2.2%) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(15 23 42 / 2.2%) 1px, transparent 1px),
+    linear-gradient(to right, rgb(15 23 42 / 0.8%) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(15 23 42 / 0.8%) 1px, transparent 1px),
+    var(--color-background);
+  background-size: auto, 28px 28px, 28px 28px, 112px 112px, 112px 112px, auto;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family:
+    "JetBrains Mono",
+    "IBM Plex Mono",
+    monospace;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-muted-foreground);
+}
