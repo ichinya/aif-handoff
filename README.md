@@ -10,6 +10,8 @@ Built on top of [AI Factory](https://github.com/lee-to/ai-factory) workflow and 
 - **Beautiful Kanban UI** — drag-and-drop board with real-time WebSocket updates
 - **AI Factory core** — built on [ai-factory](https://github.com/lee-to/ai-factory) agent definitions and skill system
 - **Subagent orchestration** — plan-coordinator, implement-coordinator, review + security sidecars
+- **Layer-aware execution** — implementer computes dependency layers and enforces parallel worker dispatch where possible
+- **Self-healing pipeline** — heartbeat + stale-stage watchdog auto-recovers stuck agent stages
 - **Human-in-the-loop** — approve plans, request changes, or let auto-mode handle everything
 
 ## Quick Start
@@ -55,6 +57,12 @@ The coordinator polls every 30 seconds and delegates to `.claude/agents/` defini
 | Backlog → Planning → Plan Ready | `plan-coordinator` | Iterative plan refinement via `plan-polisher` |
 | Plan Ready → Implementing → Review | `implement-coordinator` | Parallel task execution with worktrees + quality sidecars |
 | Review → Done | `review-sidecar` + `security-sidecar` | Code review and security audit in parallel |
+
+### Fault Tolerance
+
+- Task liveness is tracked with `lastHeartbeatAt`.
+- If a stage (`planning`, `implementing`, `review`) stops heartbeating longer than timeout, coordinator moves task to `blocked_external` with retry backoff.
+- After max stale retries, task is quarantined for manual intervention.
 
 All agents are loaded via `settingSources: ["project"]` from `.claude/agents/*.md` — the same agent definitions used by [AI Factory](https://github.com/lee-to/ai-factory).
 

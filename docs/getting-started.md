@@ -45,8 +45,13 @@ cp .env.example .env
 | `ANTHROPIC_API_KEY` | *(optional)* | API key. Agent SDK uses `~/.claude/` auth by default |
 | `PORT` | `3001` | API server port |
 | `POLL_INTERVAL_MS` | `30000` | Agent coordinator polling interval (ms) |
+| `AGENT_STAGE_STALE_TIMEOUT_MS` | `1200000` | Stale-stage watchdog timeout (ms) before auto-recovery |
+| `AGENT_STAGE_STALE_MAX_RETRY` | `3` | Max stale auto-recover attempts before quarantine in `blocked_external` |
 | `DATABASE_URL` | `./data/aif.sqlite` | SQLite database path |
+| `AGENT_QUERY_AUDIT_ENABLED` | `true` | Enable/disable query audit logs in `logs/*.log` |
 | `LOG_LEVEL` | `debug` | Log level: `fatal`, `error`, `warn`, `info`, `debug`, `trace` |
+
+You can set planner/plan-checker/implementer/review budgets per project in the project edit dialog. Leave any budget field empty for unlimited.
 
 See [Configuration](configuration.md) for details.
 

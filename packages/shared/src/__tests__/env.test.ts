@@ -12,6 +12,7 @@ describe("env validation", () => {
       PORT: "3001",
       POLL_INTERVAL_MS: "30000",
       DATABASE_URL: "./data/test.sqlite",
+      AGENT_QUERY_AUDIT_ENABLED: "false",
       LOG_LEVEL: "debug",
     });
 
@@ -19,6 +20,7 @@ describe("env validation", () => {
     expect(result.PORT).toBe(3001);
     expect(result.POLL_INTERVAL_MS).toBe(30000);
     expect(result.DATABASE_URL).toBe("./data/test.sqlite");
+    expect(result.AGENT_QUERY_AUDIT_ENABLED).toBe(false);
     expect(result.LOG_LEVEL).toBe("debug");
   });
 
@@ -28,7 +30,11 @@ describe("env validation", () => {
     expect(result.ANTHROPIC_API_KEY).toBeUndefined();
     expect(result.PORT).toBe(3001);
     expect(result.POLL_INTERVAL_MS).toBe(30000);
+    expect(result.AGENT_STAGE_STALE_TIMEOUT_MS).toBe(20 * 60 * 1000);
+    expect(result.AGENT_STAGE_STALE_MAX_RETRY).toBe(3);
+    expect(result.AGENT_STAGE_RUN_TIMEOUT_MS).toBe(15 * 60 * 1000);
     expect(result.DATABASE_URL).toBe("./data/aif.sqlite");
+    expect(result.AGENT_QUERY_AUDIT_ENABLED).toBe(true);
     expect(result.LOG_LEVEL).toBe("debug");
   });
 

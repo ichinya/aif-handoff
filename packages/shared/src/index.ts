@@ -42,3 +42,6 @@ export { applyHumanTaskEvent, HUMAN_ACTIONS_BY_STATUS } from "./stateMachine.js"
 
 // Logger
 export { logger, rootLogger } from "./logger.js";
+
+// Project initialization
+export { initProjectDirectory } from "./projectInit.js";

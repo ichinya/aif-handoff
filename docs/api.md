@@ -21,6 +21,10 @@ GET /projects
     "id": "uuid",
     "name": "My Project",
     "rootPath": "/path/to/project",
+    "plannerMaxBudgetUsd": 10,
+    "planCheckerMaxBudgetUsd": 2,
+    "implementerMaxBudgetUsd": 15,
+    "reviewSidecarMaxBudgetUsd": 2,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "updatedAt": "2026-01-01T00:00:00.000Z"
   }
@@ -38,6 +42,10 @@ POST /projects
 |-------|------|----------|-------------|
 | `name` | string | yes | Project name (1-200 chars) |
 | `rootPath` | string | yes | Absolute path to project root |
+| `plannerMaxBudgetUsd` | number | no | Budget for planner agent. If omitted, unlimited |
+| `planCheckerMaxBudgetUsd` | number | no | Budget for plan-checker agent. If omitted, unlimited |
+| `implementerMaxBudgetUsd` | number | no | Budget for implementer agent. If omitted, unlimited |
+| `reviewSidecarMaxBudgetUsd` | number | no | Per-sidecar budget for review/security sidecars. If omitted, unlimited |
 
 **Response:** `201 Created` — the created project object.
 
@@ -60,6 +68,31 @@ DELETE /projects/:id
 **Response:** `200 OK`
 ```json
 { "success": true }
+```
+
+### Get Project MCP Config
+
+```
+GET /projects/:id/mcp
+```
+
+Reads `.mcp.json` from the project root and returns its MCP servers map.
+
+**Response:** `200 OK`
+```json
+{
+  "mcpServers": {
+    "example": {
+      "command": "node",
+      "args": ["./server.js"]
+    }
+  }
+}
+```
+
+If `.mcp.json` does not exist (or cannot be parsed), returns:
+```json
+{ "mcpServers": {} }
 ```
 
 ---
@@ -93,6 +126,7 @@ POST /tasks
 | `attachments` | array | no | `[]` | File attachments (max 10) |
 | `priority` | integer | no | `0` | Priority level (0-5) |
 | `autoMode` | boolean | no | `true` | Auto-advance through agent pipeline |
+| `isFix` | boolean | no | `false` | Marks the task as fix-flow task (uses FIX plan conventions) |
 
 **Attachment object:**
 | Field | Type | Description |
@@ -128,6 +162,7 @@ PUT /tasks/:id
 | `attachments` | array | File attachments |
 | `priority` | integer | Priority (0-5) |
 | `autoMode` | boolean | Auto-advance mode |
+| `isFix` | boolean | Marks task as fix-flow |
 | `plan` | string\|null | Generated plan (markdown) |
 | `implementationLog` | string\|null | Implementation output |
 | `reviewComments` | string\|null | Review feedback |
@@ -136,6 +171,7 @@ PUT /tasks/:id
 | `blockedFromStatus` | string\|null | Status before being blocked |
 | `retryAfter` | string\|null | ISO timestamp for retry |
 | `retryCount` | integer | Number of retries |
+| `lastHeartbeatAt` | string\|null | Last heartbeat timestamp from coordinator/subagent activity |
 
 **Response:** `200 OK` — the updated task object.
 
@@ -172,9 +208,14 @@ Transitions a task through the state machine.
 | Current Status | Valid Events |
 |---------------|-------------|
 | `backlog` | `start_ai` |
-| `plan_ready` | `start_implementation`, `request_replanning` |
+| `plan_ready` | `start_implementation`, `request_replanning`, `fast_fix` |
 | `blocked_external` | `retry_from_blocked` |
 | `done` | `approve_done`, `request_changes` |
+
+Additional constraints:
+
+- `start_implementation` requires `autoMode=false` (manual gate). For `autoMode=true`, implementation is picked automatically by the coordinator.
+- `fast_fix` requires `autoMode=false` and at least one human comment on the task.
 
 **Response:** `200 OK` — the updated task object.
 
@@ -266,15 +307,16 @@ All events are JSON with this structure:
 
 ```json
 {
-  "type": "task:created | task:updated | task:moved | task:deleted",
-  "payload": { /* task object or { id } for deletes */ }
+  "type": "project:created | task:created | task:updated | task:moved | task:deleted",
+  "payload": { /* project/task object or { id } for deletes */ }
 }
 ```
 
 | Event | Payload | Triggered By |
 |-------|---------|-------------|
+| `project:created` | Full project object | `POST /projects` |
 | `task:created` | Full task object | `POST /tasks` |
-| `task:updated` | Full task object | `PUT /tasks/:id`, `PATCH /tasks/:id/position` |
+| `task:updated` | Full task object | `PUT /tasks/:id`, `PATCH /tasks/:id/position`, `POST /tasks/:id/events` (`fast_fix`) |
 | `task:moved` | Full task object | `POST /tasks/:id/events` |
 | `task:deleted` | `{ id: string }` | `DELETE /tasks/:id` |
 

@@ -10,6 +10,7 @@ const mockTask: Task = {
   title: "Sample Task",
   description: "A sample description that might be quite long and should be truncated",
   autoMode: true,
+  isFix: false,
   status: "backlog",
   priority: 3,
   position: 1000,

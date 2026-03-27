@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronDown, ChevronRight, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, Trash2 } from "lucide-react";
 import {
   HUMAN_ACTIONS_BY_STATUS,
   STATUS_CONFIG,
@@ -31,6 +31,7 @@ interface TaskDetailProps {
 }
 
 type TaskDetailTab = "implementation" | "review" | "comments" | "activity";
+type PlanChangeMode = "replanning" | "fast_fix" | "request_changes";
 
 const ACTION_BUTTONS_BY_STATUS: Partial<
   Record<
@@ -38,7 +39,7 @@ const ACTION_BUTTONS_BY_STATUS: Partial<
     Array<{
       label: string;
       event?: TaskEvent;
-      actionType?: "event" | "open_replanning";
+      actionType?: "event" | "open_replanning" | "open_fast_fix" | "open_request_changes";
       variant?: "default" | "outline";
       visible?: (task: { autoMode: boolean }) => boolean;
     }>
@@ -58,11 +59,17 @@ const ACTION_BUTTONS_BY_STATUS: Partial<
       variant: "outline",
       visible: (task) => !task.autoMode,
     },
+    {
+      label: "Fast fix",
+      actionType: "open_fast_fix",
+      variant: "outline",
+      visible: (task) => !task.autoMode,
+    },
   ],
   blocked_external: [{ label: "Retry", event: "retry_from_blocked" }],
   done: [
     { label: "Approve", event: "approve_done" },
-    { label: "Request changes", event: "request_changes", variant: "outline" },
+    { label: "Request changes", actionType: "open_request_changes", variant: "outline" },
   ],
 };
 
@@ -84,6 +91,10 @@ export function TaskDetail({ taskId, onClose }: TaskDetailProps) {
   const createTaskComment = useCreateTaskComment();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showReplanModal, setShowReplanModal] = useState(false);
+  const [planChangeMode, setPlanChangeMode] = useState<PlanChangeMode>("replanning");
+  const [isSubmittingPlanChange, setIsSubmittingPlanChange] = useState(false);
+  const [planChangeError, setPlanChangeError] = useState<string | null>(null);
+  const [planChangeSuccess, setPlanChangeSuccess] = useState<string | null>(null);
   const [replanComment, setReplanComment] = useState("");
   const [replanFiles, setReplanFiles] = useState<File[]>([]);
   const [attachmentsDragOver, setAttachmentsDragOver] = useState(false);
@@ -111,6 +122,21 @@ export function TaskDetail({ taskId, onClose }: TaskDetailProps) {
     setShowReplanModal(false);
     setReplanComment("");
     setReplanFiles([]);
+    setPlanChangeError(null);
+    setIsSubmittingPlanChange(false);
+  };
+
+  const withTimeout = async <T,>(
+    promise: Promise<T>,
+    timeoutMs: number,
+    message: string
+  ): Promise<T> => {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
   };
 
   const toAttachmentPayload = async (file: File): Promise<TaskCommentAttachment> => {
@@ -137,27 +163,53 @@ export function TaskDetail({ taskId, onClose }: TaskDetailProps) {
     };
   };
 
-  const handleReplanningRequest = async () => {
+  const handlePlanChangeRequest = async () => {
     if (!task) return;
     if (!replanComment.trim()) return;
+    if (isSubmittingPlanChange) return;
 
+    setIsSubmittingPlanChange(true);
+    setPlanChangeError(null);
     try {
       const attachments = await Promise.all(replanFiles.map((file) => toAttachmentPayload(file)));
-      await createTaskComment.mutateAsync({
-        id: task.id,
-        input: {
-          message: replanComment.trim(),
-          attachments,
-        },
-      });
-      await taskEvent.mutateAsync({
-        id: task.id,
-        event: "request_replanning",
-      });
+      await withTimeout(
+        createTaskComment.mutateAsync({
+          id: task.id,
+          input: {
+            message: replanComment.trim(),
+            attachments,
+          },
+        }),
+        30_000,
+        "Comment request timed out"
+      );
+      await withTimeout(
+        taskEvent.mutateAsync({
+          id: task.id,
+          event:
+            planChangeMode === "replanning"
+              ? "request_replanning"
+              : planChangeMode === "fast_fix"
+                ? "fast_fix"
+                : "request_changes",
+        }),
+        planChangeMode === "fast_fix" ? 200_000 : 30_000,
+        "Task event request timed out"
+      );
+      if (planChangeMode === "fast_fix") {
+        setPlanChangeSuccess("Fast fix applied. Plan updated in task and sync to .ai-factory/PLAN.md attempted.");
+      } else {
+        setPlanChangeSuccess(null);
+      }
       resetReplanModal();
-      onClose();
+      if (planChangeMode === "replanning" || planChangeMode === "request_changes") {
+        onClose();
+      }
     } catch (error) {
-      console.error("[task-detail] failed to request replanning", error);
+      console.error("[task-detail] failed to submit plan change request", error);
+      setPlanChangeError(error instanceof Error ? error.message : "Failed to submit request");
+    } finally {
+      setIsSubmittingPlanChange(false);
     }
   };
 
@@ -234,6 +286,23 @@ export function TaskDetail({ taskId, onClose }: TaskDetailProps) {
                           variant={action.variant}
                           onClick={() => {
                             if (action.actionType === "open_replanning") {
+                              setPlanChangeMode("replanning");
+                              setPlanChangeError(null);
+                              setPlanChangeSuccess(null);
+                              setShowReplanModal(true);
+                              return;
+                            }
+                            if (action.actionType === "open_fast_fix") {
+                              setPlanChangeMode("fast_fix");
+                              setPlanChangeError(null);
+                              setPlanChangeSuccess(null);
+                              setShowReplanModal(true);
+                              return;
+                            }
+                            if (action.actionType === "open_request_changes") {
+                              setPlanChangeMode("request_changes");
+                              setPlanChangeError(null);
+                              setPlanChangeSuccess(null);
                               setShowReplanModal(true);
                               return;
                             }
@@ -242,12 +311,17 @@ export function TaskDetail({ taskId, onClose }: TaskDetailProps) {
                               onClose();
                             }
                           }}
-                          disabled={taskEvent.isPending || createTaskComment.isPending}
+                          disabled={isSubmittingPlanChange}
                         >
                           {action.label}
                         </Button>
                       ))}
                     </div>
+                    {planChangeSuccess && (
+                      <div className="mt-2 border border-emerald-500/40 bg-emerald-500/10 px-2 py-1.5 text-xs text-emerald-300">
+                        {planChangeSuccess}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -434,25 +508,53 @@ export function TaskDetail({ taskId, onClose }: TaskDetailProps) {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={showReplanModal} onOpenChange={setShowReplanModal}>
+      <Dialog
+        open={showReplanModal}
+        onOpenChange={(open) => {
+          if (isSubmittingPlanChange) return;
+          if (!open) {
+            resetReplanModal();
+            return;
+          }
+          setShowReplanModal(true);
+        }}
+      >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Request Replanning</DialogTitle>
+            <DialogTitle>
+              {planChangeMode === "replanning"
+                ? "Request Replanning"
+                : planChangeMode === "fast_fix"
+                  ? "Fast Fix"
+                  : "Request Changes"}
+            </DialogTitle>
           </DialogHeader>
           <p className="mb-3 text-sm text-muted-foreground">
-            Explain what should change in the plan. Your message and file metadata will be added to task comments.
+            {planChangeMode === "replanning"
+              ? "Explain what should change in the plan. Your message and file metadata will be added to task comments."
+              : planChangeMode === "fast_fix"
+                ? "Describe a small change to the current plan. Your message and file metadata will be added to task comments."
+                : "Describe what should be changed in the implementation. Your message and file metadata will be added to task comments."}
           </p>
           <div className="space-y-3">
             <Textarea
               value={replanComment}
               onChange={(e) => setReplanComment(e.target.value)}
-              placeholder="Describe what needs to be changed in the plan..."
+              disabled={isSubmittingPlanChange}
+              placeholder={
+                planChangeMode === "replanning"
+                  ? "Describe what needs to be changed in the plan..."
+                  : planChangeMode === "fast_fix"
+                    ? "Describe the quick plan fix..."
+                    : "Describe what needs to be changed..."
+              }
               rows={6}
             />
             <div className="space-y-2">
               <input
                 type="file"
                 multiple
+                disabled={isSubmittingPlanChange}
                 onChange={(e) => setReplanFiles(Array.from(e.target.files ?? []))}
                 className="block w-full text-xs text-muted-foreground file:mr-3 file:border file:border-border file:bg-secondary/40 file:px-3 file:py-1.5 file:text-xs"
               />
@@ -464,21 +566,51 @@ export function TaskDetail({ taskId, onClose }: TaskDetailProps) {
                 </ul>
               )}
             </div>
+            {isSubmittingPlanChange && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                {planChangeMode === "fast_fix"
+                  ? "Applying fast fix to current plan..."
+                  : planChangeMode === "replanning"
+                    ? "Submitting replanning request..."
+                    : "Submitting request changes..."}
+              </div>
+            )}
+            {planChangeError && (
+              <div className="border border-destructive/40 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
+                {planChangeError}
+              </div>
+            )}
           </div>
           <div className="mt-4 flex justify-end gap-2">
-            <Button variant="ghost" size="sm" onClick={resetReplanModal}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={resetReplanModal}
+              disabled={isSubmittingPlanChange}
+            >
               Cancel
             </Button>
             <Button
               size="sm"
-              onClick={handleReplanningRequest}
+              onClick={handlePlanChangeRequest}
               disabled={
                 !replanComment.trim() ||
-                taskEvent.isPending ||
-                createTaskComment.isPending
+                isSubmittingPlanChange
               }
             >
-              {taskEvent.isPending || createTaskComment.isPending ? "Sending..." : "Send"}
+              {isSubmittingPlanChange
+                ? (
+                  <>
+                    <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                    Sending...
+                  </>
+                )
+                : planChangeMode === "replanning"
+                  ? "Send"
+                  : planChangeMode === "fast_fix"
+                    ? "Apply fast fix"
+                    : "Request changes"}
             </Button>
           </div>
         </DialogContent>

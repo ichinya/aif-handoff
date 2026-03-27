@@ -35,6 +35,7 @@ export function Header({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const { settings, setSettings } = useNotificationSettings();
   const permission = getDesktopNotificationPermission();
+  const isCompact = density === "compact";
 
   const handleDesktopNotificationsToggle = useCallback(async () => {
     const next = !settings.desktop;
@@ -58,7 +59,7 @@ export function Header({
 
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur supports-[backdrop-filter]:bg-background/65">
-      <div className="mx-auto flex h-16 w-full max-w-[1680px] items-center px-6 md:px-8">
+      <div className={`mx-auto flex w-full max-w-[1680px] items-center ${isCompact ? "h-14 px-4 md:px-5" : "h-16 px-6 md:px-8"}`}>
         <div className="flex items-center gap-3">
           <span className="text-xl font-bold tracking-tight text-primary">&gt;</span>
           <div className="h-5 w-px bg-border" />
@@ -70,12 +71,6 @@ export function Header({
         </div>
 
         <div className="ml-auto flex items-center gap-2.5">
-          {selectedProject && (
-            <span className="max-w-[340px] truncate border border-border bg-card/70 px-2 py-1 text-[11px] text-muted-foreground">
-              {selectedProject.rootPath}
-            </span>
-          )}
-
           <button
             onClick={onOpenCommandPalette}
             className="hidden h-8 items-center gap-1 border border-border bg-card px-2 font-mono text-[11px] text-muted-foreground transition-colors hover:border-primary/70 hover:text-foreground md:inline-flex"
@@ -86,10 +81,10 @@ export function Header({
             K
           </button>
 
-          <div className="hidden border border-border bg-card md:flex">
+          <div className="hidden h-8 border border-border bg-card md:flex">
             <button
               onClick={() => onViewModeChange("kanban")}
-              className={`px-2 py-1 text-[10px] font-mono transition-colors ${
+              className={`h-full px-2 text-[10px] font-mono transition-colors ${
                 viewMode === "kanban"
                   ? "bg-primary/15 text-primary"
                   : "text-muted-foreground hover:bg-accent"
@@ -100,7 +95,7 @@ export function Header({
             </button>
             <button
               onClick={() => onViewModeChange("list")}
-              className={`border-l border-border px-2 py-1 text-[10px] font-mono transition-colors ${
+              className={`h-full border-l border-border px-2 text-[10px] font-mono transition-colors ${
                 viewMode === "list"
                   ? "bg-primary/15 text-primary"
                   : "text-muted-foreground hover:bg-accent"
@@ -111,10 +106,10 @@ export function Header({
             </button>
           </div>
 
-          <div className="hidden border border-border bg-card md:flex">
+          <div className="hidden h-8 border border-border bg-card md:flex">
             <button
               onClick={() => onDensityChange("comfortable")}
-              className={`px-2 py-1 text-[10px] font-mono transition-colors ${
+              className={`h-full px-2 text-[10px] font-mono transition-colors ${
                 density === "comfortable"
                   ? "bg-primary/15 text-primary"
                   : "text-muted-foreground hover:bg-accent"
@@ -125,7 +120,7 @@ export function Header({
             </button>
             <button
               onClick={() => onDensityChange("compact")}
-              className={`border-l border-border px-2 py-1 text-[10px] font-mono transition-colors ${
+              className={`h-full border-l border-border px-2 text-[10px] font-mono transition-colors ${
                 density === "compact"
                   ? "bg-primary/15 text-primary"
                   : "text-muted-foreground hover:bg-accent"

@@ -1,9 +1,10 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { getDb, tasks, taskComments, logger } from "@aif/shared";
-import { createActivityLogger, createSubagentLogger, flushActivityLog, getClaudePath } from "../hooks.js";
+import { getDb, projects, tasks, taskComments, logger } from "@aif/shared";
+import { createActivityLogger, createSubagentLogger, logActivity, getClaudePath } from "../hooks.js";
+import { writeQueryAudit } from "../queryAudit.js";
 import {
   createClaudeStderrCollector,
   explainClaudeFailure,
@@ -11,6 +12,12 @@ import {
 } from "../claudeDiagnostics.js";
 
 const log = logger("planner");
+const AGENT_NAME = "plan-coordinator";
+const FIX_SKILL_NAME = "aif-fix";
+const PROJECT_SCOPE_SYSTEM_APPEND =
+  "Project scope rule: work strictly inside the current working directory (project root). " +
+  "Do not inspect or modify files in the orchestrator monorepo or in parent/sibling directories " +
+  "unless the user explicitly asks for that path. Avoid broad discovery outside the current project root.";
 
 function extractPlanPathFromResult(resultText: string): string | null {
   const match = resultText.match(/plan written to\s+([^\n.]+(?:\.[a-z0-9]+)?)/i);
@@ -82,8 +89,8 @@ function formatCommentsForPrompt(
 ): string {
   if (comments.length === 0) return "No user comments were provided.";
 
-  const recent = comments.slice(-10);
-  return recent
+  const latest = comments.slice(-1);
+  return latest
     .map((comment, index) => {
       const attachments = parseAttachments(comment.attachments);
       const attachmentLines = attachments.length
@@ -129,6 +136,14 @@ function formatTaskAttachmentsForPrompt(raw: string | null): string {
     .join("\n");
 }
 
+function buildFixCommandText(title: string, description: string): string {
+  const normalizedDescription = description.trim();
+  const taskText = normalizedDescription.length > 0
+    ? `${title.trim()}\n\n${normalizedDescription}`
+    : title.trim();
+  return `/aif-fix --plan-first ${JSON.stringify(taskText)}`;
+}
+
 export async function runPlanner(taskId: string, projectRoot: string): Promise<void> {
   const db = getDb();
   const task = db.select().from(tasks).where(eq(tasks.id, taskId)).get();
@@ -136,6 +151,7 @@ export async function runPlanner(taskId: string, projectRoot: string): Promise<v
     .select()
     .from(taskComments)
     .where(eq(taskComments.taskId, taskId))
+    .orderBy(asc(taskComments.createdAt), asc(taskComments.id))
     .all();
 
   if (!task) {
@@ -143,21 +159,28 @@ export async function runPlanner(taskId: string, projectRoot: string): Promise<v
     throw new Error(`Task ${taskId} not found`);
   }
 
-  log.info({ taskId, title: task.title }, "Starting plan-polisher agent");
+  const executionName = task.isFix ? FIX_SKILL_NAME : AGENT_NAME;
+  log.info({ taskId, title: task.title, isFix: task.isFix }, "Starting planning flow");
+  const project = db.select().from(projects).where(eq(projects.id, task.projectId)).get();
+  const plannerBudget = project?.plannerMaxBudgetUsd ?? null;
 
   const hasComments = comments.length > 0;
   const isReplanning = hasComments || (task.plan && task.plan.trim().length > 0);
 
-  const prompt = isReplanning
+  const taskAttachmentsForPrompt = formatTaskAttachmentsForPrompt(task.attachments);
+  const commentsForPrompt = formatCommentsForPrompt(comments);
+  const prompt = task.isFix
+    ? buildFixCommandText(task.title, task.description)
+    : isReplanning
     ? `Refine and improve the existing plan for the following task.
 Mode: fast, tests: no, docs: no, max_iterations: 3.
 
 Title: ${task.title}
 Description: ${task.description}
 Task attachments:
-${formatTaskAttachmentsForPrompt(task.attachments)}
+${taskAttachmentsForPrompt}
 User comments and replanning feedback:
-${formatCommentsForPrompt(comments)}
+${commentsForPrompt}
 
 Previous plan:
 ${task.plan ?? "(no previous plan)"}
@@ -169,14 +192,38 @@ Mode: fast, tests: no, docs: no, max_iterations: 3.
 Title: ${task.title}
 Description: ${task.description}
 Task attachments:
-${formatTaskAttachmentsForPrompt(task.attachments)}
+${taskAttachmentsForPrompt}
 User comments and replanning feedback:
-${formatCommentsForPrompt(comments)}
+${commentsForPrompt}
 
 Create a concrete, implementation-ready plan using iterative refinement via plan-polisher.`;
 
   let resultText = "";
   const stderrCollector = createClaudeStderrCollector();
+  const heartbeatTimer = setInterval(() => {
+    const nowIso = new Date().toISOString();
+    db.update(tasks)
+      .set({ lastHeartbeatAt: nowIso, updatedAt: nowIso })
+      .where(eq(tasks.id, taskId))
+      .run();
+  }, 30_000);
+  logActivity(taskId, "Agent", `${executionName} started`);
+  writeQueryAudit({
+    timestamp: new Date().toISOString(),
+    taskId,
+    agentName: executionName,
+    projectRoot,
+    prompt,
+    options: {
+      settingSources: ["project"],
+      maxBudgetUsd: plannerBudget,
+      systemPrompt: {
+        type: "preset",
+        preset: "claude_code",
+        append: PROJECT_SCOPE_SYSTEM_APPEND,
+      },
+    },
+  });
 
   try {
     for await (const message of query({
@@ -186,11 +233,14 @@ Create a concrete, implementation-ready plan using iterative refinement via plan
         env: process.env,
         pathToClaudeCodeExecutable: getClaudePath(),
         settingSources: ["project"],
-        extraArgs: { agent: "plan-coordinator" },
-        allowedTools: ["Agent", "Read", "Write", "Edit", "Glob", "Grep", "Bash"],
-        maxTurns: 30,
-        maxBudgetUsd: 2.0,
         permissionMode: "acceptEdits",
+        systemPrompt: {
+          type: "preset",
+          preset: "claude_code",
+          append: PROJECT_SCOPE_SYSTEM_APPEND,
+        },
+        ...(task.isFix ? {} : { extraArgs: { agent: AGENT_NAME } }),
+        ...(plannerBudget == null ? {} : { maxBudgetUsd: plannerBudget }),
         stderr: stderrCollector.onStderr,
         hooks: {
           PostToolUse: [
@@ -205,9 +255,9 @@ Create a concrete, implementation-ready plan using iterative refinement via plan
       if (message.type === "result") {
         if (message.subtype === "success") {
           resultText = message.result;
-          log.info({ taskId }, "plan-polisher completed successfully");
+          log.info({ taskId, executionName }, "Planning flow completed successfully");
         } else {
-          flushActivityLog(taskId, `Planner ended: ${message.subtype}`);
+          logActivity(taskId, "Agent", `${executionName} ended (${message.subtype})`);
           log.warn({ taskId, subtype: message.subtype }, "Planner ended with non-success");
           throw new Error(`Planner failed: ${message.subtype}`);
         }
@@ -226,7 +276,7 @@ Create a concrete, implementation-ready plan using iterative refinement via plan
       .where(eq(tasks.id, taskId))
       .run();
 
-    flushActivityLog(taskId, "Planning complete (plan-polisher)");
+    logActivity(taskId, "Agent", `${executionName} complete`);
     log.debug({ taskId }, "Plan saved to task");
   } catch (err) {
     let detail = stderrCollector.getTail();
@@ -234,8 +284,10 @@ Create a concrete, implementation-ready plan using iterative refinement via plan
       detail = await probeClaudeCliFailure(projectRoot, getClaudePath());
     }
     const reason = explainClaudeFailure(err, detail);
-    flushActivityLog(taskId, `Planning failed: ${reason}`);
+    logActivity(taskId, "Agent", `${executionName} failed — ${reason}`);
     log.error({ taskId, err, claudeStderr: detail }, "Planner execution failed");
     throw new Error(reason, { cause: err });
+  } finally {
+    clearInterval(heartbeatTimer);
   }
 }

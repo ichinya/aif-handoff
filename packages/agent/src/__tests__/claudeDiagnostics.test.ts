@@ -21,4 +21,10 @@ describe("claudeDiagnostics", () => {
     const reason = explainClaudeFailure(err, "Rate limit reached for this account");
     expect(reason).toContain("Claude usage limit reached");
   });
+
+  it("classifies stream interruption failures", () => {
+    const err = new Error("Implementer finished without dispatching implement-worker for parallel plan layers");
+    const reason = explainClaudeFailure(err, "Error in hook callback: Stream closed");
+    expect(reason).toContain("Claude stream interrupted during execution");
+  });
 });

@@ -153,16 +153,16 @@
       },
       "managedSubagents": {
         "best-practices-sidecar.md": {
-          "sourceHash": "c6e0554cff3f3020f23c0ec78a6571e6d1f008c82b3b0ab21715e5daf2600c0d",
-          "installedHash": "c6e0554cff3f3020f23c0ec78a6571e6d1f008c82b3b0ab21715e5daf2600c0d"
+          "sourceHash": "ff915b26a91645f8145418c354fdcef2ea4ecde3d7385204a2473ceceda7e513",
+          "installedHash": "ff915b26a91645f8145418c354fdcef2ea4ecde3d7385204a2473ceceda7e513"
         },
         "commit-preparer.md": {
-          "sourceHash": "42b3f95a36488043f54ada561c0d86008d91c0447302e6a66616e5bae8bf09df",
-          "installedHash": "42b3f95a36488043f54ada561c0d86008d91c0447302e6a66616e5bae8bf09df"
+          "sourceHash": "8ebc0658194d2c5b050e4ac0cca07b133534a44f021b1ac925e1b9589bea2a9e",
+          "installedHash": "8ebc0658194d2c5b050e4ac0cca07b133534a44f021b1ac925e1b9589bea2a9e"
         },
         "docs-auditor.md": {
-          "sourceHash": "0257149ce3042fed196b1804623b2e6d2e480d6af3002841b16b9a927f98c4d2",
-          "installedHash": "0257149ce3042fed196b1804623b2e6d2e480d6af3002841b16b9a927f98c4d2"
+          "sourceHash": "f71dd1b0a2e87995db15ca3c23f601a8b6cef8a189af27230552b08d693c5057",
+          "installedHash": "f71dd1b0a2e87995db15ca3c23f601a8b6cef8a189af27230552b08d693c5057"
         },
         "implement-coordinator.md": {
           "sourceHash": "7696dd2a597b6c78e7fefca66e883169c9270fbfb169c7a4cbd9e581cdd9a4ca",
@@ -217,12 +217,12 @@
           "installedHash": "06185fcda855203d2ec54d98162efb1d021552b3e242614e9cb67a02af9faf32"
         },
         "review-sidecar.md": {
-          "sourceHash": "d1d448995772dffe86703958407ecd14ebfc096d1aaa4e1ff7a379ca286ec0f3",
-          "installedHash": "d1d448995772dffe86703958407ecd14ebfc096d1aaa4e1ff7a379ca286ec0f3"
+          "sourceHash": "bd6cb7314062c6569f80bca8cea040e53cf7292f710a2b8e24e833d7b019ae4f",
+          "installedHash": "bd6cb7314062c6569f80bca8cea040e53cf7292f710a2b8e24e833d7b019ae4f"
         },
         "security-sidecar.md": {
-          "sourceHash": "22c3f0f1ad6d0ee6bdb1c97ed24927c6a5fba4088ea664cadefcbe3a2de85c22",
-          "installedHash": "22c3f0f1ad6d0ee6bdb1c97ed24927c6a5fba4088ea664cadefcbe3a2de85c22"
+          "sourceHash": "e4a3ac8fb185a9530331b9732bf81f131847eb16d7692ef1ffe56ee0daf230de",
+          "installedHash": "e4a3ac8fb185a9530331b9732bf81f131847eb16d7692ef1ffe56ee0daf230de"
         }
       }
     },

@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { FolderOpen, Plus, ChevronDown, Pencil, Trash2 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { FolderOpen, Plus, ChevronDown, Pencil, Trash2, Plug } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useProjects, useCreateProject, useUpdateProject, useDeleteProject } from "@/hooks/useProjects";
+import { api } from "@/lib/api";
 import type { Project } from "@aif/shared/browser";
 
 interface Props {
@@ -25,15 +27,31 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect }: Props) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [name, setName] = useState("");
   const [rootPath, setRootPath] = useState("");
+  const [plannerMaxBudgetUsd, setPlannerMaxBudgetUsd] = useState("");
+  const [planCheckerMaxBudgetUsd, setPlanCheckerMaxBudgetUsd] = useState("");
+  const [implementerMaxBudgetUsd, setImplementerMaxBudgetUsd] = useState("");
+  const [reviewSidecarMaxBudgetUsd, setReviewSidecarMaxBudgetUsd] = useState("");
   const selectorRef = useRef<HTMLDivElement>(null);
 
   const selected = projects?.find((p) => p.id === selectedId);
+  const isEditDialogOpen = dialogOpen && dialogMode === "edit" && !!editingId;
+  const { data: mcpData, isLoading: isMcpLoading } = useQuery({
+    queryKey: ["project-mcp", editingId],
+    queryFn: () => api.getProjectMcp(editingId!),
+    enabled: isEditDialogOpen,
+    staleTime: 30_000,
+  });
+  const mcpServers = mcpData?.mcpServers ? Object.keys(mcpData.mcpServers) : [];
 
   const openCreate = () => {
     setDialogMode("create");
     setEditingId(null);
     setName("");
     setRootPath("");
+    setPlannerMaxBudgetUsd("");
+    setPlanCheckerMaxBudgetUsd("");
+    setImplementerMaxBudgetUsd("");
+    setReviewSidecarMaxBudgetUsd("");
     setDropdownOpen(false);
     setDialogOpen(true);
   };
@@ -44,6 +62,16 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect }: Props) {
     setEditingId(p.id);
     setName(p.name);
     setRootPath(p.rootPath);
+    setPlannerMaxBudgetUsd(p.plannerMaxBudgetUsd == null ? "" : String(p.plannerMaxBudgetUsd));
+    setPlanCheckerMaxBudgetUsd(
+      p.planCheckerMaxBudgetUsd == null ? "" : String(p.planCheckerMaxBudgetUsd)
+    );
+    setImplementerMaxBudgetUsd(
+      p.implementerMaxBudgetUsd == null ? "" : String(p.implementerMaxBudgetUsd)
+    );
+    setReviewSidecarMaxBudgetUsd(
+      p.reviewSidecarMaxBudgetUsd == null ? "" : String(p.reviewSidecarMaxBudgetUsd)
+    );
     setDropdownOpen(false);
     setDialogOpen(true);
   };
@@ -61,10 +89,37 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect }: Props) {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !rootPath.trim()) return;
+    const parsedPlannerBudget = plannerMaxBudgetUsd.trim() ? Number(plannerMaxBudgetUsd) : undefined;
+    const parsedPlanCheckerBudget = planCheckerMaxBudgetUsd.trim()
+      ? Number(planCheckerMaxBudgetUsd)
+      : undefined;
+    const parsedImplementerBudget = implementerMaxBudgetUsd.trim()
+      ? Number(implementerMaxBudgetUsd)
+      : undefined;
+    const parsedBudget = reviewSidecarMaxBudgetUsd.trim()
+      ? Number(reviewSidecarMaxBudgetUsd)
+      : undefined;
+    const invalidBudget = (value: number | undefined) =>
+      value !== undefined && (!Number.isFinite(value) || value <= 0);
+    if (
+      invalidBudget(parsedPlannerBudget) ||
+      invalidBudget(parsedPlanCheckerBudget) ||
+      invalidBudget(parsedImplementerBudget) ||
+      invalidBudget(parsedBudget)
+    ) {
+      return;
+    }
 
     if (dialogMode === "create") {
       createProject.mutate(
-        { name: name.trim(), rootPath: rootPath.trim() },
+        {
+          name: name.trim(),
+          rootPath: rootPath.trim(),
+          plannerMaxBudgetUsd: parsedPlannerBudget,
+          planCheckerMaxBudgetUsd: parsedPlanCheckerBudget,
+          implementerMaxBudgetUsd: parsedImplementerBudget,
+          reviewSidecarMaxBudgetUsd: parsedBudget,
+        },
         {
           onSuccess: (project) => {
             onSelect(project);
@@ -74,7 +129,17 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect }: Props) {
       );
     } else if (editingId) {
       updateProject.mutate(
-        { id: editingId, input: { name: name.trim(), rootPath: rootPath.trim() } },
+        {
+          id: editingId,
+          input: {
+            name: name.trim(),
+            rootPath: rootPath.trim(),
+            plannerMaxBudgetUsd: parsedPlannerBudget,
+            planCheckerMaxBudgetUsd: parsedPlanCheckerBudget,
+            implementerMaxBudgetUsd: parsedImplementerBudget,
+            reviewSidecarMaxBudgetUsd: parsedBudget,
+          },
+        },
         {
           onSuccess: (project) => {
             if (selectedId === editingId) onSelect(project);
@@ -212,9 +277,100 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect }: Props) {
                 Absolute path where agents will create files
               </p>
             </div>
+            <div>
+              <label className="text-sm font-medium">Planner Budget (USD)</label>
+              <Input
+                type="number"
+                min="0.01"
+                step="0.1"
+                placeholder="Leave empty for unlimited"
+                value={plannerMaxBudgetUsd}
+                onChange={(e) => setPlannerMaxBudgetUsd(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Plan Checker Budget (USD)</label>
+              <Input
+                type="number"
+                min="0.01"
+                step="0.1"
+                placeholder="Leave empty for unlimited"
+                value={planCheckerMaxBudgetUsd}
+                onChange={(e) => setPlanCheckerMaxBudgetUsd(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Implementer Budget (USD)</label>
+              <Input
+                type="number"
+                min="0.01"
+                step="0.1"
+                placeholder="Leave empty for unlimited"
+                value={implementerMaxBudgetUsd}
+                onChange={(e) => setImplementerMaxBudgetUsd(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Review Sidecar Budget (USD)</label>
+              <Input
+                type="number"
+                min="0.01"
+                step="0.1"
+                placeholder="Leave empty for unlimited"
+                value={reviewSidecarMaxBudgetUsd}
+                onChange={(e) => setReviewSidecarMaxBudgetUsd(e.target.value)}
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                Per-sidecar budget for review and security agents. Empty means unlimited.
+              </p>
+            </div>
+            {dialogMode === "edit" && (
+              <div>
+                <label className="mb-2 flex items-center gap-1.5 text-sm font-medium">
+                  <Plug className="h-3.5 w-3.5" />
+                  MCP Servers
+                </label>
+                <div className="border border-border bg-card/50 p-2">
+                  {isMcpLoading && (
+                    <p className="text-xs text-muted-foreground">Loading MCP servers...</p>
+                  )}
+                  {!isMcpLoading && mcpServers.length === 0 && (
+                    <p className="text-xs text-muted-foreground">No MCP servers configured.</p>
+                  )}
+                  {!isMcpLoading && mcpServers.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {mcpServers.map((serverName) => (
+                        <span
+                          key={serverName}
+                          className="inline-flex items-center rounded border border-border bg-background px-1.5 py-0.5 text-[11px]"
+                        >
+                          {serverName}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
             <Button
               type="submit"
-              disabled={!name.trim() || !rootPath.trim() || isPending}
+              disabled={
+                !name.trim() ||
+                !rootPath.trim() ||
+                (plannerMaxBudgetUsd.trim() !== "" &&
+                  (!Number.isFinite(Number(plannerMaxBudgetUsd)) ||
+                    Number(plannerMaxBudgetUsd) <= 0)) ||
+                (planCheckerMaxBudgetUsd.trim() !== "" &&
+                  (!Number.isFinite(Number(planCheckerMaxBudgetUsd)) ||
+                    Number(planCheckerMaxBudgetUsd) <= 0)) ||
+                (implementerMaxBudgetUsd.trim() !== "" &&
+                  (!Number.isFinite(Number(implementerMaxBudgetUsd)) ||
+                    Number(implementerMaxBudgetUsd) <= 0)) ||
+                (reviewSidecarMaxBudgetUsd.trim() !== "" &&
+                  (!Number.isFinite(Number(reviewSidecarMaxBudgetUsd)) ||
+                    Number(reviewSidecarMaxBudgetUsd) <= 0)) ||
+                isPending
+              }
             >
               {isPending
                 ? dialogMode === "create"

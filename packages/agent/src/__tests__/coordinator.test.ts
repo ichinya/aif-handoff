@@ -160,6 +160,55 @@ describe("coordinator", () => {
     expect(task!.status).toBe("done");
   });
 
+  it("should auto-recover stale implementing task to blocked_external", async () => {
+    const db = testDb.current;
+    const staleDate = new Date(Date.now() - 25 * 60_000).toISOString();
+    db.insert(tasks)
+      .values({
+        id: "task-stale-impl",
+        projectId: "test-project",
+        title: "Stale implementer",
+        status: "implementing",
+        updatedAt: staleDate,
+      })
+      .run();
+
+    await pollAndProcess();
+
+    const task = db.select().from(tasks).where(eq(tasks.id, "task-stale-impl")).get();
+    expect(task!.status).toBe("blocked_external");
+    expect(task!.blockedFromStatus).toBe("plan_ready");
+    expect(task!.blockedReason).toContain("Watchdog: task stale in implementing");
+    expect(task!.retryAfter).toBeTruthy();
+    expect(task!.retryCount).toBe(1);
+    expect(runImplementer).not.toHaveBeenCalled();
+  });
+
+  it("should quarantine stale task when watchdog retry limit reached", async () => {
+    const db = testDb.current;
+    const staleDate = new Date(Date.now() - 25 * 60_000).toISOString();
+    db.insert(tasks)
+      .values({
+        id: "task-stale-limit",
+        projectId: "test-project",
+        title: "Stale over limit",
+        status: "implementing",
+        retryCount: 3,
+        updatedAt: staleDate,
+      })
+      .run();
+
+    await pollAndProcess();
+
+    const task = db.select().from(tasks).where(eq(tasks.id, "task-stale-limit")).get();
+    expect(task!.status).toBe("blocked_external");
+    expect(task!.blockedFromStatus).toBe("plan_ready");
+    expect(task!.blockedReason).toContain("auto-retry limit reached");
+    expect(task!.retryAfter).toBeNull();
+    expect(task!.retryCount).toBe(3);
+    expect(runImplementer).not.toHaveBeenCalled();
+  });
+
   it("should revert status on planner failure", async () => {
     const db = testDb.current;
     db.insert(tasks)
@@ -255,6 +304,43 @@ describe("coordinator", () => {
 
     const task = db.select().from(tasks).where(eq(tasks.id, "task-5")).get();
     expect(task!.status).toBe("plan_ready");
+  });
+
+  it("should move task to blocked_external when implementer is blocked by permissions", async () => {
+    const db = testDb.current;
+    db.insert(tasks)
+      .values({ id: "task-impl-perm", projectId: "test-project", title: "Impl blocked", status: "plan_ready" })
+      .run();
+
+    vi.mocked(runImplementer).mockRejectedValueOnce(
+      new Error("Implementer blocked by permissions")
+    );
+
+    await pollAndProcess();
+
+    const task = db.select().from(tasks).where(eq(tasks.id, "task-impl-perm")).get();
+    expect(task!.status).toBe("blocked_external");
+    expect(task!.blockedFromStatus).toBe("plan_ready");
+    expect(task!.retryAfter).toBeTruthy();
+  });
+
+  it("should move task to blocked_external on implementer stream interruption", async () => {
+    const db = testDb.current;
+    db.insert(tasks)
+      .values({ id: "task-impl-stream", projectId: "test-project", title: "Impl stream issue", status: "plan_ready" })
+      .run();
+
+    vi.mocked(runImplementer).mockRejectedValueOnce(
+      new Error("Claude stream interrupted before implement-worker dispatch")
+    );
+
+    await pollAndProcess();
+
+    const task = db.select().from(tasks).where(eq(tasks.id, "task-impl-stream")).get();
+    expect(task!.status).toBe("blocked_external");
+    expect(task!.blockedFromStatus).toBe("plan_ready");
+    expect(task!.retryAfter).toBeTruthy();
+    expect(task!.retryCount).toBe(1);
   });
 
   it("should revert status on plan checker failure", async () => {

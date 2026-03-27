@@ -8,6 +8,10 @@ export const projects = sqliteTable("projects", {
     .$defaultFn(() => crypto.randomUUID()),
   name: text("name").notNull(),
   rootPath: text("root_path").notNull(),
+  plannerMaxBudgetUsd: real("planner_max_budget_usd"),
+  planCheckerMaxBudgetUsd: real("plan_checker_max_budget_usd"),
+  implementerMaxBudgetUsd: real("implementer_max_budget_usd"),
+  reviewSidecarMaxBudgetUsd: real("review_sidecar_max_budget_usd"),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(datetime('now'))`),
@@ -28,6 +32,7 @@ export const tasks = sqliteTable("tasks", {
   description: text("description").notNull().default(""),
   attachments: text("attachments").notNull().default("[]"),
   autoMode: integer("auto_mode", { mode: "boolean" }).notNull().default(true),
+  isFix: integer("is_fix", { mode: "boolean" }).notNull().default(false),
   status: text("status").$type<TaskStatus>().notNull().default("backlog"),
   priority: integer("priority").notNull().default(0),
   position: real("position").notNull().default(1000.0),
@@ -39,6 +44,7 @@ export const tasks = sqliteTable("tasks", {
   blockedFromStatus: text("blocked_from_status").$type<TaskStatus | null>(),
   retryAfter: text("retry_after"),
   retryCount: integer("retry_count").notNull().default(0),
+  lastHeartbeatAt: text("last_heartbeat_at"),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(datetime('now'))`),

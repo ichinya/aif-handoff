@@ -31,6 +31,7 @@ describe("AddTaskForm", () => {
         projectId: "p-1",
         title: "Task with auto mode",
         autoMode: true,
+        isFix: false,
       }),
       expect.any(Object)
     );
@@ -40,7 +41,7 @@ describe("AddTaskForm", () => {
     render(<AddTaskForm projectId="p-1" />);
 
     fireEvent.click(screen.getByText("Add task"));
-    const checkbox = screen.getByRole("checkbox");
+    const checkbox = screen.getByLabelText("Auto mode");
     fireEvent.click(checkbox);
     fireEvent.change(screen.getByPlaceholderText("Task title"), {
       target: { value: "Task manual mode" },
@@ -52,6 +53,27 @@ describe("AddTaskForm", () => {
         projectId: "p-1",
         title: "Task manual mode",
         autoMode: false,
+        isFix: false,
+      }),
+      expect.any(Object)
+    );
+  });
+
+  it("submits isFix=true when Fix checkbox is checked", () => {
+    render(<AddTaskForm projectId="p-1" />);
+
+    fireEvent.click(screen.getByText("Add task"));
+    fireEvent.click(screen.getByLabelText("Fix"));
+    fireEvent.change(screen.getByPlaceholderText("Task title"), {
+      target: { value: "Fix issue" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(mutateCreateTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: "p-1",
+        title: "Fix issue",
+        isFix: true,
       }),
       expect.any(Object)
     );

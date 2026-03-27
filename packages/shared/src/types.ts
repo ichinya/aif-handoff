@@ -15,6 +15,10 @@ export interface Project {
   id: string;
   name: string;
   rootPath: string;
+  plannerMaxBudgetUsd: number | null;
+  planCheckerMaxBudgetUsd: number | null;
+  implementerMaxBudgetUsd: number | null;
+  reviewSidecarMaxBudgetUsd: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -22,6 +26,10 @@ export interface Project {
 export interface CreateProjectInput {
   name: string;
   rootPath: string;
+  plannerMaxBudgetUsd?: number;
+  planCheckerMaxBudgetUsd?: number;
+  implementerMaxBudgetUsd?: number;
+  reviewSidecarMaxBudgetUsd?: number;
 }
 
 export interface TaskCommentAttachment {
@@ -38,6 +46,7 @@ export interface Task {
   description: string;
   attachments?: TaskCommentAttachment[];
   autoMode: boolean;
+  isFix: boolean;
   status: TaskStatus;
   priority: number;
   position: number;
@@ -49,6 +58,7 @@ export interface Task {
   blockedFromStatus: TaskStatus | null;
   retryAfter: string | null;
   retryCount: number;
+  lastHeartbeatAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -75,6 +85,7 @@ export interface CreateTaskInput {
   description: string;
   priority?: number;
   autoMode?: boolean;
+  isFix?: boolean;
 }
 
 /** PUT /tasks/:id body */
@@ -84,6 +95,7 @@ export interface UpdateTaskInput {
   attachments?: TaskCommentAttachment[];
   priority?: number;
   autoMode?: boolean;
+  isFix?: boolean;
   plan?: string | null;
   implementationLog?: string | null;
   reviewComments?: string | null;
@@ -92,12 +104,14 @@ export interface UpdateTaskInput {
   blockedFromStatus?: TaskStatus | null;
   retryAfter?: string | null;
   retryCount?: number;
+  lastHeartbeatAt?: string | null;
 }
 
 export const TASK_EVENTS = [
   "start_ai",
   "start_implementation",
   "request_replanning",
+  "fast_fix",
   "approve_done",
   "request_changes",
   "retry_from_blocked",
@@ -117,6 +131,7 @@ export interface ReorderTaskInput {
 
 /** WebSocket event types */
 export type WsEventType =
+  | "project:created"
   | "task:created"
   | "task:updated"
   | "task:deleted"
@@ -124,5 +139,5 @@ export type WsEventType =
 
 export interface WsEvent {
   type: WsEventType;
-  payload: Task | { id: string };
+  payload: Task | Project | { id: string };
 }

@@ -14,6 +14,7 @@ export function AddTaskForm({ projectId }: Props) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [autoMode, setAutoMode] = useState(true);
+  const [isFix, setIsFix] = useState(false);
   const createTask = useCreateTask();
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -27,13 +28,18 @@ export function AddTaskForm({ projectId }: Props) {
         title: title.trim(),
         description: description.trim(),
         autoMode,
+        isFix,
       },
       {
         onSuccess: () => {
           setTitle("");
           setDescription("");
           setAutoMode(true);
+          setIsFix(false);
           setIsOpen(false);
+        },
+        onError: (error) => {
+          console.error("[kanban] Failed to create task", error);
         },
       }
     );
@@ -76,6 +82,15 @@ export function AddTaskForm({ projectId }: Props) {
         />
         Auto mode
       </label>
+      <label className="flex items-center gap-2 text-xs text-muted-foreground">
+        <input
+          type="checkbox"
+          checked={isFix}
+          onChange={(e) => setIsFix(e.target.checked)}
+          className="h-3.5 w-3.5 accent-[var(--color-primary)]"
+        />
+        Fix
+      </label>
       <div className="flex gap-2 pt-1">
         <Button type="submit" size="sm" disabled={!title.trim() || createTask.isPending}>
           {createTask.isPending ? "Adding..." : "Add"}
@@ -89,6 +104,7 @@ export function AddTaskForm({ projectId }: Props) {
             setTitle("");
             setDescription("");
             setAutoMode(true);
+            setIsFix(false);
           }}
         >
           <X className="h-4 w-4" />

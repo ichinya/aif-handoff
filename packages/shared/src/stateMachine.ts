@@ -59,6 +59,20 @@ export function applyHumanTaskEvent(
         },
       };
     }
+    case "fast_fix": {
+      if (task.status !== "plan_ready") {
+        return { ok: false, error: "fast_fix is only allowed from plan_ready" };
+      }
+      return {
+        ok: true,
+        patch: {
+          status: "plan_ready",
+          blockedReason: null,
+          blockedFromStatus: null,
+          retryAfter: null,
+        },
+      };
+    }
     case "approve_done": {
       if (task.status !== "done") {
         return { ok: false, error: "approve_done is only allowed from done" };
@@ -104,7 +118,7 @@ export function applyHumanTaskEvent(
 export const HUMAN_ACTIONS_BY_STATUS: Record<TaskStatus, TaskEvent[]> = {
   backlog: ["start_ai"],
   planning: [],
-  plan_ready: ["start_implementation", "request_replanning"],
+  plan_ready: ["start_implementation", "request_replanning", "fast_fix"],
   implementing: [],
   review: [],
   blocked_external: ["retry_from_blocked"],

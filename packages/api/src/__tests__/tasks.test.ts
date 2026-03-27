@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { Hono } from "hono";
 import { eq } from "drizzle-orm";
-import { createTestDb, tasks, taskComments } from "@aif/shared";
+import { createTestDb, tasks, taskComments, projects } from "@aif/shared";
 
 // Mock the shared db module to use test db
 const testDb = { current: createTestDb() };
@@ -23,6 +23,11 @@ vi.mock("../ws.js", () => ({
   getInjectWebSocket: vi.fn(),
 }));
 
+const mockQuery = vi.fn();
+vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
+  query: (args: unknown) => mockQuery(args),
+}));
+
 // Import after mocks
 const { tasksRouter } = await import("../routes/tasks.js");
 
@@ -38,6 +43,10 @@ describe("tasks API", () => {
   beforeEach(() => {
     testDb.current = createTestDb();
     app = createApp();
+    mockQuery.mockReset();
+    mockQuery.mockImplementation(async function* () {
+      yield { type: "result", subtype: "success", result: "## Updated plan\n- Fast fix applied" };
+    });
   });
 
   describe("GET /tasks", () => {
@@ -78,7 +87,25 @@ describe("tasks API", () => {
       expect(body.description).toBe("Description");
       expect(body.priority).toBe(2);
       expect(body.autoMode).toBe(true);
+      expect(body.isFix).toBe(false);
       expect(body.status).toBe("backlog");
+    });
+
+    it("should create a fix task when isFix=true", async () => {
+      const res = await app.request("/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "Fix task",
+          description: "Fix mode task",
+          projectId: "test-project",
+          isFix: true,
+        }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.isFix).toBe(true);
     });
 
     it("should reject empty title", async () => {
@@ -358,6 +385,70 @@ describe("tasks API", () => {
       });
 
       expect(res.status).toBe(409);
+    });
+
+    it("should apply fast_fix by updating plan without status transition", async () => {
+      const db = testDb.current;
+      db.insert(tasks)
+        .values({
+          id: "ev-fast-fix-1",
+          projectId: "project-fast-fix",
+          title: "Need tiny plan update",
+          status: "plan_ready",
+          autoMode: false,
+          plan: "## Plan\n- Step A",
+        })
+        .run();
+      db.insert(taskComments)
+        .values({
+          id: "ev-fast-fix-comment-1",
+          taskId: "ev-fast-fix-1",
+          author: "human",
+          message: "Please add one QA step",
+          attachments: "[]",
+        })
+        .run();
+      db.insert(projects)
+        .values({
+          id: "project-fast-fix",
+          name: "Fast fix project",
+          rootPath: process.cwd(),
+        })
+        .run();
+
+      const res = await app.request("/tasks/ev-fast-fix-1/events", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ event: "fast_fix" }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.status).toBe("plan_ready");
+      expect(body.plan).toBe("## Updated plan\n- Fast fix applied");
+      expect(mockQuery).toHaveBeenCalledTimes(1);
+    });
+
+    it("should reject fast_fix for autoMode=true", async () => {
+      const db = testDb.current;
+      db.insert(tasks)
+        .values({
+          id: "ev-fast-fix-2",
+          projectId: "test-project",
+          title: "Auto mode task",
+          status: "plan_ready",
+          autoMode: true,
+        })
+        .run();
+
+      const res = await app.request("/tasks/ev-fast-fix-2/events", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ event: "fast_fix" }),
+      });
+
+      expect(res.status).toBe(409);
+      expect(mockQuery).not.toHaveBeenCalled();
     });
   });
 

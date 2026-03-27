@@ -11,6 +11,10 @@ const taskAttachmentSchema = z.object({
 export const createProjectSchema = z.object({
   name: z.string().min(1, "Name is required").max(200),
   rootPath: z.string().min(1, "Root path is required"),
+  plannerMaxBudgetUsd: z.number().positive().optional(),
+  planCheckerMaxBudgetUsd: z.number().positive().optional(),
+  implementerMaxBudgetUsd: z.number().positive().optional(),
+  reviewSidecarMaxBudgetUsd: z.number().positive().optional(),
 });
 
 export const createTaskSchema = z.object({
@@ -20,6 +24,7 @@ export const createTaskSchema = z.object({
   attachments: z.array(taskAttachmentSchema).max(10).default([]),
   priority: z.number().int().min(0).max(5).default(0),
   autoMode: z.boolean().default(true),
+  isFix: z.boolean().default(false),
 });
 
 export const updateTaskSchema = z.object({
@@ -28,6 +33,7 @@ export const updateTaskSchema = z.object({
   attachments: z.array(taskAttachmentSchema).max(10).optional(),
   priority: z.number().int().min(0).max(5).optional(),
   autoMode: z.boolean().optional(),
+  isFix: z.boolean().optional(),
   plan: z.string().nullable().optional(),
   implementationLog: z.string().nullable().optional(),
   reviewComments: z.string().nullable().optional(),

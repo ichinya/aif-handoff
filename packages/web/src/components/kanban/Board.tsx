@@ -45,6 +45,7 @@ const STATUS_ORDER = Object.fromEntries(ORDERED_STATUSES.map((status, idx) => [s
 
 export function Board({ projectId, onTaskClick, density, viewMode = "kanban" }: BoardProps) {
   const { data: tasks, isLoading } = useTasks(projectId);
+  const isCompact = density === "compact";
   const [activeFilters, setActiveFilters] = useState<QuickFilter[]>([]);
   const [listQuery, setListQuery] = useState(() => {
     return readStorage(LIST_QUERY_KEY) ?? "";
@@ -179,7 +180,7 @@ export function Board({ projectId, onTaskClick, density, viewMode = "kanban" }: 
 
   return (
     <>
-      <div className="mb-4 flex flex-wrap items-center gap-2 border border-border bg-card/45 p-2">
+      <div className={`mb-4 flex flex-wrap items-center gap-2 border border-border bg-card/45 ${isCompact ? "px-2 py-1.5" : "px-3 py-2"}`}>
         <span className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Filters</span>
         {(Object.keys(FILTER_LABELS) as QuickFilter[]).map((key) => {
           const active = activeFilters.includes(key);
@@ -188,7 +189,9 @@ export function Board({ projectId, onTaskClick, density, viewMode = "kanban" }: 
               key={key}
               type="button"
               onClick={() => toggleFilter(key)}
-              className={`border px-2.5 py-1 text-[11px] font-mono transition-colors ${
+              className={`border font-mono transition-colors ${
+                isCompact ? "px-2 py-0.5 text-[10px]" : "px-2.5 py-1 text-[11px]"
+              } ${
                 active
                   ? "border-primary/45 bg-primary/15 text-primary"
                   : "border-border bg-background/45 text-muted-foreground hover:bg-background"
@@ -237,21 +240,21 @@ export function Board({ projectId, onTaskClick, density, viewMode = "kanban" }: 
           ))}
         </div>
       ) : (
-        <div className="space-y-3 pb-6">
+        <div className={`${isCompact ? "space-y-2" : "space-y-3"} pb-6`}>
           <div className="max-w-md">
             <AddTaskForm projectId={projectId} />
           </div>
-          <div className="flex flex-col gap-2 border border-border bg-card/45 p-2 md:flex-row md:items-center">
+          <div className={`flex flex-col gap-2 border border-border bg-card/45 ${isCompact ? "p-1.5" : "p-2"} md:flex-row md:items-center`}>
             <Input
               value={listQuery}
               onChange={(event) => setListQuery(event.target.value)}
               placeholder="Search by title, description, id, status"
-              className="h-8 md:max-w-lg"
+              className={`${isCompact ? "h-7 text-xs" : "h-8"} md:max-w-lg`}
             />
             <select
               value={listSort}
               onChange={(event) => setListSort(event.target.value as ListSort)}
-              className="h-8 border border-border bg-background px-2 text-xs text-foreground"
+              className={`${isCompact ? "h-7 px-1.5 text-[11px]" : "h-8 px-2 text-xs"} border border-border bg-background text-foreground`}
             >
               <option value="updated_desc">Updated: newest first</option>
               <option value="updated_asc">Updated: oldest first</option>
@@ -264,11 +267,11 @@ export function Board({ projectId, onTaskClick, density, viewMode = "kanban" }: 
             <table className="min-w-full border-collapse text-left">
               <thead className="border-b border-border bg-secondary/35">
                 <tr>
-                  <th className="px-3 py-2 text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Task</th>
-                  <th className="px-3 py-2 text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Status</th>
-                  <th className="px-3 py-2 text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Priority</th>
-                  <th className="px-3 py-2 text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Owner</th>
-                  <th className="px-3 py-2 text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Updated</th>
+                  <th className={`px-3 uppercase tracking-[0.16em] text-muted-foreground ${isCompact ? "py-1.5 text-[10px]" : "py-2 text-[11px]"}`}>Task</th>
+                  <th className={`px-3 uppercase tracking-[0.16em] text-muted-foreground ${isCompact ? "py-1.5 text-[10px]" : "py-2 text-[11px]"}`}>Status</th>
+                  <th className={`px-3 uppercase tracking-[0.16em] text-muted-foreground ${isCompact ? "py-1.5 text-[10px]" : "py-2 text-[11px]"}`}>Priority</th>
+                  <th className={`px-3 uppercase tracking-[0.16em] text-muted-foreground ${isCompact ? "py-1.5 text-[10px]" : "py-2 text-[11px]"}`}>Owner</th>
+                  <th className={`px-3 uppercase tracking-[0.16em] text-muted-foreground ${isCompact ? "py-1.5 text-[10px]" : "py-2 text-[11px]"}`}>Updated</th>
                 </tr>
               </thead>
               <tbody>
@@ -278,15 +281,15 @@ export function Board({ projectId, onTaskClick, density, viewMode = "kanban" }: 
                     className="cursor-pointer border-b border-border/80 transition-colors hover:bg-accent/45"
                     onClick={() => onTaskClick(task.id)}
                   >
-                    <td className={`px-3 ${density === "compact" ? "py-1.5" : "py-2.5"}`}>
-                      <div className="text-sm font-medium tracking-tight">{task.title}</div>
+                    <td className={`px-3 ${isCompact ? "py-1" : "py-2.5"}`}>
+                      <div className={`${isCompact ? "text-[13px]" : "text-sm"} font-medium tracking-tight`}>{task.title}</div>
                       {task.description && (
-                        <div className="line-clamp-1 text-xs text-muted-foreground">{task.description}</div>
+                        <div className={`line-clamp-1 text-muted-foreground ${isCompact ? "text-[11px]" : "text-xs"}`}>{task.description}</div>
                       )}
                     </td>
-                    <td className={`px-3 ${density === "compact" ? "py-1.5" : "py-2.5"}`}>
+                    <td className={`px-3 ${isCompact ? "py-1" : "py-2.5"}`}>
                       <span
-                        className="inline-flex border px-2 py-0.5 text-[11px]"
+                        className={`inline-flex border ${isCompact ? "px-1.5 py-0 text-[10px]" : "px-2 py-0.5 text-[11px]"}`}
                         style={{
                           borderColor: `${STATUS_CONFIG[task.status].color}66`,
                           color: STATUS_CONFIG[task.status].color,
@@ -296,13 +299,13 @@ export function Board({ projectId, onTaskClick, density, viewMode = "kanban" }: 
                         {STATUS_CONFIG[task.status].label}
                       </span>
                     </td>
-                    <td className={`px-3 text-xs text-muted-foreground ${density === "compact" ? "py-1.5" : "py-2.5"}`}>
+                    <td className={`px-3 text-muted-foreground ${isCompact ? "py-1 text-[11px]" : "py-2.5 text-xs"}`}>
                       {task.priority || "-"}
                     </td>
-                    <td className={`px-3 text-xs text-muted-foreground ${density === "compact" ? "py-1.5" : "py-2.5"}`}>
+                    <td className={`px-3 text-muted-foreground ${isCompact ? "py-1 text-[11px]" : "py-2.5 text-xs"}`}>
                       {task.autoMode ? "AI" : "Manual"}
                     </td>
-                    <td className={`px-3 text-xs text-muted-foreground ${density === "compact" ? "py-1.5" : "py-2.5"}`}>
+                    <td className={`px-3 text-muted-foreground ${isCompact ? "py-1 text-[11px]" : "py-2.5 text-xs"}`}>
                       {new Date(task.updatedAt).toLocaleString()}
                     </td>
                   </tr>

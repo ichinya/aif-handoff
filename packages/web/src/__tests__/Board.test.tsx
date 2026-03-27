@@ -94,7 +94,7 @@ describe("Board", () => {
 
     expect(screen.getAllByText("AI controlled").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Human controlled").length).toBeGreaterThan(0);
-    expect(screen.getByText("Human decision")).toBeDefined();
+    expect(screen.getAllByText("Human decision").length).toBeGreaterThan(1);
   });
 
   it("should show task descriptions", () => {

@@ -1,7 +1,8 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { eq } from "drizzle-orm";
-import { getDb, tasks, logger } from "@aif/shared";
-import { createActivityLogger, createSubagentLogger, flushActivityLog, getClaudePath } from "../hooks.js";
+import { getDb, projects, tasks, logger } from "@aif/shared";
+import { createActivityLogger, createSubagentLogger, logActivity, getClaudePath } from "../hooks.js";
+import { writeQueryAudit } from "../queryAudit.js";
 import {
   createClaudeStderrCollector,
   explainClaudeFailure,
@@ -9,6 +10,10 @@ import {
 } from "../claudeDiagnostics.js";
 
 const log = logger("reviewer");
+const PROJECT_SCOPE_SYSTEM_APPEND =
+  "Project scope rule: work strictly inside the current working directory (project root). " +
+  "Do not inspect or modify files in the orchestrator monorepo or in parent/sibling directories " +
+  "unless the user explicitly asks for that path. Avoid broad discovery outside the current project root.";
 
 function parseAttachments(raw: string | null): Array<{
   name: string;
@@ -56,9 +61,27 @@ async function runSidecar(
   taskId: string,
   projectRoot: string,
   agentName: string,
+  maxBudgetUsd: number | null,
 ): Promise<string> {
   let resultText = "";
   const stderrCollector = createClaudeStderrCollector();
+  logActivity(taskId, "Agent", `${agentName} started`);
+  writeQueryAudit({
+    timestamp: new Date().toISOString(),
+    taskId,
+    agentName,
+    projectRoot,
+    prompt,
+    options: {
+      settingSources: ["project"],
+      maxBudgetUsd,
+      systemPrompt: {
+        type: "preset",
+        preset: "claude_code",
+        append: PROJECT_SCOPE_SYSTEM_APPEND,
+      },
+    },
+  });
 
   try {
     for await (const message of query({
@@ -68,11 +91,14 @@ async function runSidecar(
         env: process.env,
         pathToClaudeCodeExecutable: getClaudePath(),
         settingSources: ["project"],
+        permissionMode: "acceptEdits",
+        systemPrompt: {
+          type: "preset",
+          preset: "claude_code",
+          append: PROJECT_SCOPE_SYSTEM_APPEND,
+        },
         extraArgs: { agent: agentName },
-        allowedTools: ["Read", "Glob", "Grep"],
-        maxTurns: 6,
-        maxBudgetUsd: 0.5,
-        permissionMode: "dontAsk",
+        ...(maxBudgetUsd == null ? {} : { maxBudgetUsd }),
         stderr: stderrCollector.onStderr,
         hooks: {
           PostToolUse: [
@@ -88,6 +114,7 @@ async function runSidecar(
         if (message.subtype === "success") {
           resultText = message.result;
         } else {
+          logActivity(taskId, "Agent", `${agentName} ended (${message.subtype})`);
           throw new Error(`Review agent failed: ${message.subtype}`);
         }
       }
@@ -98,9 +125,11 @@ async function runSidecar(
       detail = await probeClaudeCliFailure(projectRoot, getClaudePath());
     }
     const reason = explainClaudeFailure(err, detail);
+    logActivity(taskId, "Agent", `${agentName} failed — ${reason}`);
     throw new Error(reason, { cause: err });
   }
 
+  logActivity(taskId, "Agent", `${agentName} complete`);
   return resultText;
 }
 
@@ -112,6 +141,9 @@ export async function runReviewer(taskId: string, projectRoot: string): Promise<
     log.error({ taskId }, "Task not found for review");
     throw new Error(`Task ${taskId} not found`);
   }
+
+  const project = db.select().from(projects).where(eq(projects.id, task.projectId)).get();
+  const sidecarBudget = project?.reviewSidecarMaxBudgetUsd ?? null;
 
   log.info({ taskId, title: task.title }, "Starting review + security sidecars");
 
@@ -137,11 +169,25 @@ ${formatTaskAttachmentsForPrompt(task.attachments)}
 Focus on auth, validation, secrets, injection, and unsafe shell/file handling in changed code.`;
 
   try {
+    const heartbeatTimer = setInterval(() => {
+      const nowIso = new Date().toISOString();
+      db.update(tasks)
+        .set({ lastHeartbeatAt: nowIso, updatedAt: nowIso })
+        .where(eq(tasks.id, taskId))
+        .run();
+    }, 30_000);
+
     // Run review and security in parallel
-    const [reviewResult, securityResult] = await Promise.all([
-      runSidecar(reviewPrompt, taskId, projectRoot, "review-sidecar"),
-      runSidecar(securityPrompt, taskId, projectRoot, "security-sidecar"),
-    ]);
+    let reviewResult = "";
+    let securityResult = "";
+    try {
+      [reviewResult, securityResult] = await Promise.all([
+        runSidecar(reviewPrompt, taskId, projectRoot, "review-sidecar", sidecarBudget),
+        runSidecar(securityPrompt, taskId, projectRoot, "security-sidecar", sidecarBudget),
+      ]);
+    } finally {
+      clearInterval(heartbeatTimer);
+    }
 
     log.info({ taskId }, "Review and security sidecars completed");
 
@@ -155,10 +201,10 @@ Focus on auth, validation, secrets, injection, and unsafe shell/file handling in
       .where(eq(tasks.id, taskId))
       .run();
 
-    flushActivityLog(taskId, "Review complete (review + security sidecars)");
+    logActivity(taskId, "Agent", "review stage complete (review-sidecar + security-sidecar)");
     log.debug({ taskId }, "Review comments saved to task");
   } catch (err) {
-    flushActivityLog(taskId, `Review failed: ${(err as Error).message}`);
+    logActivity(taskId, "Agent", `review stage failed — ${(err as Error).message}`);
     throw err;
   }
 }

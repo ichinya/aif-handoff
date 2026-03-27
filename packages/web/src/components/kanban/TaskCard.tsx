@@ -24,6 +24,7 @@ function shortTaskId(id: string) {
 
 export function TaskCard({ task, onClick, overlay, density = "comfortable" }: TaskCardProps) {
   const priority = PRIORITY_LABELS[task.priority] ?? PRIORITY_LABELS[0];
+  const isCompact = density === "compact";
 
   if (overlay) {
     return (
@@ -36,27 +37,35 @@ export function TaskCard({ task, onClick, overlay, density = "comfortable" }: Ta
   return (
     <div
       onClick={onClick}
-      className="group relative cursor-pointer overflow-hidden border border-border bg-card/95 p-3 transition duration-150 hover:-translate-y-0.5 hover:border-primary/45"
+      className={`group relative cursor-pointer overflow-hidden border border-border bg-card/95 transition duration-150 hover:-translate-y-0.5 ${
+        isCompact ? "p-2" : "p-3"
+      }`}
     >
       <div
         aria-hidden
-        className="absolute inset-y-0 left-0 w-1.5"
+        className="pointer-events-none absolute inset-0 border opacity-0 transition-opacity duration-150 group-hover:opacity-60"
+        style={{ borderColor: STATUS_CONFIG[task.status].color }}
+      />
+
+      <div
+        aria-hidden
+        className={`absolute inset-y-0 left-0 ${isCompact ? "w-1" : "w-1.5"}`}
         style={{ backgroundColor: STATUS_CONFIG[task.status].color }}
       />
 
-      <div className="flex items-start justify-between gap-2">
-        <div className={`${density === "compact" ? "text-[13px]" : "text-sm"} pl-2 font-medium leading-tight tracking-tight`}>
+      <div className={`flex items-start justify-between ${isCompact ? "gap-1.5" : "gap-2"}`}>
+        <div className={`${isCompact ? "pl-1.5 text-[12px]" : "pl-2 text-sm"} font-medium leading-tight tracking-tight`}>
           {task.title}
         </div>
         {priority.label !== "None" && (
-          <Badge className={`shrink-0 px-1.5 py-0 text-[10px] ${priority.className}`}>
+          <Badge className={`shrink-0 ${isCompact ? "px-1 py-0 text-[9px]" : "px-1.5 py-0 text-[10px]"} ${priority.className}`}>
             {priority.label}
           </Badge>
         )}
       </div>
 
       {task.description && (
-        <div className={`line-clamp-2 pl-2 text-xs text-muted-foreground ${density === "compact" ? "mt-1" : "mt-1.5"}`}>
+        <div className={`line-clamp-2 text-muted-foreground ${isCompact ? "mt-0.5 pl-1.5 text-[11px]" : "mt-1.5 pl-2 text-xs"}`}>
           {task.description}
         </div>
       )}
@@ -67,7 +76,11 @@ export function TaskCard({ task, onClick, overlay, density = "comfortable" }: Ta
         </div>
       )}
 
-      <div className={`border-t border-border pl-2 font-mono text-[10px] text-muted-foreground/70 ${density === "compact" ? "mt-1.5 pt-1.5" : "mt-2 pt-2"}`}>
+      <div
+        className={`border-t border-border font-mono text-muted-foreground/70 ${
+          isCompact ? "mt-1.5 pl-1.5 pt-1 text-[9px]" : "mt-2 pl-2 pt-2 text-[10px]"
+        }`}
+      >
         #{shortTaskId(task.id)} · {timeAgo(task.updatedAt)} · {task.autoMode ? "AI" : "MANUAL"}
       </div>
     </div>

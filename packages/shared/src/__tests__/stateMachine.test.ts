@@ -9,6 +9,7 @@ function makeTask(status: Task["status"]): Task {
     title: "Task",
     description: "",
     autoMode: true,
+    isFix: false,
     status,
     priority: 0,
     position: 1000,
@@ -20,6 +21,7 @@ function makeTask(status: Task["status"]): Task {
     blockedFromStatus: null,
     retryAfter: null,
     retryCount: 0,
+    lastHeartbeatAt: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
   };
@@ -105,6 +107,22 @@ describe("task state machine", () => {
 
   it("rejects request_replanning outside plan_ready", () => {
     const result = applyHumanTaskEvent(makeTask("done"), "request_replanning");
+    expect(result.ok).toBe(false);
+  });
+
+  it("allows fast_fix from plan_ready without changing status", () => {
+    const result = applyHumanTaskEvent(
+      { ...makeTask("plan_ready"), autoMode: false },
+      "fast_fix"
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.patch.status).toBe("plan_ready");
+    }
+  });
+
+  it("rejects fast_fix outside plan_ready", () => {
+    const result = applyHumanTaskEvent(makeTask("done"), "fast_fix");
     expect(result.ok).toBe(false);
   });
 

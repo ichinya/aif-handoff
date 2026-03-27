@@ -1,7 +1,10 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { eq, asc } from "drizzle-orm";
-import { applyHumanTaskEvent, getDb, tasks, taskComments, logger } from "@aif/shared";
+import { query } from "@anthropic-ai/claude-agent-sdk";
+import { existsSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { applyHumanTaskEvent, getDb, tasks, taskComments, projects, logger } from "@aif/shared";
 import type { Task } from "@aif/shared";
 import {
   createTaskSchema,
@@ -52,6 +55,158 @@ function toTaskResponse(task: typeof tasks.$inferSelect): Task {
     ...rest,
     attachments: parseAttachments(attachments),
   };
+}
+
+function formatLatestCommentForPrompt(comment: typeof taskComments.$inferSelect): string {
+  const attachments = parseAttachments(comment.attachments);
+  const attachmentLines = attachments.length
+    ? attachments
+        .map((file, index) => {
+          const contentBlock = file.content
+            ? `\n     content:\n${file.content
+                .slice(0, 4000)
+                .split("\n")
+                .map((line) => `       ${line}`)
+                .join("\n")}`
+            : "\n     content: [not provided]";
+          return `${index + 1}. ${file.name} (${file.mimeType}, ${file.size} bytes)${contentBlock}`;
+        })
+        .join("\n")
+    : "none";
+
+  return [
+    `[${comment.createdAt}] ${comment.author}`,
+    `message: ${comment.message}`,
+    "attachments:",
+    attachmentLines,
+  ].join("\n");
+}
+
+async function runFastFixQuery(input: {
+  task: typeof tasks.$inferSelect;
+  latestComment: typeof taskComments.$inferSelect;
+  projectRoot: string;
+  previousPlan: string;
+  priorAttempt?: string;
+  shouldTryFileUpdate?: boolean;
+}): Promise<string> {
+  const includeFileUpdateStep = input.shouldTryFileUpdate ?? true;
+  const prompt = input.priorAttempt
+    ? `You are editing an existing implementation plan markdown.
+
+TASK TITLE:
+${input.task.title}
+
+TASK DESCRIPTION:
+${input.task.description}
+
+CURRENT PLAN (must be preserved, with only necessary edits):
+<<<CURRENT_PLAN
+${input.previousPlan}
+CURRENT_PLAN
+
+LATEST HUMAN COMMENT TO APPLY:
+${formatLatestCommentForPrompt(input.latestComment)}
+
+PRIOR ATTEMPT THAT WAS TOO SHORT (do not use as final output):
+<<<PRIOR_ATTEMPT
+${input.priorAttempt}
+PRIOR_ATTEMPT
+
+Requirements:
+1) Return the FULL updated plan markdown, not a summary and not only a patch.
+2) Keep existing sections and details unless the comment explicitly asks to change them.
+3) Apply only the requested quick fix.
+${includeFileUpdateStep
+  ? "4) Also update the original plan file in the workspace (if you can access files/tools): find the existing source plan markdown that matches CURRENT PLAN and overwrite it with the FULL updated plan.\n5) Output markdown only in your final response."
+  : "4) Do not use tools/subagents. Return the FULL updated plan markdown directly.\n5) Output markdown only in your final response."}`
+    : `You are editing an existing implementation plan markdown.
+
+TASK TITLE:
+${input.task.title}
+
+TASK DESCRIPTION:
+${input.task.description}
+
+CURRENT PLAN (must be preserved, with only necessary edits):
+<<<CURRENT_PLAN
+${input.previousPlan}
+CURRENT_PLAN
+
+LATEST HUMAN COMMENT TO APPLY:
+${formatLatestCommentForPrompt(input.latestComment)}
+
+Requirements:
+1) Return the FULL updated plan markdown, not a summary and not only a patch.
+2) Keep existing sections and details unless the comment explicitly asks to change them.
+3) Apply only the requested quick fix.
+${includeFileUpdateStep
+  ? "4) Also update the original plan file in the workspace (if you can access files/tools): find the existing source plan markdown that matches CURRENT PLAN and overwrite it with the FULL updated plan.\n5) Output markdown only in your final response."
+  : "4) Do not use tools/subagents. Return the FULL updated plan markdown directly.\n5) Output markdown only in your final response."}`;
+
+  let resultText = "";
+  for await (const message of query({
+    prompt,
+    options: {
+      cwd: input.projectRoot,
+      settingSources: ["project"],
+      model: "haiku",
+      maxThinkingTokens: 1024,
+      systemPrompt: {
+        type: "preset",
+        preset: "claude_code",
+        ...(includeFileUpdateStep
+          ? {}
+          : { append: "Do not use tools or subagents. Reply directly with markdown only." }),
+      },
+    },
+  })) {
+    if (message.type !== "result") continue;
+    if (message.subtype !== "success") {
+      throw new Error(`Fast fix failed: ${message.subtype}`);
+    }
+    resultText = message.result.trim();
+  }
+
+  if (!resultText) {
+    throw new Error("Fast fix did not return updated plan text");
+  }
+  return resultText;
+}
+
+function extractHeadings(markdown: string): string[] {
+  return markdown
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => /^#{1,6}\s+/.test(line))
+    .map((line) => line.replace(/^#{1,6}\s+/, "").toLowerCase());
+}
+
+function looksLikeFullPlanUpdate(previousPlan: string, updatedPlan: string): boolean {
+  const prev = previousPlan.trim();
+  const next = updatedPlan.trim();
+  if (!prev) return next.length > 0;
+  if (!next) return false;
+  const minLength = prev.length < 120
+    ? Math.max(10, Math.floor(prev.length * 0.6))
+    : Math.max(80, Math.floor(prev.length * 0.5));
+  if (next.length < minLength) {
+    return false;
+  }
+
+  const prevHeadings = extractHeadings(prev);
+  if (prev.length < 400 || prevHeadings.length === 0) return true;
+  const nextHeadings = new Set(extractHeadings(next));
+  return prevHeadings.some((heading) => nextHeadings.has(heading));
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return await Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      setTimeout(() => reject(new Error(message)), timeoutMs);
+    }),
+  ]);
 }
 
 // POST /tasks/:id/broadcast — emit WS update for a task (used by agent process)
@@ -112,8 +267,10 @@ tasksRouter.post("/", zValidator("json", createTaskSchema), async (c) => {
       attachments: JSON.stringify(body.attachments ?? []),
       priority: body.priority,
       autoMode: body.autoMode,
+      isFix: body.isFix,
       status: "backlog",
       position: 1000.0,
+      lastHeartbeatAt: now,
       createdAt: now,
       updatedAt: now,
     })
@@ -271,6 +428,112 @@ tasksRouter.post(
     const { db, task: existing } = getTaskById(id);
     if (!existing) {
       return c.json({ error: "Task not found" }, 404);
+    }
+
+    if (event === "fast_fix") {
+      if (existing.status !== "plan_ready") {
+        return c.json({ error: "fast_fix is only allowed from plan_ready" }, 409);
+      }
+      if (existing.autoMode) {
+        return c.json({ error: "fast_fix is not needed when autoMode=true" }, 409);
+      }
+
+      const latestComment = db
+        .select()
+        .from(taskComments)
+        .where(eq(taskComments.taskId, id))
+        .orderBy(asc(taskComments.createdAt), asc(taskComments.id))
+        .all()
+        .filter((comment) => comment.author === "human")
+        .at(-1);
+      if (!latestComment) {
+        return c.json({ error: "fast_fix requires a human comment with requested fix" }, 409);
+      }
+
+      const project = db.select().from(projects).where(eq(projects.id, existing.projectId)).get();
+      if (!project) {
+        return c.json({ error: "Project not found for task" }, 404);
+      }
+
+      try {
+        const previousPlan = existing.plan?.trim() ?? "";
+        if (!previousPlan) {
+          return c.json({ error: "fast_fix requires an existing plan on the task" }, 409);
+        }
+
+        let firstAttempt = "";
+        try {
+          firstAttempt = await withTimeout(
+            runFastFixQuery({
+              task: existing,
+              latestComment,
+              projectRoot: project.rootPath,
+              previousPlan,
+              shouldTryFileUpdate: true,
+            }),
+            90_000,
+            "Fast fix query timed out"
+          );
+        } catch (error) {
+          log.warn({ taskId: id, error }, "Fast fix file-update attempt failed, will fallback");
+        }
+
+        const updatedPlan = looksLikeFullPlanUpdate(previousPlan, firstAttempt)
+          ? firstAttempt
+          : await withTimeout(
+              runFastFixQuery({
+                task: existing,
+                latestComment,
+                projectRoot: project.rootPath,
+                previousPlan,
+                priorAttempt: firstAttempt || undefined,
+                shouldTryFileUpdate: false,
+              }),
+              90_000,
+              "Fast fix query timed out"
+            );
+
+        if (!looksLikeFullPlanUpdate(previousPlan, updatedPlan)) {
+          throw new Error("Fast fix result omitted existing plan content. Plan was left unchanged.");
+        }
+
+        const canonicalPlanPath = resolve(
+          project.rootPath,
+          existing.isFix ? ".ai-factory/FIX_PLAN.md" : ".ai-factory/PLAN.md"
+        );
+        if (existsSync(canonicalPlanPath)) {
+          writeFileSync(canonicalPlanPath, `${updatedPlan.trimEnd()}\n`, "utf8");
+        } else {
+          log.warn(
+            { taskId: id, canonicalPlanPath },
+            "Canonical plan file not found, skipping physical file update"
+          );
+        }
+
+        db.update(tasks)
+          .set({
+            plan: updatedPlan,
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(tasks.id, id))
+          .run();
+
+        const updated = db.select().from(tasks).where(eq(tasks.id, id)).get();
+        if (!updated) {
+          return c.json({ error: "Task not found" }, 404);
+        }
+
+        log.debug({ taskId: id, event }, "Task plan fast-fix applied");
+        broadcast({
+          type: "task:updated",
+          payload: toTaskResponse(updated),
+        });
+        return c.json(toTaskResponse(updated));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        log.error({ taskId: id, event, error }, "Fast fix query failed");
+        return c.json({ error: message }, 500);
+      }
     }
 
     const transition = applyHumanTaskEvent(toTaskResponse(existing), event);

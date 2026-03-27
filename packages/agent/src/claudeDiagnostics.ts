@@ -24,19 +24,26 @@ export function createClaudeStderrCollector(maxLines = 20): ClaudeStderrCollecto
 export function explainClaudeFailure(err: unknown, stderrTail: string): string {
   const baseMessage = err instanceof Error ? err.message : String(err);
   const stderr = stderrTail.trim();
-  const lower = stderr.toLowerCase();
+  const combinedLower = `${baseMessage} ${stderr}`.toLowerCase();
 
-  if (lower.includes("not logged in") || lower.includes("/login")) {
+  if (combinedLower.includes("not logged in") || combinedLower.includes("/login")) {
     return `Claude not logged in. Run claude /login. ${stderr || baseMessage}`;
   }
 
   if (
-    lower.includes("rate limit") ||
-    lower.includes("usage limit") ||
-    lower.includes("quota") ||
-    lower.includes("credits")
+    combinedLower.includes("rate limit") ||
+    combinedLower.includes("usage limit") ||
+    combinedLower.includes("quota") ||
+    combinedLower.includes("credits")
   ) {
     return `Claude usage limit reached. ${stderr || baseMessage}`;
+  }
+
+  if (
+    combinedLower.includes("stream closed") ||
+    combinedLower.includes("error in hook callback")
+  ) {
+    return `Claude stream interrupted during execution. ${stderr || baseMessage}`;
   }
 
   if (stderr) {

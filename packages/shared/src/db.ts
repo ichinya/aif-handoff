@@ -69,6 +69,10 @@ function ensureTables(sqlite: Database.Database): void {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       root_path TEXT NOT NULL,
+      planner_max_budget_usd REAL,
+      plan_checker_max_budget_usd REAL,
+      implementer_max_budget_usd REAL,
+      review_sidecar_max_budget_usd REAL,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
@@ -81,6 +85,7 @@ function ensureTables(sqlite: Database.Database): void {
       description TEXT NOT NULL DEFAULT '',
       attachments TEXT NOT NULL DEFAULT '[]',
       auto_mode INTEGER NOT NULL DEFAULT 1,
+      is_fix INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'backlog',
       priority INTEGER NOT NULL DEFAULT 0,
       position REAL NOT NULL DEFAULT 1000.0,
@@ -92,6 +97,7 @@ function ensureTables(sqlite: Database.Database): void {
       blocked_from_status TEXT,
       retry_after TEXT,
       retry_count INTEGER NOT NULL DEFAULT 0,
+      last_heartbeat_at TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
@@ -111,8 +117,29 @@ function ensureTables(sqlite: Database.Database): void {
   ensureColumn(sqlite, "tasks", "blocked_from_status", "blocked_from_status TEXT");
   ensureColumn(sqlite, "tasks", "retry_after", "retry_after TEXT");
   ensureColumn(sqlite, "tasks", "retry_count", "retry_count INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(sqlite, "tasks", "last_heartbeat_at", "last_heartbeat_at TEXT");
   ensureColumn(sqlite, "tasks", "auto_mode", "auto_mode INTEGER NOT NULL DEFAULT 1");
+  ensureColumn(sqlite, "tasks", "is_fix", "is_fix INTEGER NOT NULL DEFAULT 0");
   ensureColumn(sqlite, "tasks", "attachments", "attachments TEXT NOT NULL DEFAULT '[]'");
+  ensureColumn(sqlite, "projects", "planner_max_budget_usd", "planner_max_budget_usd REAL");
+  ensureColumn(
+    sqlite,
+    "projects",
+    "plan_checker_max_budget_usd",
+    "plan_checker_max_budget_usd REAL"
+  );
+  ensureColumn(
+    sqlite,
+    "projects",
+    "implementer_max_budget_usd",
+    "implementer_max_budget_usd REAL"
+  );
+  ensureColumn(
+    sqlite,
+    "projects",
+    "review_sidecar_max_budget_usd",
+    "review_sidecar_max_budget_usd REAL"
+  );
   ensureColumn(sqlite, "task_comments", "author", "author TEXT NOT NULL DEFAULT 'human'");
   ensureColumn(sqlite, "task_comments", "attachments", "attachments TEXT NOT NULL DEFAULT '[]'");
 }

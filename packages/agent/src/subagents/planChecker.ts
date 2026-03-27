@@ -1,7 +1,8 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { eq } from "drizzle-orm";
-import { getDb, tasks, logger } from "@aif/shared";
-import { createActivityLogger, flushActivityLog, getClaudePath } from "../hooks.js";
+import { getDb, projects, tasks, logger } from "@aif/shared";
+import { createActivityLogger, logActivity, getClaudePath } from "../hooks.js";
+import { writeQueryAudit } from "../queryAudit.js";
 import {
   createClaudeStderrCollector,
   explainClaudeFailure,
@@ -9,6 +10,11 @@ import {
 } from "../claudeDiagnostics.js";
 
 const log = logger("plan-checker");
+const AGENT_NAME = "plan-checker";
+const PROJECT_SCOPE_SYSTEM_APPEND =
+  "Project scope rule: work strictly inside the current working directory (project root). " +
+  "Do not inspect or modify files in the orchestrator monorepo or in parent/sibling directories " +
+  "unless the user explicitly asks for that path. Avoid broad discovery outside the current project root.";
 
 function normalizeMarkdownFence(text: string): string {
   const fenced = text.match(/```(?:markdown|md)?\s*([\s\S]*?)```/i);
@@ -29,6 +35,8 @@ export async function runPlanChecker(taskId: string, projectRoot: string): Promi
     log.warn({ taskId }, "Skipping plan checklist verification: task has no plan");
     return;
   }
+  const project = db.select().from(projects).where(eq(projects.id, task.projectId)).get();
+  const planCheckerBudget = project?.planCheckerMaxBudgetUsd ?? null;
 
   log.info({ taskId, title: task.title }, "Starting plan-checker agent");
 
@@ -47,6 +55,23 @@ Requirements:
 
   let resultText = "";
   const stderrCollector = createClaudeStderrCollector();
+  logActivity(taskId, "Agent", `${AGENT_NAME} started`);
+  writeQueryAudit({
+    timestamp: new Date().toISOString(),
+    taskId,
+    agentName: AGENT_NAME,
+    projectRoot,
+    prompt,
+    options: {
+      settingSources: ["project"],
+      maxBudgetUsd: planCheckerBudget,
+      systemPrompt: {
+        type: "preset",
+        preset: "claude_code",
+        append: PROJECT_SCOPE_SYSTEM_APPEND,
+      },
+    },
+  });
 
   try {
     for await (const message of query({
@@ -56,11 +81,13 @@ Requirements:
         env: process.env,
         pathToClaudeCodeExecutable: getClaudePath(),
         settingSources: ["project"],
-        systemPrompt: { type: "preset", preset: "claude_code" },
-        allowedTools: ["Read"],
-        maxTurns: 8,
-        maxBudgetUsd: 0.5,
-        permissionMode: "dontAsk",
+        permissionMode: "acceptEdits",
+        systemPrompt: {
+          type: "preset",
+          preset: "claude_code",
+          append: PROJECT_SCOPE_SYSTEM_APPEND,
+        },
+        ...(planCheckerBudget == null ? {} : { maxBudgetUsd: planCheckerBudget }),
         stderr: stderrCollector.onStderr,
         hooks: {
           PostToolUse: [
@@ -74,7 +101,7 @@ Requirements:
           resultText = message.result;
           log.info({ taskId }, "plan-checker completed successfully");
         } else {
-          flushActivityLog(taskId, `Plan checker ended: ${message.subtype}`);
+          logActivity(taskId, "Agent", `${AGENT_NAME} ended (${message.subtype})`);
           throw new Error(`Plan checker failed: ${message.subtype}`);
         }
       }
@@ -93,7 +120,7 @@ Requirements:
       .where(eq(tasks.id, taskId))
       .run();
 
-    flushActivityLog(taskId, "Plan checklist verification complete (plan-checker)");
+    logActivity(taskId, "Agent", `${AGENT_NAME} complete`);
     log.debug({ taskId }, "Verified plan saved to task");
   } catch (err) {
     let detail = stderrCollector.getTail();
@@ -101,7 +128,7 @@ Requirements:
       detail = await probeClaudeCliFailure(projectRoot, getClaudePath());
     }
     const reason = explainClaudeFailure(err, detail);
-    flushActivityLog(taskId, `Plan checklist verification failed: ${reason}`);
+    logActivity(taskId, "Agent", `${AGENT_NAME} failed — ${reason}`);
     log.error({ taskId, err, claudeStderr: detail }, "Plan checker execution failed");
     throw new Error(reason, { cause: err });
   }

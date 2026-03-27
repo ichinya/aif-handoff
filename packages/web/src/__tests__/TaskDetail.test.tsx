@@ -10,6 +10,7 @@ const mockTask: Task = {
   description: "Full description here",
   attachments: [],
   autoMode: true,
+  isFix: false,
   status: "implementing",
   priority: 2,
   position: 1000,
@@ -193,6 +194,35 @@ describe("TaskDetail", () => {
     expect(screen.getByText("Request changes")).toBeDefined();
   });
 
+  it("should submit request changes with comment for done task", async () => {
+    const onClose = vi.fn();
+    render(
+      <TaskDetail taskId="detail-done" onClose={onClose} />,
+      { wrapper: Wrapper }
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Request changes" }));
+    expect(screen.getByText("Request Changes")).toBeDefined();
+    fireEvent.change(screen.getByPlaceholderText("Describe what needs to be changed..."), {
+      target: { value: "Need to rework implementation details and tighten tests" },
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Request changes" })[1]);
+
+    await waitFor(() => {
+      expect(mutateCreateCommentAsync).toHaveBeenCalledWith({
+        id: "detail-done",
+        input: expect.objectContaining({
+          message: "Need to rework implementation details and tighten tests",
+        }),
+      });
+      expect(mutateTaskEventAsync).toHaveBeenCalledWith({
+        id: "detail-done",
+        event: "request_changes",
+      });
+      expect(onClose).toHaveBeenCalled();
+    });
+  });
+
   it("should trigger start_ai event from backlog action", () => {
     const onClose = vi.fn();
     render(
@@ -247,6 +277,15 @@ describe("TaskDetail", () => {
     expect(screen.getByText("Request replanning")).toBeDefined();
   });
 
+  it("should render fast fix action for manual plan_ready", () => {
+    render(
+      <TaskDetail taskId="detail-plan-ready-manual" onClose={vi.fn()} />,
+      { wrapper: Wrapper }
+    );
+
+    expect(screen.getByText("Fast fix")).toBeDefined();
+  });
+
   it("should submit replanning request and move task to planning", async () => {
     const onClose = vi.fn();
     render(
@@ -285,6 +324,36 @@ describe("TaskDetail", () => {
     expect(screen.getByText("Request Replanning")).toBeDefined();
     fireEvent.click(screen.getByText("Cancel"));
     expect(screen.queryByText("Request Replanning")).toBeNull();
+  });
+
+  it("should submit fast fix request without moving status", async () => {
+    const onClose = vi.fn();
+    render(
+      <TaskDetail taskId="detail-plan-ready-manual" onClose={onClose} />,
+      { wrapper: Wrapper }
+    );
+
+    fireEvent.click(screen.getByText("Fast fix"));
+    fireEvent.change(screen.getByPlaceholderText("Describe the quick plan fix..."), {
+      target: { value: "Add one extra QA step at the end" },
+    });
+    fireEvent.click(screen.getByText("Apply fast fix"));
+
+    await waitFor(() => {
+      expect(mutateCreateCommentAsync).toHaveBeenCalledWith({
+        id: "detail-plan-ready-manual",
+        input: expect.objectContaining({
+          message: "Add one extra QA step at the end",
+        }),
+      });
+      expect(mutateTaskEventAsync).toHaveBeenCalledWith({
+        id: "detail-plan-ready-manual",
+        event: "fast_fix",
+      });
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    expect(screen.queryByText("Fast Fix")).toBeNull();
   });
 
   it("should render review comments in review tab", () => {

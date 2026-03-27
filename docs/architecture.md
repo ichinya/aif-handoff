@@ -63,6 +63,24 @@ Backlog ──[start_ai]──► Planning ──► Plan Ready ──► Implem
 | Plan Ready → Implementing → Review | `implement-coordinator` | Parallel execution with worktrees + quality sidecars |
 | Review → Done | `review-sidecar` + `security-sidecar` | Code review and security audit in parallel |
 
+### Reliability Guards
+
+The pipeline includes two reliability layers for long-running autonomous execution:
+
+- **Heartbeat liveness:** Task rows are updated with `lastHeartbeatAt` during agent activity and stage transitions.
+- **Stale-stage watchdog:** On each poll cycle, tasks stuck in `planning` / `implementing` / `review` beyond timeout are auto-recovered to `blocked_external` with retry backoff.
+
+For stale `implementing`, recovery resumes from `plan_ready` to force a clean implementation pass instead of continuing a potentially inconsistent in-flight run.
+
+### Layer-Driven Implementation Dispatch
+
+Before launching `implement-coordinator`, the implementer computes dependency layers from the active plan (`.ai-factory/PLAN.md` or `.ai-factory/FIX_PLAN.md`) and injects a precomputed execution summary into the prompt.
+
+This makes parallelism explicit:
+
+- layers with one ready task are sequential,
+- layers with multiple ready tasks are parallel and must dispatch `implement-worker` subagents.
+
 ### Agent Definitions
 
 All agents are defined as markdown files in `.claude/agents/*.md` and loaded by the Claude Agent SDK via `settingSources: ["project"]`. The `agent` package orchestrates _when_ to invoke them; the markdown files define _what_ they do.
@@ -75,7 +93,7 @@ Defined in `packages/shared/src/stateMachine.ts`. Human actions available per st
 |--------|--------------|
 | `backlog` | `start_ai` |
 | `planning` | *(none — agent working)* |
-| `plan_ready` | `start_implementation`, `request_replanning` |
+| `plan_ready` | `start_implementation`, `request_replanning`, `fast_fix` |
 | `implementing` | *(none — agent working)* |
 | `review` | *(none — agent working)* |
 | `blocked_external` | `retry_from_blocked` |
@@ -101,9 +119,10 @@ The web UI connects via `useWebSocket` hook and invalidates React Query caches o
 
 SQLite via `better-sqlite3` with `drizzle-orm` for type-safe queries. Schema is defined in `packages/shared/src/schema.ts`.
 
-Two tables:
-- **tasks** — task data, status, plan, implementation log, review comments, agent activity
-- **projects** — project metadata (name, root path)
+Three tables:
+- **tasks** — task data, status, plan, implementation log, review comments, agent activity, heartbeat metadata
+- **task_comments** — human/agent comments with optional attachments
+- **projects** — project metadata (name, root path, agent budgets)
 
 ## See Also
 

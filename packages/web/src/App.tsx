@@ -103,7 +103,7 @@ function AppContent() {
         onViewModeChange={setViewMode}
       />
 
-      <main className="mx-auto w-full max-w-[1680px] p-6 md:p-8">
+      <main className={`mx-auto w-full max-w-[1680px] ${density === "compact" ? "p-4 md:p-5" : "p-6 md:p-8"}`}>
         {project ? (
           <Board
             projectId={project.id}

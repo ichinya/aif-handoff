@@ -10,12 +10,32 @@ import type {
 } from "@aif/shared/browser";
 
 const API_BASE = "/tasks";
+const REQUEST_TIMEOUT_MS = 15000;
+const FAST_FIX_TIMEOUT_MS = 120000;
 
-async function request<T>(url: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
+async function request<T>(
+  url: string,
+  options?: RequestInit,
+  timeoutMs = REQUEST_TIMEOUT_MS
+): Promise<T> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: { "Content-Type": "application/json" },
+      ...options,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error(`Request timed out after ${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
@@ -53,6 +73,11 @@ export const api = {
     return request(`/projects/${id}`, { method: "DELETE" });
   },
 
+  getProjectMcp(id: string): Promise<{ mcpServers: Record<string, unknown> }> {
+    console.debug("[api] GET /projects/%s/mcp", id);
+    return request(`/projects/${id}/mcp`);
+  },
+
   // Tasks
   listTasks(projectId?: string): Promise<Task[]> {
     const qs = projectId ? `?projectId=${projectId}` : "";
@@ -88,10 +113,11 @@ export const api = {
 
   taskEvent(id: string, event: TaskEvent): Promise<Task> {
     console.debug("[api] POST /tasks/%s/events →", id, event);
+    const timeoutMs = event === "fast_fix" ? FAST_FIX_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
     return request<Task>(`${API_BASE}/${id}/events`, {
       method: "POST",
       body: JSON.stringify({ event }),
-    });
+    }, timeoutMs);
   },
 
   listTaskComments(id: string): Promise<TaskComment[]> {
