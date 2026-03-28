@@ -1,7 +1,8 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { logger } from "@aif/shared";
-import { createProjectSchema } from "../schemas.js";
+import { findTaskById } from "@aif/data";
+import { createProjectSchema, roadmapImportSchema } from "../schemas.js";
 import { broadcast } from "../ws.js";
 import {
   listProjects,
@@ -11,6 +12,12 @@ import {
   deleteProject,
   getProjectMcpServers,
 } from "../repositories/projects.js";
+import { toTaskResponse } from "../repositories/tasks.js";
+import {
+  generateRoadmapTasks,
+  importGeneratedTasks,
+  RoadmapGenerationError,
+} from "../services/roadmapGeneration.js";
 
 const log = logger("projects-route");
 
@@ -61,6 +68,66 @@ projectsRouter.get("/:id/mcp", (c) => {
   }
 
   return c.json({ mcpServers: getProjectMcpServers(id) });
+});
+
+// POST /projects/:id/roadmap/import — trigger roadmap import and create backlog tasks
+projectsRouter.post("/:id/roadmap/import", zValidator("json", roadmapImportSchema), async (c) => {
+  const { id } = c.req.param();
+  const { roadmapAlias } = c.req.valid("json");
+
+  const project = findProjectById(id);
+  if (!project) {
+    return c.json({ error: "Project not found" }, 404);
+  }
+
+  log.info({ projectId: id, roadmapAlias }, "Roadmap import requested");
+
+  try {
+    // Generate tasks from roadmap via Agent SDK
+    const generation = await generateRoadmapTasks({
+      projectId: id,
+      roadmapAlias,
+    });
+
+    // Import with dedupe and tag enrichment
+    const result = importGeneratedTasks(id, generation);
+
+    // Broadcast each created task
+    for (const taskId of result.taskIds) {
+      const task = findTaskById(taskId);
+      if (task) {
+        broadcast({ type: "task:created", payload: toTaskResponse(task) });
+      }
+    }
+
+    // Wake coordinator to process new backlog items
+    if (result.created > 0) {
+      broadcast({ type: "agent:wake", payload: { id } });
+      log.info(
+        { projectId: id, roadmapAlias, created: result.created },
+        "Batch wake event sent after roadmap import",
+      );
+    }
+
+    log.info(
+      { projectId: id, roadmapAlias, created: result.created, skipped: result.skipped },
+      "Roadmap import completed",
+    );
+
+    return c.json(result, 201);
+  } catch (err) {
+    if (err instanceof RoadmapGenerationError) {
+      const status =
+        err.code === "PROJECT_NOT_FOUND" || err.code === "ROADMAP_NOT_FOUND" ? 404 : 500;
+      log.warn(
+        { projectId: id, roadmapAlias, code: err.code, error: err.message },
+        "Roadmap import failed",
+      );
+      return c.json({ error: err.message, code: err.code }, status);
+    }
+    log.error({ projectId: id, roadmapAlias, err }, "Roadmap import unexpected error");
+    return c.json({ error: "Internal server error" }, 500);
+  }
 });
 
 // DELETE /projects/:id

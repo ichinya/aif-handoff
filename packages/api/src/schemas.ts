@@ -66,3 +66,7 @@ export const reorderTaskSchema = z.object({
 export const broadcastTaskSchema = z.object({
   type: z.enum(["task:updated", "task:moved"]).default("task:updated"),
 });
+
+export const roadmapImportSchema = z.object({
+  roadmapAlias: z.string().min(1, "Roadmap alias is required").max(200),
+});

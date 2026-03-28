@@ -45,13 +45,13 @@ Created: 2026-03-28
 
 ### Phase 3: API Endpoint and WebSocket Integration
 
-- [ ] Task 5: Add API endpoint to trigger roadmap import and create backlog tasks in batch.
+- [x] Task 5: Add API endpoint to trigger roadmap import and create backlog tasks in batch.
   Deliverable: `POST /projects/:id/roadmap/import` (or `/tasks/roadmap/import`) that runs generation service, inserts backlog tasks, and returns structured summary (`roadmapAlias`, counts, task ids).
   Files: `packages/api/src/routes/projects.ts` or `packages/api/src/routes/tasks.ts`, `packages/api/src/index.ts`, `packages/api/src/schemas.ts`.
   Logging: INFO endpoint invocation and completion summary; WARN on partial failures; ERROR on Agent SDK unavailability or roadmap read failure.
   Depends on: Task 4.
 
-- [ ] Task 6: Broadcast created roadmap tasks via existing WS channel and wake agent loop.
+- [x] Task 6: Broadcast created roadmap tasks via existing WS channel and wake agent loop.
   Deliverable: for every created task send `task:created`; after batch completion send one `agent:wake` event so coordinator can pick up new backlog items quickly.
   Files: `packages/api/src/routes/...` (same endpoint handler), `packages/api/src/ws.ts` (if new helper needed).
   Logging: DEBUG per broadcast event (task id + alias), INFO one batch wake event with total created.
