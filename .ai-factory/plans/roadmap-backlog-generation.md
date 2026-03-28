@@ -73,13 +73,13 @@ Created: 2026-03-28
 
 ### Phase 5: Testing and Documentation (Mandatory Checkpoint)
 
-- [ ] Task 9: Add/extend tests for roadmap import pipeline and new task metadata.
+- [x] Task 9: Add/extend tests for roadmap import pipeline and new task metadata.
   Deliverable: unit tests for schema/normalization/dedupe/tag enrichment and API route tests for success/error paths, including invalid JSON from Agent SDK.
   Files: `packages/api/src/__tests__/roadmapGeneration.test.ts` (new), `packages/api/src/__tests__/tasks.test.ts` or route-specific tests, `packages/shared/src/__tests__/...` for model serialization.
   Logging: tests assert critical log branches for parse failure and dedupe summary (where practical via logger spies).
   Depends on: Task 6.
 
-- [ ] Task 10: Update docs for roadmap import flow, required roadmap format expectations, and tag taxonomy.
+- [x] Task 10: Update docs for roadmap import flow, required roadmap format expectations, and tag taxonomy.
   Deliverable: document endpoint contract, UI behavior, alias/tag conventions, and rerun/dedupe behavior.
   Files: `docs/api.md`, `docs/architecture.md`, `docs/getting-started.md` (if user-flow updates needed), `AGENTS.md` or `CLAUDE.md` only if operational rule changes are introduced.
   Logging: include note in docs describing where to inspect API logs during roadmap generation failures.

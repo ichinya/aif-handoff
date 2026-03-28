@@ -11,16 +11,21 @@ AIF Handoff is a Turborepo monorepo with five packages. The system automates tas
 │   Web (UI)  │ ◄──────────────► │  API Server  │
 │  React+Vite │                  │    Hono      │
 └─────────────┘                  └──────┬───────┘
+                                        │
+┌─────────────┐     HTTP         ┌──────┴───────┐
+│ Claude Agent │ ◄──────────────► │    Agent     │
+│    SDK       │                  │ Coordinator  │
+└─────────────┘                  └──────┬───────┘
+                                        │
+                                 ┌──────┴───────┐
+                                 │ @aif/data     │
+                                 │ (DB access)   │
+                                 └──────┬───────┘
                                         │ SQLite
                                  ┌──────┴───────┐
                                  │   Database    │
                                  │ (drizzle-orm) │
-                                 └──────┬───────┘
-                                        │ reads/writes
-┌─────────────┐     HTTP         ┌──────┴───────┐
-│ Claude Agent │ ◄──────────────► │    Agent     │
-│    SDK       │                  │ Coordinator  │
-└─────────────┘                  └──────────────┘
+                                 └──────────────┘
 ```
 
 ## Packages
@@ -111,6 +116,25 @@ Defined in `packages/shared/src/stateMachine.ts`. Human actions available per st
 | `verified`         | _(terminal state)_                                       |
 
 Tasks have an `autoMode` flag. When `true`, the agent automatically transitions through all stages. This includes an automatic post-review gate: review comments are analyzed, and if fix items are detected the coordinator applies a `request_changes`-style transition (`done -> implementing`) with an agent comment containing required fixes. When `false`, the user must manually trigger `start_implementation` from `plan_ready`.
+
+## Roadmap Import
+
+The system supports bulk task creation from a project's `.ai-factory/ROADMAP.md` file via `POST /projects/:id/roadmap/import`.
+
+**Flow:**
+
+1. API reads `ROADMAP.md` from the project root
+2. Agent SDK (haiku model) converts markdown milestones into structured JSON
+3. Response is validated via zod schema
+4. Tasks are created in batch with deduplication (by `projectId + normalizedTitle + roadmapAlias`)
+5. Each task receives automatic tags: `roadmap`, `rm:<alias>`, `phase:<N>`, `phase:<name>`, `seq:<NN>`
+6. WebSocket broadcasts `task:created` per task and `agent:wake` after batch
+
+**Deduplication:** Re-running import with the same alias is safe — existing tasks with matching titles are skipped. This makes the endpoint idempotent for reruns.
+
+**Tag taxonomy:** Tags enable UI filtering. The `roadmap` quick filter in the Board shows only roadmap-generated tasks. Tags like `rm:v1.0` or `phase:backend` allow future grouping refinements.
+
+**Logging:** Import logs at INFO level for start/finish with counts, DEBUG for per-task decisions, and ERROR for parse/validation failures. Check API logs during failures by filtering for the `roadmap-generation` component.
 
 ## Real-Time Updates
 

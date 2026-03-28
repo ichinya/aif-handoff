@@ -1,0 +1,241 @@
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { projects } from "@aif/shared";
+import { createTestDb } from "@aif/shared/server";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+
+const testDb = { current: createTestDb() };
+vi.mock("@aif/shared/server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@aif/shared/server")>();
+  return {
+    ...actual,
+    getDb: () => testDb.current,
+  };
+});
+
+const mockQuery = vi.fn();
+vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
+  query: (args: unknown) => mockQuery(args),
+}));
+
+const { generateRoadmapTasks, importGeneratedTasks, buildTaskTags, RoadmapGenerationError } =
+  await import("../services/roadmapGeneration.js");
+const { findTasksByRoadmapAlias } = await import("@aif/data");
+
+function createProjectWithRoadmap(roadmapContent: string) {
+  const tmpDir = mkdtempSync(join(tmpdir(), "roadmap-test-"));
+  const aiFactoryDir = join(tmpDir, ".ai-factory");
+  mkdirSync(aiFactoryDir, { recursive: true });
+  writeFileSync(join(aiFactoryDir, "ROADMAP.md"), roadmapContent);
+
+  const db = testDb.current;
+  const projectId = crypto.randomUUID();
+  db.insert(projects)
+    .values({
+      id: projectId,
+      name: "Test Project",
+      rootPath: tmpDir,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    })
+    .run();
+
+  return { projectId, tmpDir };
+}
+
+describe("roadmapGeneration", () => {
+  beforeEach(() => {
+    testDb.current = createTestDb();
+    mockQuery.mockReset();
+  });
+
+  describe("buildTaskTags", () => {
+    it("should generate required tag set", () => {
+      const tags = buildTaskTags("v1.0", {
+        title: "Setup auth",
+        description: "",
+        phase: 2,
+        phaseName: "User Management",
+        sequence: 3,
+      });
+
+      expect(tags).toContain("roadmap");
+      expect(tags).toContain("rm:v1.0");
+      expect(tags).toContain("phase:2");
+      expect(tags).toContain("phase:user-management");
+      expect(tags).toContain("seq:03");
+    });
+
+    it("should handle empty phaseName", () => {
+      const tags = buildTaskTags("mvp", {
+        title: "Init",
+        description: "",
+        phase: 1,
+        phaseName: "",
+        sequence: 1,
+      });
+
+      expect(tags).toContain("roadmap");
+      expect(tags).toContain("rm:mvp");
+      expect(tags).toContain("phase:1");
+      expect(tags).toContain("seq:01");
+      expect(tags).not.toContain("phase:");
+    });
+  });
+
+  describe("generateRoadmapTasks", () => {
+    it("should throw ROADMAP_NOT_FOUND when file missing", async () => {
+      const tmpDir = mkdtempSync(join(tmpdir(), "roadmap-test-"));
+      const db = testDb.current;
+      const projectId = crypto.randomUUID();
+      db.insert(projects)
+        .values({
+          id: projectId,
+          name: "No Roadmap",
+          rootPath: tmpDir,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        })
+        .run();
+
+      await expect(generateRoadmapTasks({ projectId, roadmapAlias: "test" })).rejects.toThrow(
+        RoadmapGenerationError,
+      );
+    });
+
+    it("should throw PROJECT_NOT_FOUND for invalid project", async () => {
+      await expect(
+        generateRoadmapTasks({ projectId: "nonexistent", roadmapAlias: "test" }),
+      ).rejects.toThrow("not found");
+    });
+
+    it("should parse valid agent response", async () => {
+      const { projectId } = createProjectWithRoadmap("# Roadmap\n- [ ] Task A\n- [ ] Task B");
+
+      mockQuery.mockImplementation(async function* () {
+        yield {
+          type: "result",
+          subtype: "success",
+          result: JSON.stringify({
+            alias: "v1",
+            tasks: [
+              { title: "Task A", description: "Do A", phase: 1, phaseName: "Setup", sequence: 1 },
+              { title: "Task B", description: "Do B", phase: 1, phaseName: "Setup", sequence: 2 },
+            ],
+          }),
+          usage: { input_tokens: 100, output_tokens: 50 },
+          total_cost_usd: 0.001,
+        };
+      });
+
+      const result = await generateRoadmapTasks({ projectId, roadmapAlias: "v1" });
+      expect(result.alias).toBe("v1");
+      expect(result.tasks).toHaveLength(2);
+      expect(result.tasks[0].title).toBe("Task A");
+    });
+
+    it("should handle agent returning markdown-fenced JSON", async () => {
+      const { projectId } = createProjectWithRoadmap("# Roadmap\n- [ ] X");
+
+      mockQuery.mockImplementation(async function* () {
+        yield {
+          type: "result",
+          subtype: "success",
+          result:
+            '```json\n{"alias":"v1","tasks":[{"title":"X","description":"","phase":1,"phaseName":"P1","sequence":1}]}\n```',
+          usage: { input_tokens: 50, output_tokens: 30 },
+          total_cost_usd: 0.0005,
+        };
+      });
+
+      const result = await generateRoadmapTasks({ projectId, roadmapAlias: "v1" });
+      expect(result.tasks).toHaveLength(1);
+    });
+
+    it("should throw PARSE_ERROR for invalid JSON", async () => {
+      const { projectId } = createProjectWithRoadmap("# Roadmap\n- [ ] X");
+
+      mockQuery.mockImplementation(async function* () {
+        yield {
+          type: "result",
+          subtype: "success",
+          result: "not json at all",
+          usage: {},
+          total_cost_usd: 0,
+        };
+      });
+
+      await expect(generateRoadmapTasks({ projectId, roadmapAlias: "v1" })).rejects.toThrow(
+        RoadmapGenerationError,
+      );
+    });
+  });
+
+  describe("importGeneratedTasks", () => {
+    it("should create tasks with proper tags", () => {
+      const { projectId } = createProjectWithRoadmap("# Roadmap");
+
+      const result = importGeneratedTasks(projectId, {
+        alias: "sprint-1",
+        tasks: [
+          {
+            title: "Build API",
+            description: "REST endpoints",
+            phase: 1,
+            phaseName: "Backend",
+            sequence: 1,
+          },
+          {
+            title: "Add auth",
+            description: "JWT auth",
+            phase: 1,
+            phaseName: "Backend",
+            sequence: 2,
+          },
+        ],
+      });
+
+      expect(result.created).toBe(2);
+      expect(result.skipped).toBe(0);
+      expect(result.taskIds).toHaveLength(2);
+      expect(result.roadmapAlias).toBe("sprint-1");
+
+      const stored = findTasksByRoadmapAlias(projectId, "sprint-1");
+      expect(stored).toHaveLength(2);
+    });
+
+    it("should skip duplicates by normalized title", () => {
+      const { projectId } = createProjectWithRoadmap("# Roadmap");
+      const generation = {
+        alias: "v1",
+        tasks: [{ title: "Setup DB", description: "", phase: 1, phaseName: "Init", sequence: 1 }],
+      };
+
+      // First import
+      const first = importGeneratedTasks(projectId, generation);
+      expect(first.created).toBe(1);
+
+      // Second import — same title should be skipped
+      const second = importGeneratedTasks(projectId, generation);
+      expect(second.created).toBe(0);
+      expect(second.skipped).toBe(1);
+    });
+
+    it("should track per-phase statistics", () => {
+      const { projectId } = createProjectWithRoadmap("# Roadmap");
+
+      const result = importGeneratedTasks(projectId, {
+        alias: "v1",
+        tasks: [
+          { title: "T1", description: "", phase: 1, phaseName: "A", sequence: 1 },
+          { title: "T2", description: "", phase: 2, phaseName: "B", sequence: 1 },
+          { title: "T3", description: "", phase: 2, phaseName: "B", sequence: 2 },
+        ],
+      });
+
+      expect(result.byPhase[1]).toEqual({ created: 1, skipped: 0 });
+      expect(result.byPhase[2]).toEqual({ created: 2, skipped: 0 });
+    });
+  });
+});

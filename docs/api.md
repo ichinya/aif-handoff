@@ -101,6 +101,47 @@ PUT /projects/:id
 
 **Response:** `200 OK` — the updated project object.
 
+### Import Roadmap Tasks
+
+```
+POST /projects/:id/roadmap/import
+```
+
+Reads `.ai-factory/ROADMAP.md` from the project root, uses Agent SDK to convert milestones into structured tasks, and creates them as backlog items with deduplication.
+
+**Body:**
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `roadmapAlias` | string | yes | Alias for grouping imported tasks (e.g., `v1.0`, `sprint-1`) |
+
+**Response:** `201 Created`
+
+```json
+{
+  "roadmapAlias": "v1.0",
+  "created": 5,
+  "skipped": 2,
+  "taskIds": ["uuid-1", "uuid-2", "..."],
+  "byPhase": {
+    "1": { "created": 3, "skipped": 1 },
+    "2": { "created": 2, "skipped": 1 }
+  }
+}
+```
+
+**Deduplication:** Tasks are deduped by `projectId + normalizedTitle + roadmapAlias`. Re-running import with the same alias skips already-existing tasks.
+
+**Tag enrichment:** Each created task automatically receives tags: `roadmap`, `rm:<alias>`, `phase:<number>`, `phase:<name>`, `seq:<nn>`.
+
+**Errors:**
+
+- `404` — Project not found or `ROADMAP.md` missing
+- `500` — Agent SDK unavailable or response parse failure
+
+**WebSocket events:** `task:created` for each new task, `agent:wake` after batch completion.
+
+**Timeout:** This endpoint may take 30-120 seconds due to Agent SDK processing.
+
 ### Delete Project
 
 ```
@@ -172,6 +213,8 @@ POST /tasks
 | `priority` | integer | no | `0` | Priority level (0-5) |
 | `autoMode` | boolean | no | `true` | Auto-advance through agent pipeline, including automatic post-review rework loop when fixes are detected |
 | `isFix` | boolean | no | `false` | Marks the task as fix-flow task (uses FIX plan conventions) |
+| `roadmapAlias` | string | no | `null` | Roadmap alias for grouping (e.g., `v1.0`) |
+| `tags` | string[] | no | `[]` | Tags for filtering/categorization (max 50, each max 100 chars) |
 
 **Attachment object:**
 | Field | Type | Description |
@@ -215,6 +258,8 @@ PUT /tasks/:id
 | `blockedReason` | string\|null | Why the task is blocked |
 | `blockedFromStatus` | string\|null | Status before being blocked |
 | `retryAfter` | string\|null | ISO timestamp for retry |
+| `roadmapAlias` | string\|null | Roadmap alias for grouping |
+| `tags` | string[] | Tags for filtering |
 | `retryCount` | integer | Number of retries |
 | `lastHeartbeatAt` | string\|null | Last heartbeat timestamp from coordinator/subagent activity |
 
@@ -366,7 +411,7 @@ All events are JSON with this structure:
 | Event             | Payload             | Triggered By                                                                         |
 | ----------------- | ------------------- | ------------------------------------------------------------------------------------ |
 | `project:created` | Full project object | `POST /projects`                                                                     |
-| `task:created`    | Full task object    | `POST /tasks`                                                                        |
+| `task:created`    | Full task object    | `POST /tasks`, `POST /projects/:id/roadmap/import`                                   |
 | `task:updated`    | Full task object    | `PUT /tasks/:id`, `PATCH /tasks/:id/position`, `POST /tasks/:id/events` (`fast_fix`) |
 | `task:moved`      | Full task object    | `POST /tasks/:id/events`                                                             |
 | `task:deleted`    | `{ id: string }`    | `DELETE /tasks/:id`                                                                  |
