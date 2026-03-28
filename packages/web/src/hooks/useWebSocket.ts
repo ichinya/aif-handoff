@@ -109,6 +109,19 @@ export function useWebSocket() {
       // Dispatch roadmap events as custom DOM events for listeners
       if (data.type === "roadmap:complete" || data.type === "roadmap:error") {
         window.dispatchEvent(new CustomEvent(data.type, { detail: data.payload }));
+
+        if (data.type === "roadmap:complete" && isRecord(data.payload)) {
+          const p = data.payload as { roadmapAlias?: string; created?: number };
+          if (settings.desktop && Notification.permission === "granted") {
+            new Notification("Roadmap ready", {
+              body: `${p.roadmapAlias}: ${p.created ?? 0} task(s) created`,
+              tag: "roadmap-complete",
+            });
+          }
+          if (settings.sound) {
+            void playStatusChangeBeep().catch(() => {});
+          }
+        }
       }
 
       // Invalidate tasks query to trigger refetch
