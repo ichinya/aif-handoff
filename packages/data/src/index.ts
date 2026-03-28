@@ -20,6 +20,35 @@ export type ProjectRow = typeof projects.$inferSelect;
 
 export type CoordinatorStage = "planner" | "plan-checker" | "implementer" | "reviewer";
 
+/** DB-level patch: all mutable task columns with their storage types (attachments/tags as JSON strings). */
+export type TaskFieldsPatch = Partial<Omit<TaskRow, "id" | "projectId" | "createdAt">>;
+
+/** API-level update: domain types (attachments as array, tags as string[]). Serialization handled by data layer. */
+export type TaskFieldsUpdate = {
+  title?: string;
+  description?: string;
+  attachments?: unknown[];
+  priority?: number;
+  autoMode?: boolean;
+  isFix?: boolean;
+  implementationLog?: string | null;
+  reviewComments?: string | null;
+  agentActivityLog?: string | null;
+  blockedReason?: string | null;
+  blockedFromStatus?: TaskStatus | null;
+  retryAfter?: string | null;
+  retryCount?: number;
+  tokenInput?: number;
+  tokenOutput?: number;
+  tokenTotal?: number;
+  costUsd?: number;
+  roadmapAlias?: string | null;
+  tags?: string[];
+  reworkRequested?: boolean;
+  lastHeartbeatAt?: string | null;
+  position?: number;
+};
+
 export { logger, formatAttachmentsForPrompt, looksLikeFullPlanUpdate };
 
 export function toTaskResponse(task: TaskRow): Task {
@@ -108,16 +137,20 @@ export function createTask(input: {
   return findTaskById(id);
 }
 
-export function updateTask(id: string, fields: Record<string, unknown>): TaskRow | undefined {
-  getDb()
-    .update(tasks)
-    .set({ ...fields, updatedAt: new Date().toISOString() })
-    .where(eq(tasks.id, id))
-    .run();
+export function updateTask(id: string, fields: TaskFieldsUpdate): TaskRow | undefined {
+  const { attachments, tags, ...rest } = fields;
+  const patch: TaskFieldsPatch = { ...rest, updatedAt: new Date().toISOString() };
+  if (attachments !== undefined) {
+    patch.attachments = JSON.stringify(attachments);
+  }
+  if (tags !== undefined) {
+    patch.tags = JSON.stringify(tags);
+  }
+  getDb().update(tasks).set(patch).where(eq(tasks.id, id)).run();
   return findTaskById(id);
 }
 
-export function setTaskFields(id: string, fields: Record<string, unknown>): void {
+export function setTaskFields(id: string, fields: TaskFieldsPatch): void {
   getDb().update(tasks).set(fields).where(eq(tasks.id, id)).run();
 }
 
@@ -318,7 +351,7 @@ export function updateTaskHeartbeat(taskId: string): void {
 export function updateTaskStatus(
   taskId: string,
   status: TaskStatus,
-  extra: Record<string, unknown> = {},
+  extra: Omit<TaskFieldsPatch, "status" | "lastHeartbeatAt" | "updatedAt"> = {},
 ): void {
   const nowIso = new Date().toISOString();
   setTaskFields(taskId, {

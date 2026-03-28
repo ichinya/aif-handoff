@@ -149,23 +149,15 @@ tasksRouter.put("/:id", zValidator("json", updateTaskSchema), async (c) => {
     return c.json({ error: "Task not found" }, 404);
   }
 
-  const { attachments, tags, ...restBody } = body;
-  const updatePayload: Record<string, unknown> = { ...restBody };
-  if (attachments) {
-    updatePayload.attachments = JSON.stringify(attachments);
-  }
-  if (tags) {
-    updatePayload.tags = JSON.stringify(tags);
-  }
+  const { plan, ...updatePayload } = body;
 
-  const hasPlanUpdate = Object.prototype.hasOwnProperty.call(restBody, "plan");
+  const hasPlanUpdate = Object.prototype.hasOwnProperty.call(body, "plan");
   if (hasPlanUpdate) {
     try {
-      updateTaskPlan(id, restBody.plan ?? null, existing.projectId, existing.isFix);
+      updateTaskPlan(id, plan ?? null, existing.isFix);
     } catch {
       return c.json({ error: "Project not found for task" }, 404);
     }
-    delete updatePayload.plan;
   }
 
   const updated = updateTask(id, updatePayload);

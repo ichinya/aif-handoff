@@ -2,6 +2,7 @@ import {
   findCoordinatorTaskCandidate,
   findProjectById,
   updateTaskStatus as updateTaskStatusRow,
+  type TaskFieldsPatch,
 } from "@aif/data";
 import {
   logger,
@@ -101,7 +102,7 @@ async function runStageWithTimeout(
 function updateTaskStatus(
   taskId: string,
   status: TaskStatus,
-  extra: Record<string, unknown> = {},
+  extra: Omit<TaskFieldsPatch, "status" | "lastHeartbeatAt" | "updatedAt"> = {},
 ): void {
   updateTaskStatusRow(taskId, status, extra);
   void notifyTaskBroadcast(taskId, "task:moved");

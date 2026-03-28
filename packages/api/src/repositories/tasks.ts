@@ -16,12 +16,7 @@ import {
   updateTask,
 } from "@aif/data";
 
-export function updateTaskPlan(
-  taskId: string,
-  planText: string | null,
-  _projectId: string,
-  isFix: boolean,
-): void {
+export function updateTaskPlan(taskId: string, planText: string | null, isFix: boolean): void {
   const project = findProjectByTaskId(taskId);
   if (!project) throw new Error("Project not found for task");
 
