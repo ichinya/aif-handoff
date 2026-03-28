@@ -57,7 +57,9 @@ export { validateProjectRootPath } from "./pathValidation.js";
 // Attachment utilities
 export {
   parseAttachments,
+  isFileBackedAttachment,
   formatAttachmentsForPrompt,
+  formatAttachmentPathsForPrompt,
   extractHeadings,
   looksLikeFullPlanUpdate,
   type ParsedAttachment,

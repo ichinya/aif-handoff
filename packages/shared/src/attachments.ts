@@ -8,8 +8,14 @@ export interface ParsedAttachment {
   mimeType: string;
   size: number;
   content: string | null;
+  /** Relative path in storage/ directory. Present for file-backed attachments. */
+  path?: string;
 }
 
+/**
+ * Parse a JSON-serialized attachment array from DB.
+ * Handles both legacy (content-only) and new (path-based) records.
+ */
 export function parseAttachments(raw: string | null): ParsedAttachment[] {
   if (!raw) return [];
   try {
@@ -17,15 +23,28 @@ export function parseAttachments(raw: string | null): ParsedAttachment[] {
     if (!Array.isArray(parsed)) return [];
     return parsed
       .filter((item) => item && typeof item === "object")
-      .map((item) => ({
-        name: typeof item.name === "string" ? item.name : "file",
-        mimeType: typeof item.mimeType === "string" ? item.mimeType : "application/octet-stream",
-        size: typeof item.size === "number" ? item.size : 0,
-        content: typeof item.content === "string" ? item.content : null,
-      }));
+      .map((item) => {
+        const attachment: ParsedAttachment = {
+          name: typeof item.name === "string" ? item.name : "file",
+          mimeType: typeof item.mimeType === "string" ? item.mimeType : "application/octet-stream",
+          size: typeof item.size === "number" ? item.size : 0,
+          content: typeof item.content === "string" ? item.content : null,
+        };
+        if (typeof item.path === "string" && item.path.length > 0) {
+          attachment.path = item.path;
+        }
+        return attachment;
+      });
   } catch {
     return [];
   }
+}
+
+/**
+ * Check whether an attachment is file-backed (has a storage path).
+ */
+export function isFileBackedAttachment(attachment: ParsedAttachment): boolean {
+  return typeof attachment.path === "string" && attachment.path.length > 0;
 }
 
 /** Max characters of file content included in agent prompts. */
@@ -39,6 +58,28 @@ const LONG_PLAN_RETENTION = 0.5;
 const SHORT_PLAN_MIN_LENGTH = 10;
 const LONG_PLAN_MIN_LENGTH = 80;
 
+/**
+ * Format attachments as path-only references for agent prompts (new flow).
+ * Includes validated paths and optional tiny text excerpts.
+ * This is the single source of truth for path-based prompt formatting — used by
+ * planner, implementer, reviewer, and fast-fix flows.
+ */
+export function formatAttachmentPathsForPrompt(attachments: ParsedAttachment[]): string {
+  const fileBackedAttachments = attachments.filter(isFileBackedAttachment);
+  if (fileBackedAttachments.length === 0) return "No task attachments were provided.";
+
+  return fileBackedAttachments
+    .map(
+      (file, index) =>
+        `${index + 1}. ${file.name} (${file.mimeType}, ${file.size} bytes)\n   path: ${file.path}`,
+    )
+    .join("\n");
+}
+
+/**
+ * Format attachments for agent prompts (legacy flow — includes inline content).
+ * @deprecated Use formatAttachmentPathsForPrompt for new path-based flow.
+ */
 export function formatAttachmentsForPrompt(raw: string | null): string {
   const attachments = parseAttachments(raw);
   if (attachments.length === 0) return "No task attachments were provided.";

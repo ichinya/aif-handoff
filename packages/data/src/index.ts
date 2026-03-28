@@ -188,6 +188,23 @@ export function createTaskComment(input: {
   return getDb().select().from(taskComments).where(eq(taskComments.id, id)).get();
 }
 
+export function updateTaskComment(
+  commentId: string,
+  patch: { attachments?: unknown[] },
+): CommentRow | undefined {
+  const sets: Record<string, unknown> = {};
+  if (patch.attachments !== undefined) {
+    sets.attachments = JSON.stringify(patch.attachments);
+  }
+  if (Object.keys(sets).length === 0) return getDb().select().from(taskComments).where(eq(taskComments.id, commentId)).get();
+  getDb()
+    .update(taskComments)
+    .set(sets)
+    .where(eq(taskComments.id, commentId))
+    .run();
+  return getDb().select().from(taskComments).where(eq(taskComments.id, commentId)).get();
+}
+
 export function getLatestHumanComment(taskId: string): CommentRow | undefined {
   return listTaskComments(taskId).filter((comment) => comment.author === "human").at(-1);
 }

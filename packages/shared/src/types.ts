@@ -36,7 +36,10 @@ export interface TaskCommentAttachment {
   name: string;
   mimeType: string;
   size: number;
+  /** Inline content (text or base64). Deprecated for binary files — use `path` instead. */
   content: string | null;
+  /** Relative path in storage/ directory. Present for file-backed attachments. */
+  path?: string;
 }
 
 export interface Task {

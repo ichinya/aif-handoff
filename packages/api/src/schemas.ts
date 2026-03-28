@@ -6,6 +6,8 @@ const taskAttachmentSchema = z.object({
   mimeType: z.string().max(200),
   size: z.number().int().min(0).max(10_000_000),
   content: z.string().max(2_000_000).nullable(),
+  /** Relative path in storage/ — present for file-backed attachments */
+  path: z.string().max(1000).optional(),
 });
 
 export const createProjectSchema = z.object({

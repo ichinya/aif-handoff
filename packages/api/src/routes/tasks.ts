@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
-import { logger } from "@aif/shared";
+import { logger, parseAttachments } from "@aif/shared";
 import {
   createTaskSchema,
   updateTaskSchema,
@@ -12,6 +12,10 @@ import {
 import { broadcast } from "../ws.js";
 import { handleTaskEvent } from "../services/taskEvents.js";
 import {
+  persistAttachments,
+  cleanupReplacedAttachments,
+} from "../services/attachmentPersistence.js";
+import {
   findTaskById,
   listTasks,
   createTask,
@@ -19,6 +23,7 @@ import {
   deleteTask,
   listComments,
   createComment,
+  updateComment,
   toTaskResponse,
   toCommentResponse,
   getTaskPlanFileStatus,
@@ -58,11 +63,12 @@ tasksRouter.get("/", (c) => {
 tasksRouter.post("/", zValidator("json", createTaskSchema), async (c) => {
   const body = c.req.valid("json");
 
+  // Pre-create the task to get an ID, then persist attachments to storage
   const created = createTask({
     projectId: body.projectId,
     title: body.title,
     description: body.description,
-    attachments: body.attachments,
+    attachments: [],
     priority: body.priority,
     autoMode: body.autoMode,
     isFix: body.isFix,
@@ -70,20 +76,32 @@ tasksRouter.post("/", zValidator("json", createTaskSchema), async (c) => {
     tags: body.tags,
   });
   if (!created) return c.json({ error: "Failed to create task" }, 500);
+
+  // Persist attachments to storage and update the task with path-based metadata
+  if (body.attachments.length > 0) {
+    const persisted = await persistAttachments(body.attachments, {
+      projectId: body.projectId,
+      taskId: created.id,
+    });
+    updateTask(created.id, { attachments: persisted });
+  }
+
+  const final = findTaskById(created.id) ?? created;
   log.debug(
     {
-      taskId: created.id,
+      taskId: final.id,
       title: body.title,
       roadmapAlias: body.roadmapAlias,
       tagCount: body.tags?.length,
+      attachmentCount: body.attachments.length,
     },
     "Task created",
   );
 
-  broadcast({ type: "task:created", payload: toTaskResponse(created) });
+  broadcast({ type: "task:created", payload: toTaskResponse(final) });
   // Wake coordinator when a new task is created (may need immediate processing)
-  broadcast({ type: "agent:wake", payload: { id: created.id } });
-  return c.json(toTaskResponse(created), 201);
+  broadcast({ type: "agent:wake", payload: { id: final.id } });
+  return c.json(toTaskResponse(final), 201);
 });
 
 // GET /tasks/:id — full detail
@@ -123,7 +141,7 @@ tasksRouter.get("/:id/comments", (c) => {
 });
 
 // POST /tasks/:id/comments — create a human comment
-tasksRouter.post("/:id/comments", zValidator("json", createTaskCommentSchema), (c) => {
+tasksRouter.post("/:id/comments", zValidator("json", createTaskCommentSchema), async (c) => {
   const { id } = c.req.param();
   const body = c.req.valid("json");
   const task = findTaskById(id);
@@ -131,12 +149,25 @@ tasksRouter.post("/:id/comments", zValidator("json", createTaskCommentSchema), (
     return c.json({ error: "Task not found" }, 404);
   }
 
+  // Create comment first to get its DB-assigned ID
   const created = createComment({
     taskId: id,
     message: body.message,
-    attachments: body.attachments,
+    attachments: [],
   });
   if (!created) return c.json({ error: "Failed to create comment" }, 500);
+
+  // Persist attachments to storage using the real comment ID, then update
+  if (body.attachments.length > 0) {
+    const persisted = await persistAttachments(body.attachments, {
+      projectId: task.projectId,
+      taskId: id,
+      commentId: created.id,
+    });
+    const updated = updateComment(created.id, { attachments: persisted });
+    return c.json(toCommentResponse(updated ?? created), 201);
+  }
+
   return c.json(toCommentResponse(created), 201);
 });
 
@@ -149,7 +180,7 @@ tasksRouter.put("/:id", zValidator("json", updateTaskSchema), async (c) => {
     return c.json({ error: "Task not found" }, 404);
   }
 
-  const { plan, ...updatePayload } = body;
+  const { plan, attachments: incomingAttachments, ...updatePayload } = body;
 
   const hasPlanUpdate = Object.prototype.hasOwnProperty.call(body, "plan");
   if (hasPlanUpdate) {
@@ -158,6 +189,17 @@ tasksRouter.put("/:id", zValidator("json", updateTaskSchema), async (c) => {
     } catch {
       return c.json({ error: "Project not found for task" }, 404);
     }
+  }
+
+  // Persist new attachments to storage and clean up replaced ones
+  if (incomingAttachments !== undefined) {
+    const oldAttachments = parseAttachments(existing.attachments);
+    cleanupReplacedAttachments(oldAttachments, incomingAttachments);
+    const persisted = await persistAttachments(incomingAttachments, {
+      projectId: existing.projectId,
+      taskId: id,
+    });
+    (updatePayload as Record<string, unknown>).attachments = persisted;
   }
 
   const updated = updateTask(id, updatePayload);
