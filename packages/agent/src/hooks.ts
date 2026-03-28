@@ -55,6 +55,24 @@ const taskQueues = new Map<string, QueueEntry[]>();
 /** Per-task flush timer handles. */
 const flushTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+/** Append new log lines to a task's agentActivityLog in the database. */
+function appendActivityLogToDb(taskId: string, newLines: string): void {
+  const db = getDb();
+  const task = db.select().from(tasks).where(eq(tasks.id, taskId)).get();
+  const currentLog = task?.agentActivityLog ?? "";
+  const updatedLog = currentLog ? `${currentLog}\n${newLines}` : newLines;
+  const nowIso = new Date().toISOString();
+
+  db.update(tasks)
+    .set({
+      agentActivityLog: updatedLog,
+      lastHeartbeatAt: nowIso,
+      updatedAt: nowIso,
+    })
+    .where(eq(tasks.id, taskId))
+    .run();
+}
+
 /**
  * Flush buffered activity entries for a single task to the database.
  * Safe to call even when the queue is empty (no-op).
@@ -70,21 +88,8 @@ export function flushActivityQueue(taskId: string): void {
   log.debug({ taskId, entries: entries.length, trigger: "flush" }, "Flushing activity queue");
 
   try {
-    const db = getDb();
-    const task = db.select().from(tasks).where(eq(tasks.id, taskId)).get();
-    const currentLog = task?.agentActivityLog ?? "";
     const newLines = entries.map((e) => `[${e.timestamp}] ${e.category}: ${e.detail}`).join("\n");
-    const updatedLog = currentLog ? `${currentLog}\n${newLines}` : newLines;
-
-    db.update(tasks)
-      .set({
-        agentActivityLog: updatedLog,
-        lastHeartbeatAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(tasks.id, taskId))
-      .run();
-
+    appendActivityLogToDb(taskId, newLines);
     log.info({ taskId, entries: entries.length, mode: "batch" }, "Activity queue flushed");
   } catch (err) {
     log.error({ err, taskId, lostEntries: entries.length }, "Failed to flush activity queue");
@@ -153,19 +158,7 @@ export function logActivity(taskId: string, category: ActivityCategory, detail: 
   if (env.ACTIVITY_LOG_MODE === "sync") {
     const entry = `[${timestamp}] ${category}: ${detail}`;
     try {
-      const db = getDb();
-      const task = db.select().from(tasks).where(eq(tasks.id, taskId)).get();
-      const currentLog = task?.agentActivityLog ?? "";
-      const updatedLog = currentLog ? `${currentLog}\n${entry}` : entry;
-
-      db.update(tasks)
-        .set({
-          agentActivityLog: updatedLog,
-          lastHeartbeatAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        })
-        .where(eq(tasks.id, taskId))
-        .run();
+      appendActivityLogToDb(taskId, entry);
     } catch (err) {
       log.error({ err, taskId }, "Failed to update agent activity log");
     }

@@ -2,7 +2,7 @@ import cron from "node-cron";
 import { getDb, getEnv, logger } from "@aif/shared";
 import { pollAndProcess } from "./coordinator.js";
 import { flushAllActivityQueues } from "./hooks.js";
-import { connectWakeChannel, closeWakeChannel } from "./notifier.js";
+import { connectWakeChannel, closeWakeChannel } from "./wakeChannel.js";
 
 const log = logger("agent");
 
