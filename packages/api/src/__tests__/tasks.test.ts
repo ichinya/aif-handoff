@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { Hono } from "hono";
 import { eq } from "drizzle-orm";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { tasks, taskComments, projects } from "@aif/shared";
@@ -114,6 +114,28 @@ describe("tasks API", () => {
       expect(body.autoMode).toBe(true);
       expect(body.isFix).toBe(false);
       expect(body.status).toBe("backlog");
+    });
+
+    it("should persist planner settings from create payload", async () => {
+      const res = await app.request("/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "Task with planner settings",
+          projectId: "test-project",
+          plannerMode: "fast",
+          planPath: ".ai-factory/custom-plan.md",
+          planDocs: true,
+          planTests: true,
+        }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.plannerMode).toBe("fast");
+      expect(body.planPath).toBe(".ai-factory/custom-plan.md");
+      expect(body.planDocs).toBe(true);
+      expect(body.planTests).toBe(true);
     });
 
     it("should create a fix task when isFix=true", async () => {
@@ -560,6 +582,77 @@ describe("tasks API", () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.status).toBe("verified");
+    });
+
+    it("should delete PLAN.md on approve_done when deletePlanFile=true", async () => {
+      const db = testDb.current;
+      const rootPath = mkdtempSync(join(tmpdir(), "aif-approve-delete-plan-"));
+      const aiFactoryDir = join(rootPath, ".ai-factory");
+      mkdirSync(aiFactoryDir, { recursive: true });
+      const planFilePath = join(aiFactoryDir, "PLAN.md");
+      writeFileSync(planFilePath, "## Plan\n- [ ] Step\n", "utf8");
+
+      db.insert(projects)
+        .values({ id: "project-approve-plan", name: "Approve Plan", rootPath })
+        .run();
+      db.insert(tasks)
+        .values({
+          id: "ev-approve-plan-1",
+          projectId: "project-approve-plan",
+          title: "Done task with plan file",
+          status: "done",
+          isFix: false,
+          planPath: ".ai-factory/PLAN.md",
+        })
+        .run();
+
+      const res = await app.request("/tasks/ev-approve-plan-1/events", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ event: "approve_done", deletePlanFile: true }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.status).toBe("verified");
+      expect(existsSync(planFilePath)).toBe(false);
+    });
+
+    it("should delete FIX_PLAN.md on approve_done when task isFix=true", async () => {
+      const db = testDb.current;
+      const rootPath = mkdtempSync(join(tmpdir(), "aif-approve-delete-fix-plan-"));
+      const aiFactoryDir = join(rootPath, ".ai-factory");
+      mkdirSync(aiFactoryDir, { recursive: true });
+      const planFilePath = join(aiFactoryDir, "PLAN.md");
+      const fixPlanFilePath = join(aiFactoryDir, "FIX_PLAN.md");
+      writeFileSync(planFilePath, "## Plan\n- [ ] Keep this\n", "utf8");
+      writeFileSync(fixPlanFilePath, "## Fix Plan\n- [ ] Remove this\n", "utf8");
+
+      db.insert(projects)
+        .values({ id: "project-approve-fix-plan", name: "Approve Fix Plan", rootPath })
+        .run();
+      db.insert(tasks)
+        .values({
+          id: "ev-approve-fix-plan-1",
+          projectId: "project-approve-fix-plan",
+          title: "Done fix task with fix plan file",
+          status: "done",
+          isFix: true,
+          planPath: ".ai-factory/PLAN.md",
+        })
+        .run();
+
+      const res = await app.request("/tasks/ev-approve-fix-plan-1/events", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ event: "approve_done", deletePlanFile: true }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.status).toBe("verified");
+      expect(existsSync(fixPlanFilePath)).toBe(false);
+      expect(existsSync(planFilePath)).toBe(true);
     });
 
     it("should send done task to implementing with rework flag on request_changes", async () => {

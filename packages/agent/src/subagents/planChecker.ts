@@ -1,5 +1,5 @@
 import { findProjectById, findTaskById, persistTaskPlanForTask } from "@aif/data";
-import { logger } from "@aif/shared";
+import { logger, looksLikeFullPlanUpdate } from "@aif/shared";
 import { executeSubagentQuery } from "../subagentQuery.js";
 
 const log = logger("plan-checker");
@@ -9,6 +9,10 @@ function normalizeMarkdownFence(text: string): string {
   const fenced = text.match(/```(?:markdown|md)?\s*([\s\S]*?)```/i);
   if (!fenced) return text.trim();
   return fenced[1].trim();
+}
+
+function hasChecklistItems(text: string): boolean {
+  return /^\s*[-*]\s+\[(?: |x|X)\]\s+/m.test(text);
 }
 
 export async function runPlanChecker(taskId: string, projectRoot: string): Promise<void> {
@@ -39,7 +43,9 @@ Requirements:
 2) Convert plain bullet tasks into unchecked checkboxes when needed.
 3) Keep headings and non-actionable context text intact.
 4) Preserve completed items "- [x]" as completed.
-5) Return only the corrected plan markdown, no explanations.`;
+5) Return the FULL updated plan markdown, not a partial snippet.
+6) Return only the corrected plan markdown, no explanations.
+7) Do not use tools or subagents.`;
 
   const { resultText } = await executeSubagentQuery({
     taskId,
@@ -54,11 +60,19 @@ Requirements:
     throw new Error("Plan checker returned empty content");
   }
 
+  const shouldReject =
+    !hasChecklistItems(normalizedPlan) || !looksLikeFullPlanUpdate(task.plan, normalizedPlan);
+  if (shouldReject) {
+    log.warn({ taskId }, "Plan checker returned non-plan-like content; keeping existing task plan");
+    return;
+  }
+
   persistTaskPlanForTask({
     taskId,
     planText: normalizedPlan,
     projectRoot,
     isFix: task.isFix,
+    planPath: task.planPath ?? undefined,
     updatedAt: new Date().toISOString(),
   });
 

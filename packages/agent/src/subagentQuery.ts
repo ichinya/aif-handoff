@@ -117,6 +117,8 @@ async function runQueryAttempt(
     subagentStartHooks.push({ hooks: extraSubagentStartHooks });
   }
 
+  const bypassPermissions = getEnv().AGENT_BYPASS_PERMISSIONS;
+
   const stream = query({
     prompt,
     options: {
@@ -124,7 +126,8 @@ async function runQueryAttempt(
       env: process.env,
       pathToClaudeCodeExecutable: getClaudePath(),
       settingSources: ["project"],
-      permissionMode: "acceptEdits",
+      permissionMode: bypassPermissions ? "bypassPermissions" : "acceptEdits",
+      ...(bypassPermissions ? { allowDangerouslySkipPermissions: true } : {}),
       systemPrompt: {
         type: "preset",
         preset: "claude_code",

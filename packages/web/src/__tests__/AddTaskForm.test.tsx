@@ -117,4 +117,33 @@ describe("AddTaskForm", () => {
       expect(screen.queryByPlaceholderText("Task title")).toBeNull();
     });
   });
+
+  it("submits planner settings from advanced options", () => {
+    render(<AddTaskForm projectId="p-1" />);
+
+    fireEvent.click(screen.getByText("Add task"));
+    fireEvent.click(screen.getByRole("button", { name: "Planner settings" }));
+    fireEvent.click(screen.getByLabelText("Fast"));
+    fireEvent.click(screen.getByLabelText("Docs"));
+    fireEvent.click(screen.getByLabelText("Tests"));
+    fireEvent.change(screen.getByPlaceholderText(".ai-factory/PLAN.md"), {
+      target: { value: ".ai-factory/custom-plan.md" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("Task title"), {
+      target: { value: "Task with planner options" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(mutateCreateTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: "p-1",
+        title: "Task with planner options",
+        plannerMode: "fast",
+        planPath: ".ai-factory/custom-plan.md",
+        planDocs: true,
+        planTests: true,
+      }),
+      expect.any(Object),
+    );
+  });
 });

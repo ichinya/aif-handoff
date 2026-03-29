@@ -28,6 +28,7 @@ cp .env.example .env
 | `ACTIVITY_LOG_BATCH_MAX_AGE_MS`    | number  | `5000`              | Maximum age (ms) of buffered entries before auto-flush in batch mode                                                                |
 | `ACTIVITY_LOG_QUEUE_LIMIT`         | number  | `500`               | Hard queue limit to prevent unbounded memory growth in batch mode                                                                   |
 | `AGENT_WAKE_ENABLED`               | boolean | `true`              | Enable event-driven coordinator wake via API WebSocket; set to `false` for polling-only mode                                        |
+| `AGENT_BYPASS_PERMISSIONS`         | boolean | `false`             | Bypass all Claude permission checks for subagents. When `false`, configure permissions via `.claude/settings.json` allow rules      |
 
 Environment validation is handled by Zod in `packages/shared/src/env.ts`. The application will fail to start with a descriptive error if required variables are invalid.
 
@@ -120,6 +121,40 @@ The coordinator includes a stale-stage watchdog:
 - If stale recovery count reaches `AGENT_STAGE_STALE_MAX_RETRY`, the task stays in `blocked_external` without `retryAfter` (manual intervention required).
 - For stale `implementing` tasks, recovery resumes from `plan_ready` to avoid half-broken implementation continuation.
 - Any valid human/stage transition resets stale-retry debt (`retryCount=0`) and refreshes heartbeat baseline.
+
+## Agent Permissions
+
+Subagents (planner, implementer, reviewer) run shell commands during task execution. By default, permission mode is `acceptEdits` — file edits are auto-approved, but Bash commands like `npm install` require explicit allow rules.
+
+Two approaches:
+
+### Option 1: Bypass all permissions (simple)
+
+Set `AGENT_BYPASS_PERMISSIONS=true` in `.env`. All tool calls are auto-approved without prompting. Convenient for trusted environments and local development.
+
+```
+AGENT_BYPASS_PERMISSIONS=true
+```
+
+### Option 2: Configure allow rules (granular)
+
+Leave `AGENT_BYPASS_PERMISSIONS=false` (default) and add needed commands to `.claude/settings.json` or `.claude/settings.local.json`:
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npm run:*)",
+      "Bash(npm test:*)",
+      "Bash(npx:*)",
+      "Bash(git:*)"
+    ]
+  }
+}
+```
+
+Unlisted commands will be denied in headless agent mode. See [Claude Code permissions docs](https://docs.anthropic.com/en/docs/claude-code/permissions) for the full rule syntax.
 
 ## Agent Budgets
 

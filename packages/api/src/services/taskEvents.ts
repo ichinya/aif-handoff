@@ -1,3 +1,5 @@
+import { existsSync, unlinkSync } from "node:fs";
+import { resolve } from "node:path";
 import { applyHumanTaskEvent, looksLikeFullPlanUpdate, type TaskEvent } from "@aif/shared";
 import {
   findProjectById,
@@ -12,6 +14,7 @@ import { runFastFixQuery, withTimeout } from "./fastFix.js";
 interface EventHandlerInput {
   taskId: string;
   event: TaskEvent;
+  deletePlanFile?: boolean;
 }
 
 export type EventHandlerResult =
@@ -124,6 +127,23 @@ function handleRegularTransition(input: EventHandlerInput): EventHandlerResult {
   const transition = applyHumanTaskEvent(task, event);
   if (!transition.ok) {
     return { ok: false, status: 409, error: transition.error };
+  }
+
+  if (input.event === "approve_done" && input.deletePlanFile) {
+    const project = findProjectById(task.projectId);
+    if (!project) {
+      return { ok: false, status: 404, error: "Project not found for task" };
+    }
+
+    // For fix tasks, always remove canonical FIX_PLAN.md.
+    // For regular tasks, use configured planPath (defaults to .ai-factory/PLAN.md).
+    const planFilePath = task.isFix
+      ? resolve(project.rootPath, ".ai-factory/FIX_PLAN.md")
+      : resolve(project.rootPath, task.planPath || ".ai-factory/PLAN.md");
+
+    if (existsSync(planFilePath)) {
+      unlinkSync(planFilePath);
+    }
   }
 
   const nowIso = new Date().toISOString();

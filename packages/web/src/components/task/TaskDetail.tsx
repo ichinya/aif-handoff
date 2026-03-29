@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Trash2 } from "lucide-react";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useTask } from "@/hooks/useTasks";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { TaskDescription } from "./TaskDescription";
@@ -22,8 +23,10 @@ interface TaskDetailProps {
 
 export function TaskDetail({ taskId, onClose }: TaskDetailProps) {
   const { data: task } = useTask(taskId);
-  const [activeTab, setActiveTab] = useState<TaskDetailTab>("implementation");
+  const [selectedTab, setSelectedTab] = useState<TaskDetailTab | null>(null);
   const actions = useTaskDetailActions(task, onClose);
+  const defaultTab: TaskDetailTab = task?.status === "review" ? "review" : "implementation";
+  const activeTab: TaskDetailTab = selectedTab ?? defaultTab;
 
   return (
     <>
@@ -34,7 +37,7 @@ export function TaskDetail({ taskId, onClose }: TaskDetailProps) {
               <TaskDetailHeader
                 task={task}
                 activeTab={activeTab}
-                onTabChange={setActiveTab}
+                onTabChange={setSelectedTab}
                 onActionClick={actions.handleActionClick}
                 isDisabled={actions.isSubmittingPlanChange}
                 isCheckingStartAi={actions.isCheckingStartAiPlanFile}
@@ -191,6 +194,42 @@ export function TaskDetail({ taskId, onClose }: TaskDetailProps) {
           actions.triggerStartAi();
         }}
       />
+      <Dialog
+        open={actions.showApproveDoneConfirm}
+        onOpenChange={actions.setShowApproveDoneConfirm}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Approve done task?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            The task will move from <strong>Done</strong> to <strong>Verified</strong>.
+          </p>
+          <label className="mt-4 flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={actions.deletePlanOnApprove}
+              onChange={(event) => actions.setDeletePlanOnApprove(event.target.checked)}
+            />
+            Delete plan file ({task?.isFix ? "FIX_PLAN.md" : "PLAN.md"})
+          </label>
+          <div className="mt-4 flex justify-end gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                actions.setShowApproveDoneConfirm(false);
+                actions.setDeletePlanOnApprove(false);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button size="sm" onClick={actions.handleApproveDone}>
+              Approve
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Plan change dialog */}
       <PlanChangeDialog

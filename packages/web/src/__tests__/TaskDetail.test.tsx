@@ -75,6 +75,7 @@ const mockPlanReadyManualTask: Task = {
 const mockReviewTask: Task = {
   ...mockTask,
   id: "detail-review",
+  status: "review",
   title: "Review Task",
   reviewComments: "Looks good after minor cleanup",
 };
@@ -489,7 +490,15 @@ describe("TaskDetail", () => {
   it("should render review comments in review tab", () => {
     render(<TaskDetail taskId="detail-review" onClose={vi.fn()} />, { wrapper: Wrapper });
 
-    fireEvent.click(screen.getByText("Review"));
+    fireEvent.click(screen.getByRole("button", { name: "Review" }));
+    expect(screen.getByText("Looks good after minor cleanup")).toBeDefined();
+  });
+
+  it("should open review tab by default for review status task", () => {
+    render(<TaskDetail taskId="detail-review" onClose={vi.fn()} />, { wrapper: Wrapper });
+
+    expect(screen.getByText("Review Comments")).toBeDefined();
+    expect(screen.queryByText("Implementation Log")).toBeNull();
     expect(screen.getByText("Looks good after minor cleanup")).toBeDefined();
   });
 

@@ -3,6 +3,7 @@ import type {
   CreateTaskInput,
   UpdateTaskInput,
   TaskEvent,
+  TaskEventInput,
   TaskComment,
   CreateTaskCommentInput,
   Project,
@@ -124,14 +125,18 @@ export const api = {
     return request(`${API_BASE}/${id}`, { method: "DELETE" });
   },
 
-  taskEvent(id: string, event: TaskEvent): Promise<Task> {
+  taskEvent(
+    id: string,
+    event: TaskEvent,
+    options?: Pick<TaskEventInput, "deletePlanFile">,
+  ): Promise<Task> {
     console.debug("[api] POST /tasks/%s/events →", id, event);
     const timeoutMs = event === "fast_fix" ? FAST_FIX_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
     return request<Task>(
       `${API_BASE}/${id}/events`,
       {
         method: "POST",
-        body: JSON.stringify({ event }),
+        body: JSON.stringify({ event, deletePlanFile: options?.deletePlanFile }),
       },
       timeoutMs,
     );

@@ -4,6 +4,7 @@ import type {
   CreateTaskInput,
   UpdateTaskInput,
   TaskEvent,
+  TaskEventInput,
   TaskComment,
   CreateTaskCommentInput,
 } from "@aif/shared/browser";
@@ -69,7 +70,15 @@ export function useDeleteTask() {
 export function useTaskEvent() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, event }: { id: string; event: TaskEvent }) => api.taskEvent(id, event),
+    mutationFn: ({
+      id,
+      event,
+      deletePlanFile,
+    }: {
+      id: string;
+      event: TaskEvent;
+      deletePlanFile?: TaskEventInput["deletePlanFile"];
+    }) => api.taskEvent(id, event, { deletePlanFile }),
     // Optimistic update
     onMutate: async ({ id }) => {
       await queryClient.cancelQueries({ queryKey: ["tasks"] });
