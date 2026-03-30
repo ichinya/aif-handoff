@@ -70,7 +70,7 @@ export function TaskDetail({ taskId, onClose }: TaskDetailProps) {
                     />
                   </Section>
 
-                  {task.status === "backlog" && (
+                  {(task.status === "backlog" || task.status === "done") && (
                     <TaskSettings
                       task={task}
                       onSave={(input) => actions.updateTask.mutate({ id: task.id, input })}

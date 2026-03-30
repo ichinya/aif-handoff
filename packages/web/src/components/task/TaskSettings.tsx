@@ -22,15 +22,17 @@ export function TaskSettings({ task, onSave }: Props) {
   const [planTests, setPlanTests] = useState(task.planTests);
   const [maxReviewIterations, setMaxReviewIterations] = useState(task.maxReviewIterations);
 
+  const showPlanner = !task.isFix && task.status !== "done";
   const hasChanges =
     autoMode !== task.autoMode ||
     skipReview !== task.skipReview ||
     useSubagents !== task.useSubagents ||
     maxReviewIterations !== task.maxReviewIterations ||
-    plannerMode !== task.plannerMode ||
-    planPath !== task.planPath ||
-    planDocs !== task.planDocs ||
-    planTests !== task.planTests;
+    (showPlanner &&
+      (plannerMode !== task.plannerMode ||
+        planPath !== task.planPath ||
+        planDocs !== task.planDocs ||
+        planTests !== task.planTests));
 
   function handleSave() {
     const input: UpdateTaskInput = {};
@@ -39,7 +41,7 @@ export function TaskSettings({ task, onSave }: Props) {
     if (useSubagents !== task.useSubagents) input.useSubagents = useSubagents;
     if (maxReviewIterations !== task.maxReviewIterations)
       input.maxReviewIterations = maxReviewIterations;
-    if (!task.isFix) {
+    if (showPlanner) {
       if (plannerMode !== task.plannerMode) input.plannerMode = plannerMode;
       if (planPath !== task.planPath) input.planPath = planPath;
       if (planDocs !== task.planDocs) input.planDocs = planDocs;
@@ -127,7 +129,7 @@ export function TaskSettings({ task, onSave }: Props) {
         </div>
       )}
 
-      {!task.isFix && (
+      {showPlanner && (
         <div className="space-y-2 border-t border-border/60 pt-2">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
             Planner
