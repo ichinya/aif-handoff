@@ -24,6 +24,8 @@ export {
   type ChatStreamTokenPayload,
   type ChatDonePayload,
   type ChatErrorPayload,
+  type ChatAction,
+  type ChatActionCreateTask,
 } from "./types.js";
 
 export { STATUS_CONFIG, ORDERED_STATUSES } from "./constants.js";

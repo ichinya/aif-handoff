@@ -243,7 +243,12 @@ function AppContent() {
 
       {project && (
         <>
-          <ChatPanel isOpen={chatOpen} projectId={project.id} onClose={() => setChatOpen(false)} />
+          <ChatPanel
+            isOpen={chatOpen}
+            projectId={project.id}
+            taskId={selectedTaskId}
+            onClose={() => setChatOpen(false)}
+          />
           <ChatBubble
             isOpen={chatOpen}
             onToggle={() => {

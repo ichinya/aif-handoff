@@ -1,16 +1,54 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { logger, env } from "@aif/shared";
+import { logger, getEnv } from "@aif/shared";
 import { findProjectById } from "../repositories/projects.js";
+import { findTaskById, toTaskResponse } from "../repositories/tasks.js";
 import { chatRequestSchema } from "../schemas.js";
 import { sendToClient } from "../ws.js";
-import type { WsEvent } from "@aif/shared";
+import type { WsEvent, Task } from "@aif/shared";
 
 const PROJECT_SCOPE_SYSTEM_APPEND =
   "Project scope rule: work strictly inside the current working directory (project root). " +
   "Do not inspect or modify files in the orchestrator monorepo or in parent/sibling directories " +
   "unless the user explicitly asks for that path. Avoid broad discovery outside the current project root.";
+
+const CHAT_ACTIONS_PROMPT = `
+You have special capabilities in this chat:
+
+1. CREATE TASK: When the user asks to create a task (based on conversation, from scratch, etc.), output a structured block:
+<!--ACTION:CREATE_TASK-->
+{"title": "Short task title", "description": "Detailed task description with context from the conversation"}
+<!--/ACTION-->
+Include this block in your response along with a brief explanation of the task you're creating. The user will see a confirmation card and can approve it.
+
+2. TASK SUMMARY: When the user asks to summarize what was done on the current task (or any task you have context for), generate a concise summary covering: what was planned, what was implemented, review results, and current status.
+`.trim();
+
+function buildContextAppend(projectName: string, task: Task | null): string {
+  const parts = [PROJECT_SCOPE_SYSTEM_APPEND];
+
+  parts.push(`\nCurrent project: "${projectName}"`);
+
+  if (task) {
+    const lines = [
+      `\nCurrently open task [${task.id}]:`,
+      `  Title: ${task.title}`,
+      `  Status: ${task.status}`,
+    ];
+    if (task.description) lines.push(`  Description: ${task.description}`);
+    if (task.plan) lines.push(`  Plan:\n${task.plan}`);
+    if (task.implementationLog) lines.push(`  Implementation log:\n${task.implementationLog}`);
+    if (task.reviewComments) lines.push(`  Review comments:\n${task.reviewComments}`);
+    if (task.agentActivityLog) lines.push(`  Agent activity log:\n${task.agentActivityLog}`);
+    parts.push(lines.join("\n"));
+  } else {
+    parts.push("No task is currently open.");
+  }
+
+  parts.push(`\n${CHAT_ACTIONS_PROMPT}`);
+  return parts.join("\n");
+}
 
 const log = logger("chat-route");
 
@@ -54,16 +92,23 @@ export const chatRouter = new Hono();
 // POST /chat
 chatRouter.post("/", zValidator("json", chatRequestSchema as any), async (c) => {
   const body = c.req.valid("json");
-  const { projectId, message, clientId, conversationId, explore } = body;
+  const { projectId, message, clientId, conversationId, explore, taskId } = body;
 
   const project = findProjectById(projectId);
   if (!project) {
     return c.json({ error: "Project not found" }, 404);
   }
 
+  // Resolve currently open task for context injection
+  let currentTask: Task | null = null;
+  if (taskId) {
+    const row = findTaskById(taskId);
+    if (row) currentTask = toTaskResponse(row);
+  }
+
   const chatConversationId = conversationId ?? crypto.randomUUID();
   log.info(
-    { projectId, clientId, conversationId: chatConversationId, explore },
+    { projectId, clientId, conversationId: chatConversationId, explore, taskId },
     "Chat request started",
   );
 
@@ -76,14 +121,14 @@ chatRouter.post("/", zValidator("json", chatRequestSchema as any), async (c) => 
       prompt,
       options: {
         cwd: project.rootPath,
-        permissionMode: env.AGENT_BYPASS_PERMISSIONS ? "bypassPermissions" : "acceptEdits",
-        ...(env.AGENT_BYPASS_PERMISSIONS ? { allowDangerouslySkipPermissions: true } : {}),
+        permissionMode: getEnv().AGENT_BYPASS_PERMISSIONS ? "bypassPermissions" : "acceptEdits",
+        ...(getEnv().AGENT_BYPASS_PERMISSIONS ? { allowDangerouslySkipPermissions: true } : {}),
         settingSources: [],
         includePartialMessages: true,
         systemPrompt: {
           type: "preset",
           preset: "claude_code",
-          append: PROJECT_SCOPE_SYSTEM_APPEND,
+          append: buildContextAppend(project.name, currentTask),
         },
         ...(resumeSessionId ? { resume: resumeSessionId } : {}),
         allowedTools: ["Read", "Glob", "Grep", "Bash", "Edit", "Write"],

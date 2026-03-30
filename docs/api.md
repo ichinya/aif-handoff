@@ -441,6 +441,7 @@ POST /chat
 | `clientId` | string | yes | | WebSocket client ID for streaming tokens back |
 | `conversationId` | string | no | auto-generated | Pass the previous `conversationId` to continue a multi-turn conversation |
 | `explore` | boolean | no | `false` | When `true`, the message is prefixed with `/aif-explore` for codebase exploration mode |
+| `taskId` | string | no | | Task UUID — injects the task's full context (status, plan, implementation log, review comments, activity log) into the chat session for task-aware discussion |
 
 **Response:** `200 OK`
 
@@ -478,13 +479,39 @@ Calling `clearMessages` on the client (or omitting `conversationId`) starts a fr
 
 ### Permissions
 
-The agent runs with `permissionMode: "acceptEdits"` by default — file reads and edits are auto-approved, but dangerous shell commands still require confirmation.
+The agent runs with `permissionMode: "bypassPermissions"` by default (when `AGENT_BYPASS_PERMISSIONS=true` in environment) — all file edits and shell commands are auto-approved, matching the behavior of task-processing subagents.
 
-When `AGENT_BYPASS_PERMISSIONS=true` is set in the environment, the agent runs with `permissionMode: "bypassPermissions"` (full autonomy, no confirmation prompts). This matches the behavior of task-processing subagents.
+When `AGENT_BYPASS_PERMISSIONS=false`, the agent runs with `permissionMode: "acceptEdits"` — file reads and edits are auto-approved, but dangerous shell commands require confirmation.
 
 ### Agent Capabilities
 
 The chat agent has access to: `Read`, `Glob`, `Grep`, `Bash`, `Edit`, `Write`. Max turns per request: 20. The agent is scoped to the project's root path and instructed not to access files outside it.
+
+### Task-Aware Context
+
+When `taskId` is provided, the chat session's system prompt includes the full task context:
+
+- Task title, status, and description
+- Plan (if available)
+- Implementation log (if available)
+- Review comments (if available)
+- Agent activity log (if available)
+
+This allows the agent to discuss implementation details, summarize what was done, help debug review feedback, or create follow-up tasks — all without re-reading from storage.
+
+### Chat Actions
+
+The chat agent can emit structured actions embedded in responses. The client parses these and presents confirmation cards for user approval.
+
+**CREATE_TASK** — when the user asks to create a task from the conversation, the agent outputs:
+
+```html
+<!--ACTION:CREATE_TASK-->
+{"title": "Task title", "description": "Detailed description"}
+<!--/ACTION-->
+```
+
+The client extracts the JSON, renders a preview card with the task title and description, and shows a "Create Task" button. On confirmation, the task is created via `POST /tasks` in the current project.
 
 ### Explore Mode
 

@@ -8,7 +8,7 @@ import type {
 import { api } from "@/lib/api";
 import { getWsClientId } from "./useWebSocket";
 
-export function useChat(projectId: string | null) {
+export function useChat(projectId: string | null, taskId: string | null = null) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [explore, setExplore] = useState(false);
@@ -118,6 +118,7 @@ export function useChat(projectId: string | null) {
           clientId,
           conversationId: newConversationId,
           explore,
+          ...(taskId ? { taskId } : {}),
         });
       } catch (err) {
         console.error("[useChat] Failed to send message:", err);
@@ -130,7 +131,7 @@ export function useChat(projectId: string | null) {
         }
       }
     },
-    [projectId, isStreaming, explore],
+    [projectId, isStreaming, explore, taskId],
   );
 
   const clearMessages = useCallback(() => {

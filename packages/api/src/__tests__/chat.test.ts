@@ -4,6 +4,8 @@ import { Hono } from "hono";
 const mockQuery = vi.fn();
 const mockFindProjectById = vi.fn();
 const mockSendToClient = vi.fn();
+const mockFindTaskById = vi.fn();
+const mockToTaskResponse = vi.fn();
 
 vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
   query: (args: unknown) => mockQuery(args),
@@ -13,9 +15,24 @@ vi.mock("../repositories/projects.js", () => ({
   findProjectById: (id: string) => mockFindProjectById(id),
 }));
 
+vi.mock("../repositories/tasks.js", () => ({
+  findTaskById: (id: string) => mockFindTaskById(id),
+  toTaskResponse: (row: unknown) => mockToTaskResponse(row),
+}));
+
 vi.mock("../ws.js", () => ({
   sendToClient: (...args: unknown[]) => mockSendToClient(...args),
 }));
+
+vi.mock("@aif/shared", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@aif/shared")>();
+  return {
+    ...actual,
+    getEnv: () => ({
+      AGENT_BYPASS_PERMISSIONS: false,
+    }),
+  };
+});
 
 const { chatRouter } = await import("../routes/chat.js");
 
@@ -41,7 +58,13 @@ describe("chat API", () => {
     mockQuery.mockReset();
     mockFindProjectById.mockReset();
     mockSendToClient.mockReset();
-    mockFindProjectById.mockReturnValue({ id: "project-1", rootPath: "/tmp/project-1" });
+    mockFindTaskById.mockReset();
+    mockToTaskResponse.mockReset();
+    mockFindProjectById.mockReturnValue({
+      id: "project-1",
+      rootPath: "/tmp/project-1",
+      name: "Test Project",
+    });
   });
 
   it("returns 404 when project is not found", async () => {

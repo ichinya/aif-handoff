@@ -231,7 +231,19 @@ export interface ChatRequest {
   clientId: string;
   conversationId?: string;
   explore?: boolean;
+  /** Currently open task ID — provides context to the chat agent */
+  taskId?: string;
 }
+
+// ── Chat actions (structured blocks in AI responses) ───────
+
+export interface ChatActionCreateTask {
+  type: "create_task";
+  title: string;
+  description: string;
+}
+
+export type ChatAction = ChatActionCreateTask;
 
 export interface ChatStreamTokenPayload {
   conversationId: string;

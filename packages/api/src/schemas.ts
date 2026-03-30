@@ -106,4 +106,5 @@ export const chatRequestSchema = z.object({
   clientId: z.string().min(1, "Client ID is required"),
   conversationId: z.string().optional(),
   explore: z.boolean().default(false),
+  taskId: z.string().optional(),
 });
