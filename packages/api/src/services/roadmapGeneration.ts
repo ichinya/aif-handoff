@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { z } from "zod";
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { logger } from "@aif/shared";
+import { logger, getEnv } from "@aif/shared";
 import {
   createTask,
   findProjectById,
@@ -430,6 +430,7 @@ export function importGeneratedTasks(
       description: genTask.description,
       roadmapAlias: alias,
       tags,
+      useSubagents: getEnv().AGENT_USE_SUBAGENTS,
     });
 
     if (created) {

@@ -47,6 +47,11 @@ async function request<T>(
 }
 
 export const api = {
+  getSettings(): Promise<{ useSubagents: boolean }> {
+    console.debug("[api] GET /settings");
+    return request("/settings");
+  },
+
   getAgentReadiness(): Promise<{
     ready: boolean;
     hasApiKey: boolean;

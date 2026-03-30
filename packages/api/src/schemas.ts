@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { TASK_EVENTS, TASK_STATUSES } from "@aif/shared";
+import { TASK_EVENTS, TASK_STATUSES, getEnv } from "@aif/shared";
 
 const taskAttachmentSchema = z.object({
   name: z.string().min(1).max(500),
@@ -32,7 +32,7 @@ export const createTaskSchema = z.object({
   planDocs: z.boolean().default(false),
   planTests: z.boolean().default(false),
   skipReview: z.boolean().default(false),
-  useSubagents: z.boolean().default(true),
+  useSubagents: z.boolean().default(getEnv().AGENT_USE_SUBAGENTS),
   roadmapAlias: z.string().max(200).optional(),
   tags: z.array(z.string().max(100)).max(50).default([]),
 });

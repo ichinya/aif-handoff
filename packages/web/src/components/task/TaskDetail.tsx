@@ -11,6 +11,7 @@ import { TaskLog } from "./TaskLog";
 import { AgentTimeline } from "./AgentTimeline";
 import { TaskComments } from "./TaskComments";
 import { TaskAttachments } from "./TaskAttachments";
+import { TaskSettings } from "./TaskSettings";
 import { PlanChangeDialog } from "./PlanChangeDialog";
 import { TaskDetailHeader, type TaskDetailTab } from "./TaskDetailHeader";
 import { Section } from "./Section";
@@ -65,6 +66,13 @@ export function TaskDetail({ taskId, onClose }: TaskDetailProps) {
                       onRemove={actions.handleRemoveTaskAttachment}
                     />
                   </Section>
+
+                  {task.status === "backlog" && (
+                    <TaskSettings
+                      task={task}
+                      onSave={(input) => actions.updateTask.mutate({ id: task.id, input })}
+                    />
+                  )}
 
                   <Section
                     title="Plan"

@@ -3,6 +3,12 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 const mutateCreateTask = vi.fn();
 
+vi.mock("@/lib/api", () => ({
+  api: {
+    getSettings: vi.fn().mockResolvedValue({ useSubagents: true }),
+  },
+}));
+
 vi.mock("@/hooks/useTasks", () => ({
   useCreateTask: () => ({
     mutate: mutateCreateTask,

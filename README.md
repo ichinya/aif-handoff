@@ -98,6 +98,20 @@ All agents are loaded via `settingSources: ["project"]` from `.claude/agents/*.m
 | `npm run db:setup` | Create data directory and push schema         |
 | `npm run db:push`  | Push schema changes via drizzle-kit           |
 
+## Troubleshooting
+
+If your workflow runs for too long and frequently times out, try disabling subagents in your environment:
+
+```env
+AGENT_USE_SUBAGENTS=false
+```
+
+If an LLM report says it lacks permissions for specific actions during workflow execution, either grant the required permissions in `.claude/settings.local.json` or bypass permission checks via environment variable:
+
+```env
+AGENT_BYPASS_PERMISSIONS=true
+```
+
 ---
 
 ## Documentation

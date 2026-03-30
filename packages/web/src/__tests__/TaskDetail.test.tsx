@@ -203,6 +203,28 @@ describe("TaskDetail", () => {
     expect(screen.getAllByText("Full description here").length).toBeGreaterThan(0);
   });
 
+  it("should show Settings button for backlog tasks", () => {
+    render(<TaskDetail taskId="detail-backlog" onClose={vi.fn()} />, { wrapper: Wrapper });
+    expect(screen.getByText("Settings")).toBeDefined();
+  });
+
+  it("should not show Settings button for non-backlog tasks", () => {
+    render(<TaskDetail taskId="detail-1" onClose={vi.fn()} />, { wrapper: Wrapper });
+    expect(screen.queryByText("Settings")).toBeNull();
+  });
+
+  it("should update task settings from Settings panel", () => {
+    render(<TaskDetail taskId="detail-backlog" onClose={vi.fn()} />, { wrapper: Wrapper });
+    fireEvent.click(screen.getByText("Settings"));
+    fireEvent.click(screen.getByLabelText("Auto mode"));
+    fireEvent.click(screen.getByText("Save"));
+
+    expect(mutateUpdateTask).toHaveBeenCalledWith({
+      id: "detail-backlog",
+      input: { autoMode: false },
+    });
+  });
+
   it("should render implementation log", () => {
     render(<TaskDetail taskId="detail-1" onClose={vi.fn()} />, { wrapper: Wrapper });
     fireEvent.click(screen.getByText("Implementation"));

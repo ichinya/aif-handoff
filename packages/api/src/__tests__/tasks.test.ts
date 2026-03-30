@@ -51,6 +51,16 @@ function createApp() {
   return app;
 }
 
+function createAppWithSettings() {
+  const app = new Hono();
+  app.get("/settings", async (c) => {
+    const { getEnv } = await import("@aif/shared");
+    const env = getEnv();
+    return c.json({ useSubagents: env.AGENT_USE_SUBAGENTS });
+  });
+  return app;
+}
+
 function insertTestProject(db: ReturnType<typeof createTestDb>, rootPath = "/tmp/test-project") {
   db.insert(projects).values({ id: "test-project", name: "Test Project", rootPath }).run();
 }
@@ -185,7 +195,10 @@ describe("tasks API", () => {
       expect(body.useSubagents).toBe(false);
     });
 
-    it("should default useSubagents to true", async () => {
+    it("should default useSubagents to AGENT_USE_SUBAGENTS env value", async () => {
+      const { getEnv } = await import("@aif/shared");
+      const envDefault = getEnv().AGENT_USE_SUBAGENTS;
+
       const res = await app.request("/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -197,7 +210,7 @@ describe("tasks API", () => {
 
       expect(res.status).toBe(201);
       const body = await res.json();
-      expect(body.useSubagents).toBe(true);
+      expect(body.useSubagents).toBe(envDefault);
     });
 
     it("should create a fix task when isFix=true", async () => {
@@ -311,6 +324,48 @@ describe("tasks API", () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.useSubagents).toBe(false);
+    });
+
+    it("should update autoMode via PUT", async () => {
+      const db = testDb.current;
+      db.insert(tasks)
+        .values({ id: "upd-auto", projectId: "test-project", title: "Auto task" })
+        .run();
+
+      const res = await app.request("/tasks/upd-auto", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ autoMode: false }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.autoMode).toBe(false);
+    });
+
+    it("should update planner settings via PUT", async () => {
+      const db = testDb.current;
+      db.insert(tasks)
+        .values({ id: "upd-planner", projectId: "test-project", title: "Planner task" })
+        .run();
+
+      const res = await app.request("/tasks/upd-planner", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plannerMode: "fast",
+          planPath: ".ai-factory/custom.md",
+          planDocs: true,
+          planTests: true,
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.plannerMode).toBe("fast");
+      expect(body.planPath).toBe(".ai-factory/custom.md");
+      expect(body.planDocs).toBe(true);
+      expect(body.planTests).toBe(true);
     });
 
     it("should handle attachments update via PUT", async () => {
@@ -1431,6 +1486,16 @@ describe("tasks API", () => {
       expect(res.headers.get("Content-Disposition")).toBe('attachment; filename="notes.md"');
       const body = await res.arrayBuffer();
       expect(Buffer.from(body).toString()).toBe("comment file data");
+    });
+  });
+
+  describe("GET /settings", () => {
+    it("should return useSubagents from env", async () => {
+      const settingsApp = createAppWithSettings();
+      const res = await settingsApp.request("/settings");
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(typeof body.useSubagents).toBe("boolean");
     });
   });
 });

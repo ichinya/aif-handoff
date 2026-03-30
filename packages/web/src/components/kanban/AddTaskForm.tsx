@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Plus, X, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useCreateTask } from "@/hooks/useTasks";
+import { api } from "@/lib/api";
 
 interface Props {
   projectId: string;
@@ -21,8 +22,21 @@ export function AddTaskForm({ projectId }: Props) {
   const [planDocs, setPlanDocs] = useState(false);
   const [planTests, setPlanTests] = useState(false);
   const [skipReview, setSkipReview] = useState(false);
+  const [useSubagentsDefault, setUseSubagentsDefault] = useState(true);
   const [useSubagents, setUseSubagents] = useState(true);
   const createTask = useCreateTask();
+
+  useEffect(() => {
+    api
+      .getSettings()
+      .then((s) => {
+        setUseSubagentsDefault(s.useSubagents);
+        setUseSubagents(s.useSubagents);
+      })
+      .catch(() => {
+        // keep default true on failure
+      });
+  }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -55,7 +69,7 @@ export function AddTaskForm({ projectId }: Props) {
           setPlanDocs(false);
           setPlanTests(false);
           setSkipReview(false);
-          setUseSubagents(true);
+          setUseSubagents(useSubagentsDefault);
           setIsOpen(false);
         },
         onError: (error) => {
@@ -267,7 +281,7 @@ export function AddTaskForm({ projectId }: Props) {
             setPlanDocs(false);
             setPlanTests(false);
             setSkipReview(false);
-            setUseSubagents(true);
+            setUseSubagents(useSubagentsDefault);
           }}
         >
           <X className="h-4 w-4" />

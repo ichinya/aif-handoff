@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
-import { logger } from "@aif/shared";
+import { logger, getEnv } from "@aif/shared";
 import { listProjects } from "@aif/data";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -94,6 +94,12 @@ app.get("/agent/readiness", (c) => {
       : "Claude authentication not found. Set ANTHROPIC_API_KEY in .env or sign in via Claude Code profile (~/.claude).",
     checkedAt: new Date().toISOString(),
   });
+});
+
+// Settings (expose env defaults to frontend)
+app.get("/settings", (c) => {
+  const env = getEnv();
+  return c.json({ useSubagents: env.AGENT_USE_SUBAGENTS });
 });
 
 // Routes
