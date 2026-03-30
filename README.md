@@ -2,9 +2,9 @@
 
 # AIF Handoff
 
-> This project was built using [AI Factory](https://github.com/lee-to/ai-factory) — an open-source framework for AI-driven development.
-
 > Autonomous Kanban board where AI agents plan, implement, and review your tasks — fully hands-off.
+
+> This project was built using [AI Factory](https://github.com/lee-to/ai-factory) — an open-source framework for AI-driven development.
 
 Built on top of [AI Factory](https://github.com/lee-to/ai-factory) workflow and powered by [Claude Agent SDK](https://docs.anthropic.com/en/docs/agents/claude-agent-sdk) subagents. Tasks flow through stages automatically: **Backlog → Planning → Plan Ready → Implementing → Review → Done** — each stage orchestrated by specialized AI subagents following the AIF methodology. In auto mode, review feedback can also trigger an automatic rework loop: **Review → request_changes → Implementing**.
 
