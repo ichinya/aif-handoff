@@ -23,7 +23,7 @@ const { injectWebSocket } = setupWebSocket(app);
 app.use(
   "*",
   cors({
-    origin: process.env.CORS_ORIGIN || "http://localhost:5173",
+    origin: process.env.CORS_ORIGIN || "http://localhost:5180",
   }),
 );
 app.use("*", requestLogger);
@@ -99,7 +99,10 @@ app.get("/agent/readiness", (c) => {
 // Settings (expose env defaults to frontend)
 app.get("/settings", (c) => {
   const env = getEnv();
-  return c.json({ useSubagents: env.AGENT_USE_SUBAGENTS });
+  return c.json({
+    useSubagents: env.AGENT_USE_SUBAGENTS,
+    maxReviewIterations: env.AGENT_MAX_REVIEW_ITERATIONS,
+  });
 });
 
 // Routes
@@ -107,7 +110,7 @@ app.route("/projects", projectsRouter);
 app.route("/tasks", tasksRouter);
 
 // Initialize DB and start server
-const port = Number(process.env.PORT) || 3001;
+const port = Number(process.env.PORT) || 3009;
 
 // Ensure data layer / DB is ready
 listProjects();

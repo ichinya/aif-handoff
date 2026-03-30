@@ -56,7 +56,10 @@ function createAppWithSettings() {
   app.get("/settings", async (c) => {
     const { getEnv } = await import("@aif/shared");
     const env = getEnv();
-    return c.json({ useSubagents: env.AGENT_USE_SUBAGENTS });
+    return c.json({
+      useSubagents: env.AGENT_USE_SUBAGENTS,
+      maxReviewIterations: env.AGENT_MAX_REVIEW_ITERATIONS,
+    });
   });
   return app;
 }
@@ -213,6 +216,41 @@ describe("tasks API", () => {
       expect(body.useSubagents).toBe(envDefault);
     });
 
+    it("should create a task with explicit maxReviewIterations", async () => {
+      const res = await app.request("/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "Task with max iterations",
+          projectId: "test-project",
+          maxReviewIterations: 5,
+        }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.maxReviewIterations).toBe(5);
+      expect(body.reviewIterationCount).toBe(0);
+    });
+
+    it("should default maxReviewIterations to AGENT_MAX_REVIEW_ITERATIONS env value", async () => {
+      const { getEnv } = await import("@aif/shared");
+      const envDefault = getEnv().AGENT_MAX_REVIEW_ITERATIONS;
+
+      const res = await app.request("/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "Task with default max iterations",
+          projectId: "test-project",
+        }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.maxReviewIterations).toBe(envDefault);
+    });
+
     it("should create a fix task when isFix=true", async () => {
       const res = await app.request("/tasks", {
         method: "POST",
@@ -282,6 +320,23 @@ describe("tasks API", () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.title).toBe("Updated");
+    });
+
+    it("should update maxReviewIterations", async () => {
+      const db = testDb.current;
+      db.insert(tasks)
+        .values({ id: "upd-mri", projectId: "test-project", title: "Iter task" })
+        .run();
+
+      const res = await app.request("/tasks/upd-mri", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ maxReviewIterations: 10 }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.maxReviewIterations).toBe(10);
     });
 
     it("should return 404 for non-existent task", async () => {

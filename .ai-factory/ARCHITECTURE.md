@@ -171,7 +171,7 @@ export async function runPlanner(taskId: string, description: string) {
 
 ```typescript
 // packages/web/src/lib/api.ts
-const API_BASE = "http://localhost:3001";
+const API_BASE = "http://localhost:3009";
 
 export async function fetchTasks(projectId: string) {
   const res = await fetch(`${API_BASE}/api/tasks?projectId=${projectId}`);

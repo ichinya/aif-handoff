@@ -11,7 +11,7 @@ import { evaluateReviewCommentsForAutoMode } from "./reviewGate.js";
 
 const log = logger("auto-review-handler");
 
-export type ReviewGateOutcome = "accepted" | "rework_requested";
+export type ReviewGateOutcome = "accepted" | "rework_requested" | "max_iterations_reached";
 
 interface AutoReviewInput {
   taskId: string;
@@ -50,10 +50,50 @@ export async function handleAutoReviewGate(
       .map((line) => line.trim())
       .filter((line) => line.startsWith("- ")).length;
 
+    const currentIteration = (refreshedTask.reviewIterationCount ?? 0) + 1;
+    const maxIterations = refreshedTask.maxReviewIterations ?? 3;
+
+    if (currentIteration >= maxIterations) {
+      createTaskComment({
+        taskId: input.taskId,
+        author: "agent",
+        message: [
+          "## Auto Review Gate Summary",
+          `- Outcome: max_iterations_reached (${currentIteration}/${maxIterations})`,
+          `- Unresolved fixes: ${requestedFixesCount}`,
+          "",
+          "Maximum review iterations reached. Moving task to Done without resolving all review comments.",
+          "",
+          "## Unresolved Fixes",
+          reviewGate.fixes,
+        ].join("\n"),
+        attachments: [],
+      });
+
+      logActivity(
+        input.taskId,
+        "Agent",
+        `coordinator auto review gate: max iterations reached (${currentIteration}/${maxIterations}), moving to done with unresolved fixes`,
+      );
+
+      log.warn(
+        {
+          taskId: input.taskId,
+          iteration: currentIteration,
+          maxIterations,
+          fixesCount: requestedFixesCount,
+        },
+        "Max review iterations reached, moving to done",
+      );
+
+      return "max_iterations_reached";
+    }
+
     const reviewSummary = [
       "## Auto Review Gate Summary",
       "- Outcome: request_changes",
       `- Required fixes: ${requestedFixesCount}`,
+      `- Review iteration: ${currentIteration}/${maxIterations}`,
       "",
       "## Required Fixes",
       reviewGate.fixes,
@@ -69,11 +109,16 @@ export async function handleAutoReviewGate(
     logActivity(
       input.taskId,
       "Agent",
-      `coordinator auto review gate requested changes (${requestedFixesCount} items), returning to implementing`,
+      `coordinator auto review gate requested changes (${requestedFixesCount} items, iteration ${currentIteration}/${maxIterations}), returning to implementing`,
     );
 
     log.info(
-      { taskId: input.taskId, fixesCount: requestedFixesCount },
+      {
+        taskId: input.taskId,
+        fixesCount: requestedFixesCount,
+        iteration: currentIteration,
+        maxIterations,
+      },
       "Auto review gate requested changes, returning to implementing",
     );
 

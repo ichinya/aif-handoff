@@ -9,7 +9,7 @@ const ACTIVITY_LOG_MODES = ["sync", "batch"] as const;
 
 const envSchema = z.object({
   ANTHROPIC_API_KEY: z.string().optional(),
-  PORT: z.coerce.number().default(3001),
+  PORT: z.coerce.number().default(3009),
   POLL_INTERVAL_MS: z.coerce.number().default(30000),
   AGENT_STAGE_STALE_TIMEOUT_MS: z.coerce.number().default(20 * 60 * 1000),
   AGENT_STAGE_STALE_MAX_RETRY: z.coerce.number().default(3),
@@ -18,7 +18,7 @@ const envSchema = z.object({
   AGENT_QUERY_START_RETRY_DELAY_MS: z.coerce.number().default(1000),
   DATABASE_URL: z.string().default("./data/aif.sqlite"),
   CORS_ORIGIN: z.string().default("*"),
-  API_BASE_URL: z.string().default("http://localhost:3001"),
+  API_BASE_URL: z.string().default("http://localhost:3009"),
   AGENT_QUERY_AUDIT_ENABLED: z
     .preprocess((value) => {
       if (typeof value === "string") {
@@ -67,6 +67,7 @@ const envSchema = z.object({
       return value;
     }, z.boolean())
     .default(false),
+  AGENT_MAX_REVIEW_ITERATIONS: z.coerce.number().min(1).default(3),
   AGENT_USE_SUBAGENTS: z
     .preprocess((value) => {
       if (typeof value === "string") {

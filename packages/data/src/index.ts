@@ -48,6 +48,8 @@ export type TaskFieldsUpdate = {
   roadmapAlias?: string | null;
   tags?: string[];
   reworkRequested?: boolean;
+  reviewIterationCount?: number;
+  maxReviewIterations?: number;
   lastHeartbeatAt?: string | null;
   position?: number;
 };
@@ -114,6 +116,7 @@ export function createTask(input: {
   planTests?: boolean;
   skipReview?: boolean;
   useSubagents?: boolean;
+  maxReviewIterations?: number;
   roadmapAlias?: string;
   tags?: string[];
 }): TaskRow | undefined {
@@ -137,6 +140,7 @@ export function createTask(input: {
       planTests: input.planTests,
       skipReview: input.skipReview,
       useSubagents: input.useSubagents,
+      maxReviewIterations: input.maxReviewIterations,
       roadmapAlias: input.roadmapAlias ?? null,
       tags: JSON.stringify(input.tags ?? []),
       reworkRequested: false,

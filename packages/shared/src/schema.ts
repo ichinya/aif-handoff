@@ -57,6 +57,8 @@ export const tasks = sqliteTable("tasks", {
   roadmapAlias: text("roadmap_alias"),
   tags: text("tags").notNull().default("[]"),
   reworkRequested: integer("rework_requested", { mode: "boolean" }).notNull().default(false),
+  reviewIterationCount: integer("review_iteration_count").notNull().default(0),
+  maxReviewIterations: integer("max_review_iterations").notNull().default(3),
   lastHeartbeatAt: text("last_heartbeat_at"),
   createdAt: text("created_at")
     .notNull()

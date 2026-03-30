@@ -33,6 +33,12 @@ export const createTaskSchema = z.object({
   planTests: z.boolean().default(false),
   skipReview: z.boolean().default(false),
   useSubagents: z.boolean().default(getEnv().AGENT_USE_SUBAGENTS),
+  maxReviewIterations: z
+    .number()
+    .int()
+    .min(1)
+    .max(50)
+    .default(getEnv().AGENT_MAX_REVIEW_ITERATIONS),
   roadmapAlias: z.string().max(200).optional(),
   tags: z.array(z.string().max(100)).max(50).default([]),
 });
@@ -50,6 +56,7 @@ export const updateTaskSchema = z.object({
   planTests: z.boolean().optional(),
   skipReview: z.boolean().optional(),
   useSubagents: z.boolean().optional(),
+  maxReviewIterations: z.number().int().min(1).max(50).optional(),
   plan: z.string().nullable().optional(),
   implementationLog: z.string().nullable().optional(),
   reviewComments: z.string().nullable().optional(),

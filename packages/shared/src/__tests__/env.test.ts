@@ -9,7 +9,7 @@ describe("env validation", () => {
   it("should pass with valid config", () => {
     const result = validateEnv({
       ANTHROPIC_API_KEY: "sk-ant-test-key",
-      PORT: "3001",
+      PORT: "3009",
       POLL_INTERVAL_MS: "30000",
       AGENT_QUERY_START_TIMEOUT_MS: "20000",
       AGENT_QUERY_START_RETRY_DELAY_MS: "250",
@@ -19,7 +19,7 @@ describe("env validation", () => {
     });
 
     expect(result.ANTHROPIC_API_KEY).toBe("sk-ant-test-key");
-    expect(result.PORT).toBe(3001);
+    expect(result.PORT).toBe(3009);
     expect(result.POLL_INTERVAL_MS).toBe(30000);
     expect(result.AGENT_QUERY_START_TIMEOUT_MS).toBe(20000);
     expect(result.AGENT_QUERY_START_RETRY_DELAY_MS).toBe(250);
@@ -32,7 +32,7 @@ describe("env validation", () => {
     const result = validateEnv({});
 
     expect(result.ANTHROPIC_API_KEY).toBeUndefined();
-    expect(result.PORT).toBe(3001);
+    expect(result.PORT).toBe(3009);
     expect(result.POLL_INTERVAL_MS).toBe(30000);
     expect(result.AGENT_STAGE_STALE_TIMEOUT_MS).toBe(20 * 60 * 1000);
     expect(result.AGENT_STAGE_STALE_MAX_RETRY).toBe(3);
@@ -47,6 +47,7 @@ describe("env validation", () => {
     expect(result.ACTIVITY_LOG_BATCH_MAX_AGE_MS).toBe(5000);
     expect(result.ACTIVITY_LOG_QUEUE_LIMIT).toBe(500);
     expect(result.AGENT_WAKE_ENABLED).toBe(true);
+    expect(result.AGENT_MAX_REVIEW_ITERATIONS).toBe(3);
     expect(result.AGENT_USE_SUBAGENTS).toBe(true);
   });
 

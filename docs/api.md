@@ -2,7 +2,7 @@
 
 # API Reference
 
-Base URL: `http://localhost:3001`
+Base URL: `http://localhost:3009`
 
 All endpoints return JSON. Request bodies use `application/json`.
 
@@ -423,7 +423,7 @@ POST /tasks/:id/comments
 
 ## WebSocket
 
-Connect to `ws://localhost:3001/ws` for real-time updates.
+Connect to `ws://localhost:3009/ws` for real-time updates.
 
 ### Events
 

@@ -47,7 +47,7 @@ async function request<T>(
 }
 
 export const api = {
-  getSettings(): Promise<{ useSubagents: boolean }> {
+  getSettings(): Promise<{ useSubagents: boolean; maxReviewIterations: number }> {
     console.debug("[api] GET /settings");
     return request("/settings");
   },

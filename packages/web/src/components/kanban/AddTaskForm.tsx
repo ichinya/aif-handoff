@@ -24,6 +24,8 @@ export function AddTaskForm({ projectId }: Props) {
   const [skipReview, setSkipReview] = useState(false);
   const [useSubagentsDefault, setUseSubagentsDefault] = useState(true);
   const [useSubagents, setUseSubagents] = useState(true);
+  const [maxReviewIterationsDefault, setMaxReviewIterationsDefault] = useState(3);
+  const [maxReviewIterations, setMaxReviewIterations] = useState(3);
   const createTask = useCreateTask();
 
   useEffect(() => {
@@ -32,9 +34,11 @@ export function AddTaskForm({ projectId }: Props) {
       .then((s) => {
         setUseSubagentsDefault(s.useSubagents);
         setUseSubagents(s.useSubagents);
+        setMaxReviewIterationsDefault(s.maxReviewIterations);
+        setMaxReviewIterations(s.maxReviewIterations);
       })
       .catch(() => {
-        // keep default true on failure
+        // keep defaults on failure
       });
   }, []);
 
@@ -56,6 +60,7 @@ export function AddTaskForm({ projectId }: Props) {
         planTests,
         skipReview,
         useSubagents,
+        maxReviewIterations,
       },
       {
         onSuccess: () => {
@@ -70,6 +75,7 @@ export function AddTaskForm({ projectId }: Props) {
           setPlanTests(false);
           setSkipReview(false);
           setUseSubagents(useSubagentsDefault);
+          setMaxReviewIterations(maxReviewIterationsDefault);
           setIsOpen(false);
         },
         onError: (error) => {
@@ -282,6 +288,7 @@ export function AddTaskForm({ projectId }: Props) {
             setPlanTests(false);
             setSkipReview(false);
             setUseSubagents(useSubagentsDefault);
+            setMaxReviewIterations(maxReviewIterationsDefault);
           }}
         >
           <X className="h-4 w-4" />

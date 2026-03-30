@@ -18,6 +18,9 @@ Built on top of [AI Factory](https://github.com/lee-to/ai-factory) workflow and 
 - **Self-healing pipeline** — heartbeat + stale-stage watchdog auto-recovers stuck agent stages
 - **Human-in-the-loop** — approve plans, request changes, or let auto-mode handle everything
 
+![ui-light](https://github.com/lee-to/aif-handoff/blob/main/art/ui-light.png)
+![ui-dark](https://github.com/lee-to/aif-handoff/blob/main/art/ui-dark.png)
+
 ## Quick Start
 
 ```bash
@@ -32,8 +35,8 @@ This starts three services in parallel via Turborepo:
 
 | Service   | URL                     | Description                                  |
 | --------- | ----------------------- | -------------------------------------------- |
-| **API**   | `http://localhost:3001` | Hono REST + WebSocket server                 |
-| **Web**   | `http://localhost:5173` | React Kanban UI                              |
+| **API**   | `http://localhost:3009` | Hono REST + WebSocket server                 |
+| **Web**   | `http://localhost:5180` | React Kanban UI                              |
 | **Agent** | _(background)_          | Event-driven + polling, dispatches subagents |
 
 The agent coordinator reacts to task events via WebSocket in near real-time and falls back to 30-second polling. Activity logging can be switched to batch mode (`ACTIVITY_LOG_MODE=batch`) to reduce DB write amplification. See [Configuration](docs/configuration.md) for all tuning options.
@@ -50,8 +53,8 @@ To use a separate API key, copy `.env.example` to `.env` and set `ANTHROPIC_API_
 packages/
 ├── shared/    # Types, schema, state machine, env, constants, logger
 ├── data/      # Centralized DB access layer (@aif/data)
-├── api/       # Hono REST + WebSocket server (port 3001)
-├── web/       # React + Vite + TailwindCSS — Kanban UI (port 5173)
+├── api/       # Hono REST + WebSocket server (port 3009)
+├── web/       # React + Vite + TailwindCSS — Kanban UI (port 5180)
 └── agent/     # Coordinator (node-cron) + Claude Agent SDK subagents
 ```
 
@@ -74,6 +77,15 @@ The coordinator polls every 30 seconds and delegates to `.claude/agents/` defini
 - After max stale retries, task is quarantined for manual intervention.
 
 All agents are loaded via `settingSources: ["project"]` from `.claude/agents/*.md` — the same agent definitions used by [AI Factory](https://github.com/lee-to/ai-factory).
+
+### Execution Modes
+
+AIF Handoff supports two execution modes, configurable globally via `AGENT_USE_SUBAGENTS` or per-task in the UI:
+
+| Mode          | `AGENT_USE_SUBAGENTS` | How it works                                                                                                                                                                                                  | Trade-off                                                                                                                                                            |
+| ------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Subagents** | `true` (default)      | Each stage runs through specialized coordinator agents (`plan-coordinator`, `implement-coordinator`, `review-sidecar` + `security-sidecar`) that iteratively refine the result until quality criteria are met | Higher quality — plans are polished in multiple rounds, implementation gets parallel workers with quality sidecars, reviews are thorough. Takes more time and tokens |
+| **Skills**    | `false`               | Each stage runs as a single-pass AIF skill (`/aif-plan`, `/aif-implement`, `/aif-review`, `/aif-security-checklist`)                                                                                          | Faster execution with lower token usage, but no iterative refinement — good enough for simpler tasks or quick prototyping                                            |
 
 ## Tech Stack
 

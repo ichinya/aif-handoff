@@ -30,6 +30,8 @@ function makeTask(overrides: Partial<Task>): Task {
     retryAfter: null,
     retryCount: 0,
     reworkRequested: false,
+    reviewIterationCount: 0,
+    maxReviewIterations: 3,
     lastHeartbeatAt: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",

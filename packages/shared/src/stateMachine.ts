@@ -2,7 +2,12 @@ import type { Task, TaskEvent, TaskStatus, UpdateTaskInput } from "./types.js";
 
 type TransitionPatch = Pick<
   UpdateTaskInput,
-  "blockedReason" | "blockedFromStatus" | "retryAfter" | "retryCount" | "reworkRequested"
+  | "blockedReason"
+  | "blockedFromStatus"
+  | "retryAfter"
+  | "retryCount"
+  | "reworkRequested"
+  | "reviewIterationCount"
 > & { status: TaskStatus };
 
 type TransitionResult = { ok: true; patch: TransitionPatch } | { ok: false; error: string };
@@ -14,6 +19,7 @@ export const CLEAN_STATE_RESET = {
   retryAfter: null,
   retryCount: 0,
   reworkRequested: false,
+  reviewIterationCount: 0,
 } as const satisfies Omit<TransitionPatch, "status">;
 
 export function applyHumanTaskEvent(

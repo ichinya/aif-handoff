@@ -18,6 +18,8 @@ const mockTask: Task = {
   skipReview: false,
   useSubagents: true,
   reworkRequested: false,
+  reviewIterationCount: 0,
+  maxReviewIterations: 3,
   lastHeartbeatAt: null,
   roadmapAlias: null,
   tags: [],

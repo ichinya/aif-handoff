@@ -30,7 +30,7 @@ const TASK_ID = "test-task-1";
 function makeEnv(overrides: Record<string, unknown> = {}) {
   return {
     ANTHROPIC_API_KEY: undefined,
-    PORT: 3001,
+    PORT: 3009,
     POLL_INTERVAL_MS: 30000,
     AGENT_STAGE_STALE_TIMEOUT_MS: 1200000,
     AGENT_STAGE_STALE_MAX_RETRY: 3,
@@ -39,7 +39,7 @@ function makeEnv(overrides: Record<string, unknown> = {}) {
     AGENT_QUERY_START_RETRY_DELAY_MS: 1000,
     DATABASE_URL: "./data/aif.sqlite",
     CORS_ORIGIN: "*",
-    API_BASE_URL: "http://localhost:3001",
+    API_BASE_URL: "http://localhost:3009",
     AGENT_QUERY_AUDIT_ENABLED: true,
     LOG_LEVEL: "debug" as const,
     ACTIVITY_LOG_MODE: "sync" as const,
@@ -48,6 +48,7 @@ function makeEnv(overrides: Record<string, unknown> = {}) {
     ACTIVITY_LOG_QUEUE_LIMIT: 500,
     AGENT_WAKE_ENABLED: true,
     AGENT_BYPASS_PERMISSIONS: false,
+    AGENT_MAX_REVIEW_ITERATIONS: 3,
     AGENT_USE_SUBAGENTS: true,
     ...overrides,
   };

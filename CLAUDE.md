@@ -33,14 +33,14 @@ packages/
 ├── data/                # @aif/data — centralized data-access layer
 │   └── src/
 │       └── index.ts         # Repository-style DB operations for API/Agent
-├── api/                 # @aif/api — Hono REST + WebSocket server (port 3001)
+├── api/                 # @aif/api — Hono REST + WebSocket server (port 3009)
 │   └── src/
 │       ├── index.ts         # Server entry point
 │       ├── routes/          # tasks.ts, projects.ts
 │       ├── middleware/      # logger.ts
 │       ├── schemas.ts       # Zod request validation
 │       └── ws.ts            # WebSocket handler
-├── web/                 # @aif/web — React Kanban UI (port 5173)
+├── web/                 # @aif/web — React Kanban UI (port 5180)
 │   └── src/
 │       ├── App.tsx          # Root component
 │       ├── components/
@@ -69,8 +69,8 @@ data/                    # SQLite database files (gitignored)
 
 | File                                  | Purpose                            |
 | ------------------------------------- | ---------------------------------- |
-| `packages/api/src/index.ts`           | API server entry (Hono, port 3001) |
-| `packages/web/src/main.tsx`           | Web app entry (React, port 5173)   |
+| `packages/api/src/index.ts`           | API server entry (Hono, port 3009) |
+| `packages/web/src/main.tsx`           | Web app entry (React, port 5180)   |
 | `packages/agent/src/index.ts`         | Agent coordinator entry            |
 | `packages/data/src/index.ts`          | Centralized data-access API        |
 | `packages/shared/src/schema.ts`       | Database schema (drizzle-orm)      |

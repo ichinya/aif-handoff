@@ -45,7 +45,8 @@ cp .env.example .env
 | Variable                       | Default             | Description                                                                                   |
 | ------------------------------ | ------------------- | --------------------------------------------------------------------------------------------- |
 | `ANTHROPIC_API_KEY`            | _(optional)_        | API key. Agent SDK uses `~/.claude/` auth by default                                          |
-| `PORT`                         | `3001`              | API server port                                                                               |
+| `PORT`                         | `3009`              | API server port                                                                               |
+| `WEB_PORT`                     | `5180`              | Web UI dev server port                                                                        |
 | `POLL_INTERVAL_MS`             | `30000`             | Agent coordinator polling interval (ms)                                                       |
 | `AGENT_STAGE_STALE_TIMEOUT_MS` | `1200000`           | Stale-stage watchdog timeout (ms) before auto-recovery                                        |
 | `AGENT_STAGE_STALE_MAX_RETRY`  | `3`                 | Max stale auto-recover attempts before quarantine in `blocked_external`                       |
@@ -72,13 +73,13 @@ This runs three processes in parallel via Turborepo:
 
 | Service   | URL                     | Description                                               |
 | --------- | ----------------------- | --------------------------------------------------------- |
-| **API**   | `http://localhost:3001` | REST + WebSocket server                                   |
-| **Web**   | `http://localhost:5173` | Kanban board UI                                           |
+| **API**   | `http://localhost:3009` | REST + WebSocket server                                   |
+| **Web**   | `http://localhost:5180` | Kanban board UI                                           |
 | **Agent** | _(background)_          | Polls every 30s + event-driven wake, dispatches subagents |
 
 ## Verify It Works
 
-1. Open `http://localhost:5173` — you should see the Kanban board
+1. Open `http://localhost:5180` — you should see the Kanban board
 2. Create a project (top-left selector)
 3. Add a task to the Backlog column
 4. If Claude auth is missing, the UI will show a warning banner with setup guidance
@@ -87,7 +88,7 @@ This runs three processes in parallel via Turborepo:
 Optional readiness check:
 
 ```bash
-curl -s http://localhost:3001/agent/readiness
+curl -s http://localhost:3009/agent/readiness
 ```
 
 ## Available Scripts

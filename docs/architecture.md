@@ -34,8 +34,8 @@ AIF Handoff is a Turborepo monorepo with five packages. The system automates tas
 | ----------------- | ------------- | ----------------------------------------------------------- |
 | `packages/shared` | `@aif/shared` | Types, schema, state machine, constants, env, logger        |
 | `packages/data`   | `@aif/data`   | Centralized DB access layer (all SQL/repository operations) |
-| `packages/api`    | `@aif/api`    | Hono REST + WebSocket server (port 3001)                    |
-| `packages/web`    | `@aif/web`    | React Kanban UI (port 5173)                                 |
+| `packages/api`    | `@aif/api`    | Hono REST + WebSocket server (port 3009)                    |
+| `packages/web`    | `@aif/web`    | React Kanban UI (port 5180)                                 |
 | `packages/agent`  | `@aif/agent`  | Coordinator + Claude Agent SDK subagents                    |
 
 ### Dependency Graph

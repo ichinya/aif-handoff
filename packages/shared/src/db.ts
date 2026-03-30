@@ -141,6 +141,18 @@ function ensureTables(sqlite: Database.Database): void {
     "review_sidecar_max_budget_usd",
     "review_sidecar_max_budget_usd REAL",
   );
+  ensureColumn(
+    sqlite,
+    "tasks",
+    "review_iteration_count",
+    "review_iteration_count INTEGER NOT NULL DEFAULT 0",
+  );
+  ensureColumn(
+    sqlite,
+    "tasks",
+    "max_review_iterations",
+    "max_review_iterations INTEGER NOT NULL DEFAULT 3",
+  );
   ensureColumn(sqlite, "task_comments", "author", "author TEXT NOT NULL DEFAULT 'human'");
   ensureColumn(sqlite, "task_comments", "attachments", "attachments TEXT NOT NULL DEFAULT '[]'");
 

@@ -74,6 +74,8 @@ export interface Task {
   roadmapAlias: string | null;
   tags: string[];
   reworkRequested: boolean;
+  reviewIterationCount: number;
+  maxReviewIterations: number;
   lastHeartbeatAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -108,6 +110,7 @@ export interface CreateTaskInput {
   planTests?: boolean;
   skipReview?: boolean;
   useSubagents?: boolean;
+  maxReviewIterations?: number;
   roadmapAlias?: string;
   tags?: string[];
 }
@@ -141,6 +144,8 @@ export interface UpdateTaskInput {
   roadmapAlias?: string | null;
   tags?: string[];
   reworkRequested?: boolean;
+  reviewIterationCount?: number;
+  maxReviewIterations?: number;
   lastHeartbeatAt?: string | null;
 }
 

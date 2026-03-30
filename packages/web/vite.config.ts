@@ -3,6 +3,10 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 
+const WEB_PORT = Number(process.env.WEB_PORT) || 5180;
+const API_PORT = Number(process.env.PORT) || 3009;
+const apiTarget = `http://localhost:${API_PORT}`;
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
@@ -11,15 +15,15 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    port: WEB_PORT,
     proxy: {
-      "/projects": "http://localhost:3001",
-      "/tasks": "http://localhost:3001",
-      "/agent": "http://localhost:3001",
-      "/settings": "http://localhost:3001",
-      "/health": "http://localhost:3001",
+      "/projects": apiTarget,
+      "/tasks": apiTarget,
+      "/agent": apiTarget,
+      "/settings": apiTarget,
+      "/health": apiTarget,
       "/ws": {
-        target: "ws://localhost:3001",
+        target: `ws://localhost:${API_PORT}`,
         ws: true,
       },
     },

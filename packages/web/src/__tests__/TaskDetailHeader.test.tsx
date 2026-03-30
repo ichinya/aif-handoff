@@ -18,6 +18,8 @@ const baseTask: Task = {
   skipReview: false,
   useSubagents: true,
   reworkRequested: false,
+  reviewIterationCount: 0,
+  maxReviewIterations: 3,
   lastHeartbeatAt: null,
   roadmapAlias: "RM-1",
   tags: ["backend", "rm:ignore"],

@@ -166,14 +166,31 @@ export async function pollAndProcess(): Promise<void> {
           projectRoot: project.rootPath,
         });
 
+        if (outcome === "max_iterations_reached") {
+          updateTaskStatus(task.id, "done", CLEAN_STATE_RESET);
+
+          log.info(
+            { taskId: task.id, from: stage.inProgress, to: "done" },
+            "Auto review gate: max iterations reached, moving to done",
+          );
+          continue;
+        }
+
         if (outcome === "rework_requested") {
+          const currentCount = task.reviewIterationCount ?? 0;
           updateTaskStatus(task.id, "implementing", {
             ...CLEAN_STATE_RESET,
             reworkRequested: true,
+            reviewIterationCount: currentCount + 1,
           });
 
           log.info(
-            { taskId: task.id, from: stage.inProgress, to: "implementing" },
+            {
+              taskId: task.id,
+              from: stage.inProgress,
+              to: "implementing",
+              reviewIteration: currentCount + 1,
+            },
             "Auto review gate requested changes, restarting implementing stage",
           );
           continue;

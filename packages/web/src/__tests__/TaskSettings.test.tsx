@@ -17,6 +17,8 @@ const mockTask: Task = {
   skipReview: false,
   useSubagents: true,
   reworkRequested: false,
+  reviewIterationCount: 0,
+  maxReviewIterations: 3,
   lastHeartbeatAt: null,
   roadmapAlias: null,
   tags: [],
@@ -145,6 +147,32 @@ describe("TaskSettings", () => {
     // Should show collapsed button again
     expect(screen.getByText("Settings")).toBeDefined();
     expect(screen.queryByText("Auto mode")).toBeNull();
+  });
+
+  it("shows max review iterations input when autoMode is on", () => {
+    render(<TaskSettings task={mockTask} onSave={onSave} />);
+    fireEvent.click(screen.getByText("Settings"));
+
+    expect(screen.getByText("Max review iterations")).toBeDefined();
+  });
+
+  it("hides max review iterations input when autoMode is off", () => {
+    const noAutoTask = { ...mockTask, autoMode: false };
+    render(<TaskSettings task={noAutoTask} onSave={onSave} />);
+    fireEvent.click(screen.getByText("Settings"));
+
+    expect(screen.queryByText("Max review iterations")).toBeNull();
+  });
+
+  it("saves maxReviewIterations change", () => {
+    render(<TaskSettings task={mockTask} onSave={onSave} />);
+    fireEvent.click(screen.getByText("Settings"));
+
+    const input = screen.getByDisplayValue("3");
+    fireEvent.change(input, { target: { value: "7" } });
+    fireEvent.click(screen.getByText("Save"));
+
+    expect(onSave).toHaveBeenCalledWith({ maxReviewIterations: 7 });
   });
 
   it("does not include planner fields in save for fix tasks", () => {

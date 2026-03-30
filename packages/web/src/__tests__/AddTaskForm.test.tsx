@@ -5,7 +5,7 @@ const mutateCreateTask = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   api: {
-    getSettings: vi.fn().mockResolvedValue({ useSubagents: true }),
+    getSettings: vi.fn().mockResolvedValue({ useSubagents: true, maxReviewIterations: 3 }),
   },
 }));
 

@@ -8,7 +8,7 @@ export async function notifyTaskBroadcast(
   taskId: string,
   type: BroadcastType = "task:updated",
 ): Promise<void> {
-  const baseUrl = process.env.API_BASE_URL || `http://localhost:${process.env.PORT || 3001}`;
+  const baseUrl = process.env.API_BASE_URL || `http://localhost:${process.env.PORT || 3009}`;
   const url = `${baseUrl}/tasks/${taskId}/broadcast`;
 
   try {

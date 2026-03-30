@@ -20,11 +20,13 @@ export function TaskSettings({ task, onSave }: Props) {
   const [planPath, setPlanPath] = useState(task.planPath);
   const [planDocs, setPlanDocs] = useState(task.planDocs);
   const [planTests, setPlanTests] = useState(task.planTests);
+  const [maxReviewIterations, setMaxReviewIterations] = useState(task.maxReviewIterations);
 
   const hasChanges =
     autoMode !== task.autoMode ||
     skipReview !== task.skipReview ||
     useSubagents !== task.useSubagents ||
+    maxReviewIterations !== task.maxReviewIterations ||
     plannerMode !== task.plannerMode ||
     planPath !== task.planPath ||
     planDocs !== task.planDocs ||
@@ -35,6 +37,8 @@ export function TaskSettings({ task, onSave }: Props) {
     if (autoMode !== task.autoMode) input.autoMode = autoMode;
     if (skipReview !== task.skipReview) input.skipReview = skipReview;
     if (useSubagents !== task.useSubagents) input.useSubagents = useSubagents;
+    if (maxReviewIterations !== task.maxReviewIterations)
+      input.maxReviewIterations = maxReviewIterations;
     if (!task.isFix) {
       if (plannerMode !== task.plannerMode) input.plannerMode = plannerMode;
       if (planPath !== task.planPath) input.planPath = planPath;
@@ -79,6 +83,7 @@ export function TaskSettings({ task, onSave }: Props) {
               setAutoMode(task.autoMode);
               setSkipReview(task.skipReview);
               setUseSubagents(task.useSubagents);
+              setMaxReviewIterations(task.maxReviewIterations);
               setPlannerMode(task.plannerMode as "full" | "fast");
               setPlanPath(task.planPath);
               setPlanDocs(task.planDocs);
@@ -102,6 +107,25 @@ export function TaskSettings({ task, onSave }: Props) {
           Run via custom subagents (plan-coordinator, implement-coordinator, sidecars).
         </Checkbox>
       </div>
+
+      {autoMode && (
+        <div className="space-y-1 border-t border-border/60 pt-2">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Max review iterations
+          </p>
+          <Input
+            type="number"
+            min={1}
+            max={50}
+            value={maxReviewIterations}
+            onChange={(e) => setMaxReviewIterations(Math.max(1, parseInt(e.target.value) || 1))}
+            className="h-7 w-20 text-xs"
+          />
+          <p className="text-[10px] text-muted-foreground">
+            Max review→implement cycles before auto-completing the task.
+          </p>
+        </div>
+      )}
 
       {!task.isFix && (
         <div className="space-y-2 border-t border-border/60 pt-2">
