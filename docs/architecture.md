@@ -119,6 +119,18 @@ Tasks have an `autoMode` flag. When `true`, the agent automatically transitions 
 
 Tasks also have a `skipReview` flag (default `false`). When `true`, the coordinator bypasses the review stage entirely — after successful implementation the task moves directly to `done`, skipping the `review-sidecar` and `security-sidecar` runs. This is useful for small changes or tasks where code review is unnecessary.
 
+### Pause / Resume
+
+Tasks have a `paused` flag (default `false`). When `true`, the coordinator skips the task in all selection queries:
+
+- `findCoordinatorTaskCandidate` — paused tasks are not picked up for any stage (planning, plan-checking, implementing, reviewing).
+- `listDueBlockedExternalTasks` — paused blocked tasks are not auto-released when their retry window elapses.
+- `listStaleInProgressTasks` — paused tasks are not treated as stale by the watchdog, so they won't be force-recovered to `blocked_external`.
+
+**Important:** pausing a task does **not** abort an already running agent session. If a Claude SDK query is in flight, it will finish. The pause takes effect on the **next** coordinator cycle — the task simply won't be picked up for the next stage transition.
+
+The Pause/Resume button is shown in the TaskDetail Actions bar for active processing stages (`planning`, `plan_ready`, `implementing`, `review`, `blocked_external`). It is hidden for `backlog`, `done`, and `verified` where the agent pipeline is not running.
+
 ## Roadmap Import
 
 The system supports bulk task creation from a project's `.ai-factory/ROADMAP.md` file via `POST /projects/:id/roadmap/import`.
