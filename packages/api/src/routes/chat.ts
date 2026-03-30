@@ -13,6 +13,19 @@ const PROJECT_SCOPE_SYSTEM_APPEND =
   "Do not inspect or modify files in the orchestrator monorepo or in parent/sibling directories " +
   "unless the user explicitly asks for that path. Avoid broad discovery outside the current project root.";
 
+const ALLOWED_CHAT_SKILLS = [
+  "aif-docs",
+  "aif-ci",
+  "aif-explore",
+  "aif-reference",
+  "aif-evolve",
+  "aif-build-automation",
+  "aif-dockerize",
+  "aif-grounded",
+  "aif",
+  "aif-rules",
+];
+
 const CHAT_ACTIONS_PROMPT = `
 You have special capabilities in this chat:
 
@@ -23,6 +36,9 @@ You have special capabilities in this chat:
 Include this block in your response along with a brief explanation of the task you're creating. The user will see a confirmation card and can approve it.
 
 2. TASK SUMMARY: When the user asks to summarize what was done on the current task (or any task you have context for), generate a concise summary covering: what was planned, what was implemented, review results, and current status.
+
+3. SKILLS: You can invoke the following skills via the Skill tool: ${ALLOWED_CHAT_SKILLS.join(", ")}.
+Do NOT invoke any other skills — only the ones listed above. If the user asks for a skill not in this list, explain that it is not available in the chat.
 `.trim();
 
 function buildContextAppend(projectName: string, task: Task | null): string {
@@ -131,12 +147,20 @@ chatRouter.post("/", zValidator("json", chatRequestSchema as any), async (c) => 
           append: buildContextAppend(project.name, currentTask),
         },
         ...(resumeSessionId ? { resume: resumeSessionId } : {}),
-        allowedTools: ["Read", "Glob", "Grep", "Bash", "Edit", "Write"],
+        allowedTools: ["Read", "Glob", "Grep", "Bash", "Edit", "Write", "Skill"],
         maxTurns: 20,
       },
     });
 
     let sessionId: string | undefined;
+
+    const sendToken = (text: string) => {
+      const tokenEvent: WsEvent = {
+        type: "chat:token",
+        payload: { conversationId: chatConversationId, token: text },
+      };
+      sendToClient(clientId, tokenEvent);
+    };
 
     for await (const msg of stream) {
       if (!msg || typeof msg !== "object" || !("type" in msg)) continue;
@@ -163,11 +187,7 @@ chatRouter.post("/", zValidator("json", chatRequestSchema as any), async (c) => 
           event.delta?.type === "text_delta" &&
           event.delta.text
         ) {
-          const tokenEvent: WsEvent = {
-            type: "chat:token",
-            payload: { conversationId: chatConversationId, token: event.delta.text },
-          };
-          sendToClient(clientId, tokenEvent);
+          sendToken(event.delta.text);
           log.debug(
             { conversationId: chatConversationId, tokenLength: event.delta.text.length },
             "Streamed chat token",
@@ -175,15 +195,54 @@ chatRouter.post("/", zValidator("json", chatRequestSchema as any), async (c) => 
         }
       }
 
-      // Handle result message
+      // Stream tool use summaries as visible text
+      if (typed.type === "tool_use_summary" && typeof typed.summary === "string") {
+        sendToken(`\n\n> ${typed.summary}\n\n`);
+        log.debug({ conversationId: chatConversationId }, "Streamed tool use summary");
+      }
+
+      // Handle result message — surface errors and permission denials
       if (typed.type === "result") {
         if (typed.subtype === "success") {
           log.info({ conversationId: chatConversationId }, "Chat request completed successfully");
+
+          // Surface permission denials
+          const denials = typed.permission_denials as
+            | Array<{ tool_name: string; tool_input?: Record<string, unknown> }>
+            | undefined;
+          if (denials?.length) {
+            const names = denials.map((d) => d.tool_name).join(", ");
+            sendToken(
+              `\n\n**Permission denied** for tool(s): ${names}. The operation was blocked by the current permission mode.\n`,
+            );
+          }
         } else {
           log.error(
             { conversationId: chatConversationId, subtype: typed.subtype },
             "Chat query ended with non-success",
           );
+
+          // Surface error details and permission denials to the user
+          const errors = typed.errors as string[] | undefined;
+          const denials = typed.permission_denials as Array<{ tool_name: string }> | undefined;
+          const parts: string[] = [];
+
+          if (typed.subtype === "error_max_turns") {
+            parts.push("**Reached max turns limit** — the agent stopped after 20 turns.");
+          } else if (typed.subtype === "error_max_budget_usd") {
+            parts.push("**Budget limit reached** — the agent exceeded the allowed cost.");
+          } else if (errors?.length) {
+            parts.push(`**Error:** ${errors.join("; ")}`);
+          } else {
+            parts.push(`**Error:** agent stopped unexpectedly (${String(typed.subtype)}).`);
+          }
+
+          if (denials?.length) {
+            const names = denials.map((d) => d.tool_name).join(", ");
+            parts.push(`**Permission denied** for: ${names}.`);
+          }
+
+          sendToken("\n\n" + parts.join("\n") + "\n");
         }
       }
     }

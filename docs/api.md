@@ -485,7 +485,9 @@ When `AGENT_BYPASS_PERMISSIONS=false`, the agent runs with `permissionMode: "acc
 
 ### Agent Capabilities
 
-The chat agent has access to: `Read`, `Glob`, `Grep`, `Bash`, `Edit`, `Write`. Max turns per request: 20. The agent is scoped to the project's root path and instructed not to access files outside it.
+The chat agent has access to: `Read`, `Glob`, `Grep`, `Bash`, `Edit`, `Write`, `Skill`. Max turns per request: 20. The agent is scoped to the project's root path and instructed not to access files outside it.
+
+**Allowed skills:** `aif-docs`, `aif-ci`, `aif-explore`, `aif-reference`, `aif-evolve`, `aif-build-automation`, `aif-dockerize`, `aif-grounded`, `aif`, `aif-rules`. Other skills are blocked by the system prompt.
 
 ### Task-Aware Context
 
@@ -512,6 +514,14 @@ The chat agent can emit structured actions embedded in responses. The client par
 ```
 
 The client extracts the JSON, renders a preview card with the task title and description, and shows a "Create Task" button. On confirmation, the task is created via `POST /tasks` in the current project.
+
+### Error and Tool Feedback
+
+The chat streams additional feedback beyond text tokens:
+
+- **Tool use summaries** — after a tool executes, its human-readable summary is streamed as a blockquote
+- **Permission denials** — if a tool is blocked by the permission mode, a `**Permission denied**` message is streamed with the tool name
+- **Agent errors** — max turns, budget limits, and execution errors are surfaced as `**Error:**` messages instead of silent failures
 
 ### Explore Mode
 
