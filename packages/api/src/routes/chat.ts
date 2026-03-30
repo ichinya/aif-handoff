@@ -1,11 +1,16 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { logger } from "@aif/shared";
+import { logger, env } from "@aif/shared";
 import { findProjectById } from "../repositories/projects.js";
 import { chatRequestSchema } from "../schemas.js";
 import { sendToClient } from "../ws.js";
 import type { WsEvent } from "@aif/shared";
+
+const PROJECT_SCOPE_SYSTEM_APPEND =
+  "Project scope rule: work strictly inside the current working directory (project root). " +
+  "Do not inspect or modify files in the orchestrator monorepo or in parent/sibling directories " +
+  "unless the user explicitly asks for that path. Avoid broad discovery outside the current project root.";
 
 const log = logger("chat-route");
 
@@ -71,9 +76,15 @@ chatRouter.post("/", zValidator("json", chatRequestSchema as any), async (c) => 
       prompt,
       options: {
         cwd: project.rootPath,
-        permissionMode: "acceptEdits",
-        settingSources: ["project"],
+        permissionMode: env.AGENT_BYPASS_PERMISSIONS ? "bypassPermissions" : "acceptEdits",
+        ...(env.AGENT_BYPASS_PERMISSIONS ? { allowDangerouslySkipPermissions: true } : {}),
+        settingSources: [],
         includePartialMessages: true,
+        systemPrompt: {
+          type: "preset",
+          preset: "claude_code",
+          append: PROJECT_SCOPE_SYSTEM_APPEND,
+        },
         ...(resumeSessionId ? { resume: resumeSessionId } : {}),
         allowedTools: ["Read", "Glob", "Grep", "Bash", "Edit", "Write"],
         maxTurns: 20,

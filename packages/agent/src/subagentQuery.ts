@@ -125,7 +125,7 @@ async function runQueryAttempt(
       cwd: projectRoot,
       env: process.env,
       pathToClaudeCodeExecutable: getClaudePath(),
-      settingSources: ["project"],
+      settingSources: [],
       permissionMode: bypassPermissions ? "bypassPermissions" : "acceptEdits",
       ...(bypassPermissions ? { allowDangerouslySkipPermissions: true } : {}),
       systemPrompt: {
@@ -209,7 +209,7 @@ export async function executeSubagentQuery(
     projectRoot,
     prompt,
     options: {
-      settingSources: ["project"],
+      settingSources: [],
       maxBudgetUsd,
       systemPrompt: {
         type: "preset",

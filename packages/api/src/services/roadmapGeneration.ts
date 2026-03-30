@@ -105,9 +105,8 @@ export async function generateRoadmapFile(
       prompt,
       options: {
         cwd: project.rootPath,
-        settingSources: ["project"],
+        settingSources: [],
         model: "sonnet",
-        maxThinkingTokens: 4096,
         systemPrompt: {
           type: "preset",
           preset: "claude_code",
@@ -235,9 +234,8 @@ export async function generateRoadmapTasks(
       prompt,
       options: {
         cwd: project.rootPath,
-        settingSources: ["project"],
+        settingSources: [],
         model: "haiku",
-        maxThinkingTokens: 1024,
         systemPrompt: {
           type: "preset",
           preset: "claude_code",

@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, type KeyboardEvent } from "react";
+import { useRef, useEffect, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Send, Trash2, Bot, User, Loader2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Markdown } from "@/components/ui/markdown";
@@ -102,7 +102,7 @@ export function ChatPanel({ isOpen, projectId, onClose }: ChatPanelProps) {
     setInput("");
   };
 
-  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+  const handleKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -115,7 +115,7 @@ export function ChatPanel({ isOpen, projectId, onClose }: ChatPanelProps) {
     <div
       ref={panelRef}
       className={cn(
-        "fixed bottom-0 left-0 z-[60] flex h-[calc(100vh-3.5rem)] w-[400px] flex-col",
+        "fixed bottom-0 left-0 z-[60] flex h-[calc(100vh-3.5rem)] w-[800px] flex-col",
         "border-r border-border bg-background shadow-xl",
         "transition-transform duration-300 ease-in-out",
         isOpen ? "translate-x-0" : "-translate-x-full",

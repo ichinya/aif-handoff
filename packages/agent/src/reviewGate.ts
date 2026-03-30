@@ -36,9 +36,8 @@ Rules:
       cwd: input.projectRoot,
       env: process.env,
       pathToClaudeCodeExecutable: getClaudePath(),
-      settingSources: ["project"],
+      settingSources: [],
       model: "haiku",
-      maxThinkingTokens: 1024,
       systemPrompt: {
         type: "preset",
         preset: "claude_code",

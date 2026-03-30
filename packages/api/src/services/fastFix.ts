@@ -121,9 +121,8 @@ ${
     prompt,
     options: {
       cwd: input.projectRoot,
-      settingSources: ["project"],
+      settingSources: [],
       model: "haiku",
-      maxThinkingTokens: 1024,
       systemPrompt: {
         type: "preset",
         preset: "claude_code",

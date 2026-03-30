@@ -117,11 +117,6 @@ export function CommandPalette({
     );
   }, [actions, query]);
 
-  // Reset selection when filtered results change
-  useEffect(() => {
-    setSelectedIndex(0);
-  }, [query, filtered.length]);
-
   // Scroll selected item into view
   useEffect(() => {
     const selectedItem = itemsRef.current[selectedIndex];
@@ -163,7 +158,10 @@ export function CommandPalette({
           <Input
             placeholder="Search tasks, projects, or commands..."
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setSelectedIndex(0);
+            }}
             onKeyDown={handleKeyDown}
             autoFocus
           />
@@ -177,7 +175,9 @@ export function CommandPalette({
           ) : (
             filtered.map((action, index) => (
               <button
-                ref={(el) => (itemsRef.current[index] = el)}
+                ref={(el) => {
+                  itemsRef.current[index] = el;
+                }}
                 key={action.id}
                 className={cn(
                   "mb-1 flex w-full items-center justify-between border border-transparent px-3 py-2 text-left text-sm transition-colors hover:border-border hover:bg-accent/40",
