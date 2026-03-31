@@ -23,6 +23,7 @@ const mockTask: Task = {
   paused: false,
   lastHeartbeatAt: null,
   lastSyncedAt: null,
+  sessionId: null,
   roadmapAlias: null,
   tags: [],
   status: "implementing",

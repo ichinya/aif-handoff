@@ -23,6 +23,7 @@ const baseTask: Task = {
   paused: false,
   lastHeartbeatAt: null,
   lastSyncedAt: null,
+  sessionId: null,
   roadmapAlias: "RM-1",
   tags: ["backend", "rm:ignore"],
   status: "plan_ready",

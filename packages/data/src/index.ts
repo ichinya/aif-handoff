@@ -540,10 +540,20 @@ export function updateTaskStatus(
   const nowIso = new Date().toISOString();
   setTaskFields(taskId, {
     status,
+    sessionId: null,
     lastHeartbeatAt: nowIso,
     updatedAt: nowIso,
     ...extra,
   });
+}
+
+export function saveTaskSessionId(taskId: string, sessionId: string): void {
+  setTaskFields(taskId, { sessionId });
+}
+
+export function getTaskSessionId(taskId: string): string | null {
+  const task = findTaskById(taskId);
+  return task?.sessionId ?? null;
 }
 
 export function incrementTaskTokenUsage(

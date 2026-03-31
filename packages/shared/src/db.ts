@@ -90,6 +90,7 @@ function ensureTables(sqlite: Database.Database): void {
       paused INTEGER NOT NULL DEFAULT 0,
       last_heartbeat_at TEXT,
       last_synced_at TEXT,
+      session_id TEXT,
       created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
       updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     )
@@ -105,64 +106,71 @@ function ensureTables(sqlite: Database.Database): void {
     )
   `);
 
-  ensureColumn(sqlite, "tasks", "blocked_reason", "blocked_reason TEXT");
-  ensureColumn(sqlite, "tasks", "blocked_from_status", "blocked_from_status TEXT");
-  ensureColumn(sqlite, "tasks", "retry_after", "retry_after TEXT");
-  ensureColumn(sqlite, "tasks", "retry_count", "retry_count INTEGER NOT NULL DEFAULT 0");
-  ensureColumn(sqlite, "tasks", "token_input", "token_input INTEGER NOT NULL DEFAULT 0");
-  ensureColumn(sqlite, "tasks", "token_output", "token_output INTEGER NOT NULL DEFAULT 0");
-  ensureColumn(sqlite, "tasks", "token_total", "token_total INTEGER NOT NULL DEFAULT 0");
-  ensureColumn(sqlite, "tasks", "cost_usd", "cost_usd REAL NOT NULL DEFAULT 0");
-  ensureColumn(sqlite, "tasks", "rework_requested", "rework_requested INTEGER NOT NULL DEFAULT 0");
-  ensureColumn(sqlite, "tasks", "last_heartbeat_at", "last_heartbeat_at TEXT");
-  ensureColumn(sqlite, "tasks", "auto_mode", "auto_mode INTEGER NOT NULL DEFAULT 1");
-  ensureColumn(sqlite, "tasks", "is_fix", "is_fix INTEGER NOT NULL DEFAULT 0");
-  ensureColumn(sqlite, "tasks", "roadmap_alias", "roadmap_alias TEXT");
-  ensureColumn(sqlite, "tasks", "tags", "tags TEXT NOT NULL DEFAULT '[]'");
-  ensureColumn(sqlite, "tasks", "attachments", "attachments TEXT NOT NULL DEFAULT '[]'");
-  ensureColumn(sqlite, "tasks", "planner_mode", "planner_mode TEXT NOT NULL DEFAULT 'fast'");
-  ensureColumn(
-    sqlite,
-    "tasks",
-    "plan_path",
-    "plan_path TEXT NOT NULL DEFAULT '.ai-factory/PLAN.md'",
-  );
-  ensureColumn(sqlite, "tasks", "plan_docs", "plan_docs INTEGER NOT NULL DEFAULT 0");
-  ensureColumn(sqlite, "tasks", "plan_tests", "plan_tests INTEGER NOT NULL DEFAULT 0");
-  ensureColumn(sqlite, "tasks", "skip_review", "skip_review INTEGER NOT NULL DEFAULT 0");
-  ensureColumn(sqlite, "tasks", "use_subagents", "use_subagents INTEGER NOT NULL DEFAULT 1");
-  ensureColumn(sqlite, "projects", "planner_max_budget_usd", "planner_max_budget_usd REAL");
-  ensureColumn(
-    sqlite,
-    "projects",
-    "plan_checker_max_budget_usd",
-    "plan_checker_max_budget_usd REAL",
-  );
-  ensureColumn(sqlite, "projects", "implementer_max_budget_usd", "implementer_max_budget_usd REAL");
-  ensureColumn(
-    sqlite,
-    "projects",
-    "review_sidecar_max_budget_usd",
-    "review_sidecar_max_budget_usd REAL",
-  );
-  ensureColumn(
-    sqlite,
-    "tasks",
-    "review_iteration_count",
-    "review_iteration_count INTEGER NOT NULL DEFAULT 0",
-  );
-  ensureColumn(
-    sqlite,
-    "tasks",
-    "max_review_iterations",
-    "max_review_iterations INTEGER NOT NULL DEFAULT 3",
-  );
-  ensureColumn(sqlite, "tasks", "paused", "paused INTEGER NOT NULL DEFAULT 0");
-  ensureColumn(sqlite, "task_comments", "author", "author TEXT NOT NULL DEFAULT 'human'");
-  ensureColumn(sqlite, "task_comments", "attachments", "attachments TEXT NOT NULL DEFAULT '[]'");
-  ensureColumn(sqlite, "tasks", "last_synced_at", "last_synced_at TEXT");
-
+  runMigrations(sqlite);
   ensureIndexes(sqlite);
+}
+
+/**
+ * Versioned migration system using SQLite's PRAGMA user_version.
+ * Each migration runs once, in order, inside a transaction.
+ * Add new migrations to the end of the array — never reorder or remove existing entries.
+ */
+interface Migration {
+  version: number;
+  description: string;
+  sql: string;
+}
+
+const MIGRATIONS: Migration[] = [
+  // Legacy columns that were added via ensureColumn — consolidated into migrations.
+  // These use ensureColumn-style idempotent checks since existing DBs already have them.
+  {
+    version: 1,
+    description: "Add session_id column to tasks for agent session resume",
+    sql: "ALTER TABLE tasks ADD COLUMN session_id TEXT",
+  },
+];
+
+function runMigrations(sqlite: Database.Database): void {
+  const currentVersion = (sqlite.pragma("user_version", { simple: true }) as number) ?? 0;
+  const pending = MIGRATIONS.filter((m) => m.version > currentVersion);
+
+  if (pending.length === 0) {
+    // For fresh DBs (user_version=0) that were just created with CREATE TABLE IF NOT EXISTS
+    // (which already includes session_id), set version to latest to skip migrations.
+    if (currentVersion === 0 && MIGRATIONS.length > 0) {
+      const latest = MIGRATIONS[MIGRATIONS.length - 1].version;
+      sqlite.pragma(`user_version = ${latest}`);
+    }
+    return;
+  }
+
+  log.info({ currentVersion, pendingCount: pending.length }, "Running database migrations");
+
+  const runAll = sqlite.transaction(() => {
+    for (const migration of pending) {
+      try {
+        sqlite.exec(migration.sql);
+      } catch (err) {
+        // Column may already exist from legacy ensureColumn calls — skip gracefully
+        const msg = String(err);
+        if (msg.includes("duplicate column name")) {
+          log.debug({ version: migration.version }, "Column already exists, skipping");
+        } else {
+          throw err;
+        }
+      }
+      log.info(
+        { version: migration.version, description: migration.description },
+        "Migration applied",
+      );
+    }
+    const latest = pending[pending.length - 1].version;
+    sqlite.pragma(`user_version = ${latest}`);
+  });
+
+  runAll();
+  log.info({ newVersion: pending[pending.length - 1].version }, "Migrations complete");
 }
 
 /** Idempotent index bootstrap for high-frequency query patterns. */
@@ -195,19 +203,6 @@ function ensureIndexes(sqlite: Database.Database): void {
     { indexes: indexDefs.map((d) => d.match(/idx_\w+/)?.[0] ?? d) },
     "Indexes created/verified",
   );
-}
-
-function ensureColumn(
-  sqlite: Database.Database,
-  table: string,
-  columnName: string,
-  columnDefinition: string,
-): void {
-  const columns = sqlite.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
-  const exists = columns.some((column) => column.name === columnName);
-  if (!exists) {
-    sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${columnDefinition}`);
-  }
 }
 
 /** Create a fresh in-memory DB — useful for testing */

@@ -79,6 +79,7 @@ export interface Task {
   paused: boolean;
   lastHeartbeatAt: string | null;
   lastSyncedAt: string | null;
+  sessionId: string | null;
   createdAt: string;
   updatedAt: string;
 }

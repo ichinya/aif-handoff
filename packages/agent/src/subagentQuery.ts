@@ -1,5 +1,10 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { incrementTaskTokenUsage, updateTaskHeartbeat } from "@aif/data";
+import {
+  incrementTaskTokenUsage,
+  updateTaskHeartbeat,
+  saveTaskSessionId,
+  getTaskSessionId,
+} from "@aif/data";
 import { getEnv, logger } from "@aif/shared";
 import { createActivityLogger, createSubagentLogger, logActivity, getClaudePath } from "./hooks.js";
 import { writeQueryAudit } from "./queryAudit.js";
@@ -74,10 +79,18 @@ function processQueryMessage(
   const typed = message as {
     type: string;
     subtype?: string;
+    session_id?: string;
     result?: string;
     usage?: Record<string, number>;
     total_cost_usd?: number;
   };
+
+  if (typed.type === "system" && typed.subtype === "init" && typed.session_id) {
+    saveTaskSessionId(taskId, typed.session_id);
+    log.debug({ taskId, agentName, sessionId: typed.session_id }, "Captured agent session ID");
+    return;
+  }
+
   if (typed.type !== "result") return;
 
   incrementTaskTokenUsage(taskId, {
@@ -121,6 +134,7 @@ async function runQueryAttempt(
   }
 
   const bypassPermissions = getEnv().AGENT_BYPASS_PERMISSIONS;
+  const existingSessionId = getTaskSessionId(taskId);
 
   const stream = query({
     prompt,
@@ -143,6 +157,7 @@ async function runQueryAttempt(
       },
       ...(agent ? { extraArgs: { agent } } : {}),
       ...(maxBudgetUsd == null ? {} : { maxBudgetUsd }),
+      ...(existingSessionId ? { resume: existingSessionId } : {}),
       stderr: onStderr,
       hooks: {
         PostToolUse: [{ hooks: [createActivityLogger(taskId)] }],
@@ -150,6 +165,13 @@ async function runQueryAttempt(
       },
     },
   });
+
+  if (existingSessionId) {
+    log.info(
+      { taskId, agentName, sessionId: existingSessionId },
+      "Resuming previous agent session",
+    );
+  }
 
   const iterator = stream[Symbol.asyncIterator]();
   const timeoutError = makeQueryStartTimeoutError(agentName, queryStartTimeoutMs);

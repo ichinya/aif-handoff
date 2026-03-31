@@ -62,6 +62,7 @@ export const tasks = sqliteTable("tasks", {
   paused: integer("paused", { mode: "boolean" }).notNull().default(false),
   lastHeartbeatAt: text("last_heartbeat_at"),
   lastSyncedAt: text("last_synced_at"),
+  sessionId: text("session_id"),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),

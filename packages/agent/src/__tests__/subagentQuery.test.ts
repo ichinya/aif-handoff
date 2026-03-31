@@ -32,6 +32,8 @@ vi.mock("@aif/data", async (importOriginal) => {
     ...actual,
     incrementTaskTokenUsage: incrementTaskTokenUsageMock,
     updateTaskHeartbeat: () => undefined,
+    getTaskSessionId: () => null,
+    saveTaskSessionId: () => undefined,
   };
 });
 
