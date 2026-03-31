@@ -137,9 +137,9 @@ export async function pollAndProcess(): Promise<void> {
       "Picked up task for processing",
     );
     const sourceStatus = task.status;
-    const taskInfo = { title: task.title, fromStatus: sourceStatus };
+    const taskTitle = task.title;
 
-    updateTaskStatus(task.id, stage.inProgress, {}, taskInfo);
+    updateTaskStatus(task.id, stage.inProgress, {}, { title: taskTitle, fromStatus: sourceStatus });
 
     log.debug(
       { taskId: task.id, from: sourceStatus, to: stage.inProgress },
@@ -153,7 +153,10 @@ export async function pollAndProcess(): Promise<void> {
 
       // Skip review: if task has skipReview, jump straight to done after implementing
       if (stage.label === "implementer" && task.skipReview) {
-        updateTaskStatus(task.id, "done", CLEAN_STATE_RESET, taskInfo);
+        updateTaskStatus(task.id, "done", CLEAN_STATE_RESET, {
+          title: taskTitle,
+          fromStatus: stage.inProgress,
+        });
         log.info(
           { taskId: task.id, from: stage.inProgress, to: "done" },
           "Skip review enabled — bypassing review stage",
@@ -169,7 +172,10 @@ export async function pollAndProcess(): Promise<void> {
         });
 
         if (outcome === "max_iterations_reached") {
-          updateTaskStatus(task.id, "done", CLEAN_STATE_RESET, taskInfo);
+          updateTaskStatus(task.id, "done", CLEAN_STATE_RESET, {
+            title: taskTitle,
+            fromStatus: stage.inProgress,
+          });
 
           log.info(
             { taskId: task.id, from: stage.inProgress, to: "done" },
@@ -188,7 +194,7 @@ export async function pollAndProcess(): Promise<void> {
               reworkRequested: true,
               reviewIterationCount: currentCount + 1,
             },
-            taskInfo,
+            { title: taskTitle, fromStatus: stage.inProgress },
           );
 
           log.info(
@@ -214,7 +220,7 @@ export async function pollAndProcess(): Promise<void> {
           reviewIterationCount:
             stage.label === "implementer" ? (task.reviewIterationCount ?? 0) : 0,
         },
-        taskInfo,
+        { title: taskTitle, fromStatus: stage.inProgress },
       );
 
       log.info(
@@ -250,7 +256,7 @@ export async function pollAndProcess(): Promise<void> {
               blockedFromStatus: null,
               retryAfter: null,
             },
-            taskInfo,
+            { title: taskTitle, fromStatus: stage.inProgress },
           );
           break;
 
@@ -264,12 +270,17 @@ export async function pollAndProcess(): Promise<void> {
               retryAfter: recovery.retryAfter,
               retryCount: recovery.retryCount,
             },
-            taskInfo,
+            { title: taskTitle, fromStatus: stage.inProgress },
           );
           break;
 
         case "revert":
-          updateTaskStatus(task.id, stage.inProgress, {}, taskInfo);
+          updateTaskStatus(
+            task.id,
+            stage.inProgress,
+            {},
+            { title: taskTitle, fromStatus: stage.inProgress },
+          );
           break;
       }
 
