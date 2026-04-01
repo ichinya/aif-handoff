@@ -35,9 +35,10 @@ function Sheet({ open, onOpenChange, children }: SheetProps) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50">
+    <div className="fixed inset-0 z-50" style={{ top: "4rem" }}>
       <div
         className="fixed inset-0 bg-black/85 backdrop-blur-[1px]"
+        style={{ top: "4rem" }}
         onClick={() => onOpenChange(false)}
       />
       {children}
@@ -45,17 +46,14 @@ function Sheet({ open, onOpenChange, children }: SheetProps) {
   );
 }
 
-function SheetContent({
-  className,
-  children,
-  ...props
-}: React.HTMLAttributes<HTMLDivElement>) {
+function SheetContent({ className, children, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
       className={cn(
-        "fixed inset-y-0 right-0 z-50 w-full max-w-lg border-l border-border bg-card p-6 shadow-[0_0_0_1px_rgba(255,255,255,0.03)] transition-transform duration-200",
-        className
+        "fixed right-0 bottom-0 z-50 w-full max-w-lg border-l border-border bg-card p-6 shadow-[0_0_0_1px_rgba(255,255,255,0.03)] transition-transform duration-200",
+        className,
       )}
+      style={{ top: "4rem", ...props.style }}
       {...props}
     >
       {children}
@@ -63,28 +61,12 @@ function SheetContent({
   );
 }
 
-function SheetHeader({
-  className,
-  ...props
-}: React.HTMLAttributes<HTMLDivElement>) {
-  return (
-    <div
-      className={cn("flex flex-col space-y-2 mb-6", className)}
-      {...props}
-    />
-  );
+function SheetHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  return <div className={cn("flex flex-col space-y-2 mb-6", className)} {...props} />;
 }
 
-function SheetTitle({
-  className,
-  ...props
-}: React.HTMLAttributes<HTMLHeadingElement>) {
-  return (
-    <h2
-      className={cn("text-lg font-semibold", className)}
-      {...props}
-    />
-  );
+function SheetTitle({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) {
+  return <h2 className={cn("text-lg font-semibold", className)} {...props} />;
 }
 
 function SheetClose({ onClose }: { onClose: () => void }) {
