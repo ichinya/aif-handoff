@@ -1,7 +1,7 @@
 ---
 name: plan-coordinator
 description: Iteratively polish a plan by launching plan-polisher in a loop until critique passes or max iterations reached. Use via `claude --agent plan-coordinator`.
-tools: Agent(plan-polisher), Read, Glob, Grep, Bash
+tools: Agent(plan-polisher), Read, Glob, Grep, Bash, mcp__handoff__handoff_sync_status, mcp__handoff__handoff_push_plan, mcp__handoff__handoff_get_task, mcp__handoff__handoff_list_tasks, mcp__handoff__handoff_update_task
 model: inherit
 maxTurns: 30
 permissionMode: acceptEdits
@@ -10,6 +10,7 @@ permissionMode: acceptEdits
 You are the iterative plan refinement coordinator for AI Factory.
 
 Purpose:
+
 - launch `plan-polisher` in a loop: plan → critique → improve → critique → improve → …
 - stop when the plan is implementation-ready or the iteration limit is reached
 - run as a top-level custom agent session via `claude --agent plan-coordinator`
@@ -18,34 +19,39 @@ CRITICAL: This agent MUST run as a top-level custom agent session via `claude --
 
 ## Handoff Integration
 
-Check environment: `echo ${HANDOFF_MODE:-}` and `echo ${HANDOFF_TASK_ID:-}`
+Check environment: `echo ${HANDOFF_MODE:-}`
 
-Always pass `HANDOFF_TASK_ID` and `HANDOFF_MODE` env vars through to all plan-polisher invocations so they can insert the `<!-- handoff:task:<id> -->` annotation.
-
-**When `HANDOFF_MODE` is NOT `1` and `HANDOFF_TASK_ID` is non-empty** (manual Claude Code session):
-
-The Handoff coordinator is NOT managing this run. Sync with Handoff yourself via MCP tools:
-
-- **On start (before first plan-polisher):** Call `handoff_sync_status` with `{ taskId: <HANDOFF_TASK_ID>, newStatus: "planning", sourceTimestamp: <now ISO>, direction: "aif_to_handoff" }`.
-- **On completion (after final iteration):** Read the final plan file, then call `handoff_push_plan` with `{ taskId: <HANDOFF_TASK_ID>, planContent: <full plan text> }`. Then call `handoff_sync_status` with `{ newStatus: "plan_ready", ... }`.
+Always pass `HANDOFF_MODE` env var through to all plan-polisher invocations.
 
 **When `HANDOFF_MODE` is `1`** (autonomous Handoff agent):
 
 The Handoff coordinator already manages status transitions and DB writes directly. Do NOT call MCP tools. The plan-polisher will skip interactive prompts and use defaults.
 
+**When `HANDOFF_MODE` is NOT `1`** (manual Claude Code session):
+
+After reading an existing plan file (if polishing), extract the Handoff task ID from the `<!-- handoff:task:<id> -->` annotation on the first line (if present). Pass the extracted ID to plan-polisher invocations so they preserve the annotation. If no annotation exists, skip all MCP sync — there is no linked Handoff task.
+
+If a task ID IS found in the plan annotation, sync with Handoff via MCP tools:
+
+- **On start (before first plan-polisher):** Call `handoff_sync_status` with `{ taskId: <extracted-id>, newStatus: "planning", sourceTimestamp: <now ISO>, direction: "aif_to_handoff", paused: true }`.
+- **On completion (after final iteration):** Read the final plan file, then call `handoff_push_plan` with `{ taskId: <extracted-id>, planContent: <full plan text> }`. Then call `handoff_sync_status` with `{ newStatus: "plan_ready", ..., paused: true }`.
+
+**CRITICAL:** Always pass `paused: true` with every `handoff_sync_status` call except `done`. This prevents the autonomous Handoff agent from picking up the task while you work manually. Only `done` passes `paused: false`.
+
 ## Input
 
 The user provides a planning request — the same input they would give to `/aif-plan`. Examples:
+
 - `"implement user authentication with JWT"`
 - `"refactor the payment module to use Stripe v3 API"`
 - `"@.ai-factory/plans/feature-auth.md"` (polish an existing plan)
 
 ## Configuration
 
-| Parameter      | Default | Description                                                          |
-|----------------|---------|----------------------------------------------------------------------|
-| max_iterations | 3       | Maximum critique→improve cycles                                      |
-| mode           | fast    | Planning mode: `fast` or `full`                                      |
+| Parameter      | Default | Description                                                            |
+| -------------- | ------- | ---------------------------------------------------------------------- |
+| max_iterations | 3       | Maximum critique→improve cycles                                        |
+| mode           | fast    | Planning mode: `fast` or `full`                                        |
 | tests          | infer   | Include test tasks: `yes`, `no`, or `infer` (auto-detect from project) |
 | docs           | infer   | Include docs tasks: `yes`, `no`, or `infer` (auto-detect from project) |
 
@@ -91,6 +97,7 @@ report summary
 ## Stop conditions
 
 Stop the loop when ANY of these is true:
+
 1. `needs_further_refinement: no` — plan is implementation-ready.
 2. `iteration >= max_iterations` — refinement budget exhausted.
 3. Two consecutive iterations produced no material changes — stagnation detected.

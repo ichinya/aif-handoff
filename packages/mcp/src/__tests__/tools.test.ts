@@ -249,6 +249,43 @@ describe("MCP tools", () => {
       expect(updated!.lastSyncedAt).toBeTruthy();
     });
 
+    it("applies paused flag when provided with status change", () => {
+      const task = seedTask();
+      setTaskFields(task!.id, { updatedAt: "2026-01-01T00:00:00.000Z" });
+
+      const resolution = resolveConflict({
+        sourceTimestamp: "2026-01-02T00:00:00.000Z",
+        targetTimestamp: "2026-01-01T00:00:00.000Z",
+        field: "status",
+      });
+      expect(resolution.applied).toBe(true);
+
+      updateTaskStatus(task!.id, "planning");
+      touchLastSyncedAt(task!.id);
+      // Simulate what syncStatus does with paused flag
+      setTaskFields(task!.id, { paused: true });
+
+      const updated = findTaskById(task!.id);
+      expect(updated!.status).toBe("planning");
+      expect(updated!.paused).toBe(true);
+    });
+
+    it("clears paused flag on done status", () => {
+      const task = seedTask();
+      setTaskFields(task!.id, {
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        paused: true,
+      });
+
+      updateTaskStatus(task!.id, "done");
+      touchLastSyncedAt(task!.id);
+      setTaskFields(task!.id, { paused: false });
+
+      const updated = findTaskById(task!.id);
+      expect(updated!.status).toBe("done");
+      expect(updated!.paused).toBe(false);
+    });
+
     it("detects conflict when target is newer", () => {
       const task = seedTask();
       setTaskFields(task!.id, { updatedAt: "2026-01-02T00:00:00.000Z" });

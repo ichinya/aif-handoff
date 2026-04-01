@@ -2,7 +2,7 @@
 name: aif-plan
 description: Plan implementation for a feature or task. Two modes — fast (single quick plan) or full (richer plan with optional git branch/worktree flow). Use when user says "plan", "new feature", "start feature", "create tasks".
 argument-hint: "[fast | full] [--parallel | --list | --cleanup <branch>] <description>"
-allowed-tools: Read Write Glob Grep Bash(git *) Bash(cd *) Bash(cp *) Bash(mkdir *) Bash(basename *) TaskCreate TaskUpdate TaskList AskUserQuestion Questions Task
+allowed-tools: Read Write Glob Grep Bash(git *) Bash(cd *) Bash(cp *) Bash(mkdir *) Bash(basename *) TaskCreate TaskUpdate TaskList AskUserQuestion Questions Task mcp__handoff__handoff_sync_status mcp__handoff__handoff_push_plan mcp__handoff__handoff_get_task mcp__handoff__handoff_list_tasks mcp__handoff__handoff_update_task
 disable-model-invocation: false
 ---
 
@@ -18,18 +18,8 @@ Create an implementation plan for a feature or task. Two modes:
 ### Step 0 (pre): Detect Handoff Mode
 
 Handoff mode: !`echo ${HANDOFF_MODE:-}`
-Handoff task ID: !`echo ${HANDOFF_TASK_ID:-}`
-
-**If `HANDOFF_TASK_ID` is non-empty**, always insert `<!-- handoff:task:<HANDOFF_TASK_ID> -->` as the very first line of any plan file (Step 5), before the title.
 
 **Then check `HANDOFF_MODE`:**
-
-#### When `HANDOFF_MODE` is NOT `1` (manual Claude Code session with Handoff sync)
-
-The Handoff coordinator is NOT managing this run. You must sync with Handoff yourself via MCP tools:
-
-- **On start:** Call `handoff_sync_status` with `{ taskId: <HANDOFF_TASK_ID>, newStatus: "planning", sourceTimestamp: <now ISO>, direction: "aif_to_handoff" }`.
-- **On completion:** Call `handoff_push_plan` with `{ taskId: <HANDOFF_TASK_ID>, planContent: <full plan text> }`. Then call `handoff_sync_status` with `{ newStatus: "plan_ready", ... }`.
 
 #### When `HANDOFF_MODE` is `1` (autonomous Handoff agent)
 
@@ -37,6 +27,19 @@ The Handoff coordinator already manages status transitions and DB writes directl
 
 - **No interactive questions:** Do not use `AskUserQuestion` — use sensible defaults (verbose logging, yes to tests, yes to docs, skip roadmap linkage).
 - **Mode default:** If mode is not specified, default to `fast`.
+
+#### When `HANDOFF_MODE` is NOT `1` (manual Claude Code session)
+
+If polishing an existing plan, extract the Handoff task ID from the `<!-- handoff:task:<id> -->` annotation on the first line (if present). If creating a new plan and no annotation context exists, skip all MCP sync — there is no linked Handoff task.
+
+If a task ID IS found in the plan annotation, sync with Handoff via MCP tools:
+
+- **On start:** Call `handoff_sync_status` with `{ taskId: <extracted-id>, newStatus: "planning", sourceTimestamp: <now ISO>, direction: "aif_to_handoff", paused: true }`.
+- **On completion:** Call `handoff_push_plan` with `{ taskId: <extracted-id>, planContent: <full plan text> }`. Then call `handoff_sync_status` with `{ newStatus: "plan_ready", ..., paused: true }`.
+
+**CRITICAL:** Always pass `paused: true` with every `handoff_sync_status` call except `done`. This prevents the autonomous Handoff agent from picking up the task while you work manually. Only `done` passes `paused: false`.
+
+Preserve the `<!-- handoff:task:<id> -->` annotation on the first line when rewriting the plan file.
 
 ### Step 0: Load Project Context
 

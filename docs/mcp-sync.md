@@ -33,18 +33,18 @@ After building, the Claude CLI auto-discovers the Handoff MCP server.
 
 The MCP server uses the shared monorepo environment (`packages/shared/src/env.ts`) for database and API configuration. MCP-specific variables:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MCP_RATE_LIMIT_READ_RPM` | `120` | Read tool rate limit (requests/minute) |
-| `MCP_RATE_LIMIT_READ_BURST` | `10` | Read tool burst capacity |
-| `MCP_RATE_LIMIT_WRITE_RPM` | `30` | Write tool rate limit (requests/minute) |
-| `MCP_RATE_LIMIT_WRITE_BURST` | `5` | Write tool burst capacity |
+| Variable                     | Default | Description                             |
+| ---------------------------- | ------- | --------------------------------------- |
+| `MCP_RATE_LIMIT_READ_RPM`    | `120`   | Read tool rate limit (requests/minute)  |
+| `MCP_RATE_LIMIT_READ_BURST`  | `10`    | Read tool burst capacity                |
+| `MCP_RATE_LIMIT_WRITE_RPM`   | `30`    | Write tool rate limit (requests/minute) |
+| `MCP_RATE_LIMIT_WRITE_BURST` | `5`     | Write tool burst capacity               |
 
 Shared variables (from `@aif/shared`):
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DATABASE_URL` | `./data/aif.sqlite` | SQLite database path |
+| Variable       | Default                 | Description                             |
+| -------------- | ----------------------- | --------------------------------------- |
+| `DATABASE_URL` | `./data/aif.sqlite`     | SQLite database path                    |
 | `API_BASE_URL` | `http://localhost:3009` | API server URL for WebSocket broadcasts |
 
 ## Tools Reference
@@ -52,19 +52,21 @@ Shared variables (from `@aif/shared`):
 ### Read Tools
 
 #### `handoff_list_tasks`
+
 List tasks with optional filters and pagination. Returns **summary fields** (no plan, description, or logs) to keep payloads small. Use `handoff_get_task` to fetch full task details.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `projectId` | UUID | No | Filter by project |
-| `status` | TaskStatus | No | Filter by status |
-| `limit` | number | No | Max results per page (default 20, max 100) |
-| `offset` | number | No | Number of results to skip (default 0) |
+| Parameter   | Type       | Required | Description                                |
+| ----------- | ---------- | -------- | ------------------------------------------ |
+| `projectId` | UUID       | No       | Filter by project                          |
+| `status`    | TaskStatus | No       | Filter by status                           |
+| `limit`     | number     | No       | Max results per page (default 20, max 100) |
+| `offset`    | number     | No       | Number of results to skip (default 0)      |
 
 **Response:**
+
 ```json
 {
-  "items": [{ "id": "...", "title": "...", "status": "...", ... }],
+  "items": [{ "id": "abc-123", "title": "Example task", "status": "backlog" }],
   "total": 42,
   "limit": 20,
   "offset": 0
@@ -74,91 +76,101 @@ List tasks with optional filters and pagination. Returns **summary fields** (no 
 Summary fields include: `id`, `projectId`, `title`, `status`, `priority`, `position`, `autoMode`, `isFix`, `paused`, `roadmapAlias`, `tags`, `blockedReason`, `retryCount`, `tokenTotal`, `costUsd`, `lastSyncedAt`, `createdAt`, `updatedAt`.
 
 #### `handoff_get_task`
+
 Get a single task by ID with **full detail** (including plan, description, logs).
 
 | Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `taskId` | UUID | Yes | Task ID |
+| --------- | ---- | -------- | ----------- |
+| `taskId`  | UUID | Yes      | Task ID     |
 
 #### `handoff_search_tasks`
+
 Full-text search across task titles and descriptions with pagination. Returns **summary fields**.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `query` | string | Yes | Search query (max 200 chars) |
-| `projectId` | UUID | No | Scope search to project |
-| `limit` | number | No | Max results per page (default 20, max 50) |
-| `offset` | number | No | Number of results to skip (default 0) |
+| Parameter   | Type   | Required | Description                               |
+| ----------- | ------ | -------- | ----------------------------------------- |
+| `query`     | string | Yes      | Search query (max 200 chars)              |
+| `projectId` | UUID   | No       | Scope search to project                   |
+| `limit`     | number | No       | Max results per page (default 20, max 50) |
+| `offset`    | number | No       | Number of results to skip (default 0)     |
 
 Response format is the same as `handoff_list_tasks`.
 
 #### `handoff_list_projects`
+
 List all projects. No parameters required.
 
 ### Write Tools
 
 #### `handoff_create_task`
+
 Create a new task.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `projectId` | UUID | Yes | Project ID (must exist) |
-| `title` | string | Yes | Task title (max 500 chars) |
-| `description` | string | No | Task description |
-| `priority` | 0-3 | No | Priority level |
-| `tags` | string[] | No | Tags |
-| `plannerMode` | `fast`\|`full` | No | Planner mode |
-| `autoMode` | boolean | No | Auto mode |
+| Parameter     | Type           | Required | Description                |
+| ------------- | -------------- | -------- | -------------------------- |
+| `projectId`   | UUID           | Yes      | Project ID (must exist)    |
+| `title`       | string         | Yes      | Task title (max 500 chars) |
+| `description` | string         | No       | Task description           |
+| `priority`    | 0-3            | No       | Priority level             |
+| `tags`        | string[]       | No       | Tags                       |
+| `plannerMode` | `fast`\|`full` | No       | Planner mode               |
+| `autoMode`    | boolean        | No       | Auto mode                  |
 
 #### `handoff_update_task`
+
 Update an existing task.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `taskId` | UUID | Yes | Task ID (must exist) |
-| `title` | string | No | New title |
-| `description` | string | No | New description |
-| `priority` | 0-3 | No | New priority |
-| `plan` | string\|null | No | Plan content |
-| ... | | | All mutable task fields |
+| Parameter     | Type         | Required | Description             |
+| ------------- | ------------ | -------- | ----------------------- |
+| `taskId`      | UUID         | Yes      | Task ID (must exist)    |
+| `title`       | string       | No       | New title               |
+| `description` | string       | No       | New description         |
+| `priority`    | 0-3          | No       | New priority            |
+| `plan`        | string\|null | No       | Plan content            |
+| ...           |              |          | All mutable task fields |
 
 #### `handoff_sync_status`
+
 Bidirectional status sync with conflict detection.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `taskId` | UUID | Yes | Task ID |
-| `newStatus` | TaskStatus | Yes | Desired status |
-| `sourceTimestamp` | ISO string | Yes | Source system timestamp (ms precision) |
-| `direction` | `aif_to_handoff`\|`handoff_to_aif` | Yes | Sync direction |
+| Parameter         | Type                               | Required | Description                                                                                                                                                     |
+| ----------------- | ---------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `taskId`          | UUID                               | Yes      | Task ID                                                                                                                                                         |
+| `newStatus`       | TaskStatus                         | Yes      | Desired status                                                                                                                                                  |
+| `sourceTimestamp` | ISO string                         | Yes      | Source system timestamp (ms precision)                                                                                                                          |
+| `direction`       | `aif_to_handoff`\|`handoff_to_aif` | Yes      | Sync direction                                                                                                                                                  |
+| `paused`          | boolean                            | No       | Set paused flag atomically with the status change (e.g. `true` to prevent Handoff from picking up the task during manual work, `false` on `done` to release it) |
 
 **Response:**
+
 ```json
 {
   "applied": true,
   "conflict": false,
-  "conflictResolution": { "winner": "source", ... },
-  "task": { ... },
+  "conflictResolution": { "winner": "source", "field": "status" },
+  "task": { "id": "abc-123", "title": "Example task", "status": "in_progress" },
   "lastSyncedAt": "2026-03-31T12:00:00.123Z"
 }
 ```
 
 #### `handoff_push_plan`
+
 Push plan content to a task with annotation validation.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `taskId` | UUID | Yes | Task ID |
-| `planContent` | string | Yes | Plan markdown (max 100KB) |
+| Parameter     | Type   | Required | Description               |
+| ------------- | ------ | -------- | ------------------------- |
+| `taskId`      | UUID   | Yes      | Task ID                   |
+| `planContent` | string | Yes      | Plan markdown (max 100KB) |
 
 #### `handoff_annotate_plan`
+
 Insert or update task ID annotations in plan markdown. Does NOT persist -- use `handoff_push_plan` or `handoff_update_task` to save.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `taskId` | UUID | Yes | Task ID for annotation |
-| `planContent` | string | Yes | Plan markdown |
-| `sectionHeading` | string | No | Insert after this heading |
+| Parameter        | Type   | Required | Description               |
+| ---------------- | ------ | -------- | ------------------------- |
+| `taskId`         | UUID   | Yes      | Task ID for annotation    |
+| `planContent`    | string | Yes      | Plan markdown             |
+| `sectionHeading` | string | No       | Insert after this heading |
 
 ## Plan Annotation Format
 
@@ -166,7 +178,9 @@ Annotations use HTML comments that are invisible in rendered markdown:
 
 ```markdown
 ## Overview
+
 <!-- handoff:task:a1b2c3d4-e5f6-7890-abcd-ef1234567890 -->
+
 This section implements the authentication feature.
 ```
 
@@ -206,11 +220,11 @@ The system supports two execution modes for AIF skills and agents. The mode dete
 
 Every `query()` call from the Handoff agent system injects these env vars into the Claude Code subprocess:
 
-| Variable | Set when | Description |
-|----------|----------|-------------|
-| `HANDOFF_MODE` | Always `"1"` from Handoff agent | Signals that the Handoff coordinator is managing this run |
-| `HANDOFF_TASK_ID` | Task ID is known | UUID of the associated Handoff task |
-| `HANDOFF_SKIP_REVIEW` | `task.skipReview` is true | Skip the review stage (implementing → done) |
+| Variable              | Set when                        | Description                                               |
+| --------------------- | ------------------------------- | --------------------------------------------------------- |
+| `HANDOFF_MODE`        | Always `"1"` from Handoff agent | Signals that the Handoff coordinator is managing this run |
+| `HANDOFF_TASK_ID`     | Task ID is known                | UUID of the associated Handoff task                       |
+| `HANDOFF_SKIP_REVIEW` | `task.skipReview` is true       | Skip the review stage (implementing → done)               |
 
 Skills read these at load time via dynamic shell substitution:
 
@@ -281,11 +295,11 @@ backlog ──start_ai──► planning ──────────► plan_
 
 Status transitions driven by AIF:
 
-| Stage | Start status | End status | Who updates |
-|-------|-------------|------------|-------------|
-| Planning | `planning` | `plan_ready` | Coordinator (mode 1) or MCP (mode 2) |
+| Stage        | Start status   | End status         | Who updates                          |
+| ------------ | -------------- | ------------------ | ------------------------------------ |
+| Planning     | `planning`     | `plan_ready`       | Coordinator (mode 1) or MCP (mode 2) |
 | Implementing | `implementing` | `review` or `done` | Coordinator (mode 1) or MCP (mode 2) |
-| Review | `review` | `done` | Coordinator only (mode 1) |
+| Review       | `review`       | `done`             | Coordinator only (mode 1)            |
 
 ### Plan Annotations
 
@@ -293,7 +307,9 @@ Every plan file created with a `HANDOFF_TASK_ID` gets an annotation as the first
 
 ```markdown
 <!-- handoff:task:a1b2c3d4-e5f6-7890-abcd-ef1234567890 -->
+
 # Implementation Plan: User Authentication
+
 ...
 ```
 
@@ -305,15 +321,15 @@ This annotation is inserted regardless of mode (both mode 1 and mode 2). It enab
 
 ### Affected Skills and Agents
 
-| File | Handoff behavior |
-|------|-----------------|
-| `aif-plan` (skill) | Annotation + MCP sync (mode 2) or no-interactivity (mode 1) |
-| `aif-fix` (skill) | Annotation + MCP sync (mode 2) or no-interactivity (mode 1) |
-| `aif-implement` (skill) | MCP sync with checklist updates (mode 2) or no-interactivity (mode 1) |
-| `plan-coordinator` (agent) | MCP sync (mode 2) or pass-through (mode 1) |
-| `plan-polisher` (agent) | Annotation only (never calls MCP) |
-| `implement-coordinator` (agent) | MCP sync with layer updates (mode 2) or pass-through (mode 1) |
-| `implement-worker` (agent) | Never calls MCP (coordinator handles sync) |
+| File                            | Handoff behavior                                                      |
+| ------------------------------- | --------------------------------------------------------------------- |
+| `aif-plan` (skill)              | Annotation + MCP sync (mode 2) or no-interactivity (mode 1)           |
+| `aif-fix` (skill)               | Annotation + MCP sync (mode 2) or no-interactivity (mode 1)           |
+| `aif-implement` (skill)         | MCP sync with checklist updates (mode 2) or no-interactivity (mode 1) |
+| `plan-coordinator` (agent)      | MCP sync (mode 2) or pass-through (mode 1)                            |
+| `plan-polisher` (agent)         | Annotation only (never calls MCP)                                     |
+| `implement-coordinator` (agent) | MCP sync with layer updates (mode 2) or pass-through (mode 1)         |
+| `implement-worker` (agent)      | Never calls MCP (coordinator handles sync)                            |
 
 ### MCP Server Requirement
 
