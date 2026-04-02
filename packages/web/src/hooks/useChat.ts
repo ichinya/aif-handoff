@@ -8,6 +8,13 @@ import type {
 import { api } from "@/lib/api";
 import { getWsClientId } from "./useWebSocket";
 
+interface SessionStreamState {
+  conversationId: string;
+  accumulator: string;
+  messages: ChatMessage[];
+  errorHandled: boolean;
+}
+
 export function useChat(
   projectId: string | null,
   sessionId: string | null = null,
@@ -17,11 +24,23 @@ export function useChat(
   const [isStreaming, setIsStreaming] = useState(false);
   const [explore, setExplore] = useState(false);
   const [chatErrorCode, setChatErrorCode] = useState<string | null>(null);
-  const conversationIdRef = useRef<string | null>(null);
-  const accumulatorRef = useRef("");
-  const streamErrorHandledRef = useRef(false);
-  const isStreamingRef = useRef(false);
   const currentSessionIdRef = useRef<string | null>(null);
+
+  // Per-session streaming state: conversationId → streamKey (sessionId or conversationId)
+  const activeStreamsRef = useRef<Map<string, string>>(new Map());
+  // Per-session stream data: streamKey → state
+  const sessionStreamsRef = useRef<Map<string, SessionStreamState>>(new Map());
+  // Track conversationId used when no session exists (for matching events)
+  const conversationIdForNoSession = useRef<string | null>(null);
+
+  // Check if a specific session is currently streaming
+  const isSessionStreaming = useCallback((sid: string | null) => {
+    if (!sid) return false;
+    for (const [, streamSid] of activeStreamsRef.current) {
+      if (streamSid === sid) return true;
+    }
+    return false;
+  }, []);
 
   // Load messages when sessionId changes
   const prevSessionIdRef = useRef<string | null>(null);
@@ -30,15 +49,13 @@ export function useChat(
     prevSessionIdRef.current = sessionId;
 
     if (!sessionId) {
-      // Only clear if we're transitioning from a session to no session
       if (prevSessionId !== null) {
         console.debug("[useChat] Session cleared, resetting messages");
-        conversationIdRef.current = null;
-        accumulatorRef.current = "";
         currentSessionIdRef.current = null;
         queueMicrotask(() => {
           setMessages([]);
           setChatErrorCode(null);
+          setIsStreaming(false);
         });
       }
       return;
@@ -47,8 +64,18 @@ export function useChat(
     if (sessionId === currentSessionIdRef.current) return;
 
     currentSessionIdRef.current = sessionId;
-    // Reset streaming state when switching between sessions
-    isStreamingRef.current = false;
+
+    // If this session is actively streaming, restore its in-flight messages
+    const streamState = sessionStreamsRef.current.get(sessionId);
+    if (streamState) {
+      console.debug("[useChat] Restoring streaming session %s", sessionId);
+      setMessages(streamState.messages);
+      setIsStreaming(true);
+      setChatErrorCode(null);
+      return;
+    }
+
+    // Otherwise load from server
     queueMicrotask(() => setIsStreaming(false));
     console.debug("[useChat] Loading session messages sessionId=%s", sessionId);
 
@@ -56,62 +83,86 @@ export function useChat(
       .getChatSessionMessages(sessionId)
       .then((msgs) => {
         if (currentSessionIdRef.current !== sessionId) return;
-        // Don't overwrite messages if a send is in-flight — the user already
-        // sees their message and possibly streaming tokens.
-        if (isStreamingRef.current) {
+        if (isSessionStreaming(sessionId)) {
           console.debug("[useChat] Skipping session load — streaming in progress");
           return;
         }
         console.debug("[useChat] Session changed, loaded %d messages", msgs.length);
         setMessages(msgs.map((m) => ({ role: m.role, content: m.content })));
-        conversationIdRef.current = null;
-        accumulatorRef.current = "";
         setChatErrorCode(null);
       })
       .catch((err) => {
         console.error("[useChat] Failed to load session messages:", err);
       });
-  }, [sessionId]);
+  }, [sessionId, isSessionStreaming]);
 
   // Listen for chat stream events dispatched by useWebSocket
   useEffect(() => {
+    // Check if a stream belongs to the currently viewed session
+    const isCurrentStream = (streamKey: string) =>
+      currentSessionIdRef.current === streamKey ||
+      (!currentSessionIdRef.current && streamKey === conversationIdForNoSession.current);
+
     const handleToken = (e: Event) => {
       const { conversationId, token } = (e as CustomEvent<ChatStreamTokenPayload>).detail;
-      if (conversationId !== conversationIdRef.current) return;
-      accumulatorRef.current += token;
-      const accumulated = accumulatorRef.current;
-      console.debug("[useChat] Token accumulated, length:", accumulated.length);
-      setMessages((prev) => {
-        const last = prev[prev.length - 1];
-        if (last?.role === "assistant") {
-          return [...prev.slice(0, -1), { role: "assistant", content: accumulated }];
-        }
-        return [...prev, { role: "assistant", content: accumulated }];
-      });
+      const streamKey = activeStreamsRef.current.get(conversationId);
+      if (!streamKey) return;
+
+      const state = sessionStreamsRef.current.get(streamKey);
+      if (!state) return;
+
+      state.accumulator += token;
+      const accumulated = state.accumulator;
+
+      const last = state.messages[state.messages.length - 1];
+      if (last?.role === "assistant") {
+        state.messages = [
+          ...state.messages.slice(0, -1),
+          { role: "assistant", content: accumulated },
+        ];
+      } else {
+        state.messages = [...state.messages, { role: "assistant", content: accumulated }];
+      }
+
+      if (isCurrentStream(streamKey)) {
+        setMessages(state.messages);
+      }
     };
 
     const handleDone = (e: Event) => {
       const { conversationId } = (e as CustomEvent<ChatDonePayload>).detail;
-      if (conversationId !== conversationIdRef.current) return;
-      accumulatorRef.current = "";
-      setIsStreaming(false);
-      isStreamingRef.current = false;
-      console.debug("[useChat] Stream done for conversation:", conversationId);
+      const streamKey = activeStreamsRef.current.get(conversationId);
+      if (!streamKey) return;
+
+      console.debug("[useChat] Stream done for %s conversation %s", streamKey, conversationId);
+      activeStreamsRef.current.delete(conversationId);
+      sessionStreamsRef.current.delete(streamKey);
+
+      if (isCurrentStream(streamKey)) {
+        setIsStreaming(false);
+      }
     };
 
     const handleError = (e: Event) => {
       const { conversationId, message, code } = (e as CustomEvent<ChatErrorPayload>).detail;
-      if (conversationId !== conversationIdRef.current) return;
-      streamErrorHandledRef.current = true;
-      accumulatorRef.current = "";
-      setIsStreaming(false);
-      isStreamingRef.current = false;
-      setChatErrorCode(code ?? null);
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: message || "Chat request failed" },
-      ]);
-      console.debug("[useChat] Stream error for conversation:", conversationId);
+      const streamKey = activeStreamsRef.current.get(conversationId);
+      if (!streamKey) return;
+
+      const state = sessionStreamsRef.current.get(streamKey);
+      if (state) state.errorHandled = true;
+
+      console.debug("[useChat] Stream error for %s", streamKey);
+      activeStreamsRef.current.delete(conversationId);
+      sessionStreamsRef.current.delete(streamKey);
+
+      if (isCurrentStream(streamKey)) {
+        setIsStreaming(false);
+        setChatErrorCode(code ?? null);
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: message || "Chat request failed" },
+        ]);
+      }
     };
 
     window.addEventListener("chat:token", handleToken);
@@ -134,20 +185,30 @@ export function useChat(
         return;
       }
 
-      const newConversationId = conversationIdRef.current ?? crypto.randomUUID();
-      conversationIdRef.current = newConversationId;
+      const newConversationId = crypto.randomUUID();
+      const effectiveSessionId = sessionId ?? currentSessionIdRef.current;
+      // Use sessionId or conversationId as stream key (for sessions not yet created)
+      const streamKey = effectiveSessionId ?? newConversationId;
 
       const userMessage: ChatMessage = { role: "user", content: text.trim() };
-      setMessages((prev) => [...prev, userMessage]);
-      setIsStreaming(true);
-      isStreamingRef.current = true;
-      setChatErrorCode(null);
-      accumulatorRef.current = "";
-      streamErrorHandledRef.current = false;
-      if (explore) setExplore(false);
+      const newMessages = [...messages, userMessage];
 
-      // Prefer the prop sessionId (authoritative) over the ref (can be stale)
-      const effectiveSessionId = sessionId ?? currentSessionIdRef.current;
+      // Register active stream
+      if (!effectiveSessionId) {
+        conversationIdForNoSession.current = newConversationId;
+      }
+      activeStreamsRef.current.set(newConversationId, streamKey);
+      sessionStreamsRef.current.set(streamKey, {
+        conversationId: newConversationId,
+        accumulator: "",
+        messages: newMessages,
+        errorHandled: false,
+      });
+
+      setMessages(newMessages);
+      setIsStreaming(true);
+      setChatErrorCode(null);
+      if (explore) setExplore(false);
 
       console.debug("[useChat] Sending message:", {
         projectId,
@@ -167,23 +228,36 @@ export function useChat(
           ...(taskId ? { taskId } : {}),
         });
 
-        // Track the server-assigned sessionId for subsequent messages
         if (result.sessionId && !currentSessionIdRef.current) {
           currentSessionIdRef.current = result.sessionId;
+          // Migrate stream tracking from temp key (conversationId) to real sessionId
+          if (streamKey !== result.sessionId) {
+            const state = sessionStreamsRef.current.get(streamKey);
+            if (state) {
+              sessionStreamsRef.current.delete(streamKey);
+              sessionStreamsRef.current.set(result.sessionId, state);
+            }
+            activeStreamsRef.current.set(newConversationId, result.sessionId);
+          }
         }
 
         // Safety net: HTTP response arrives after server sends chat:done.
-        // If WS missed the done event (reconnect, race), ensure streaming stops.
-        if (isStreamingRef.current) {
-          console.debug("[useChat] HTTP completed but still streaming — forcing stop");
-          setIsStreaming(false);
-          isStreamingRef.current = false;
-        }
+        // Give WS events a moment to arrive, then force stop if still active.
+        setTimeout(() => {
+          if (activeStreamsRef.current.has(newConversationId)) {
+            console.debug("[useChat] Stream still active after HTTP — forcing stop");
+            activeStreamsRef.current.delete(newConversationId);
+            sessionStreamsRef.current.delete(streamKey);
+            setIsStreaming(false);
+          }
+        }, 500);
       } catch (err) {
         console.error("[useChat] Failed to send message:", err);
+        activeStreamsRef.current.delete(newConversationId);
+        const errorHandled = sessionStreamsRef.current.get(streamKey)?.errorHandled ?? false;
+        sessionStreamsRef.current.delete(streamKey);
         setIsStreaming(false);
-        isStreamingRef.current = false;
-        if (!streamErrorHandledRef.current) {
+        if (!errorHandled) {
           const message =
             err instanceof Error ? err.message : "Failed to get a response. Please try again.";
           setChatErrorCode(null);
@@ -191,22 +265,16 @@ export function useChat(
         }
       }
     },
-    [projectId, sessionId, isStreaming, explore, taskId],
+    [projectId, sessionId, messages, isStreaming, explore, taskId],
   );
 
   const clearMessages = useCallback(() => {
     setMessages([]);
-    conversationIdRef.current = null;
-    accumulatorRef.current = "";
-    streamErrorHandledRef.current = false;
     setChatErrorCode(null);
   }, []);
 
   const newSession = useCallback(() => {
     setMessages([]);
-    conversationIdRef.current = null;
-    accumulatorRef.current = "";
-    streamErrorHandledRef.current = false;
     currentSessionIdRef.current = null;
     setChatErrorCode(null);
   }, []);
