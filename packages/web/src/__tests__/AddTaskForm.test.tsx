@@ -3,13 +3,21 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 const mutateCreateTask = vi.fn();
 
-const mockApi = {
-  getSettings: vi.fn((): Promise<unknown> => new Promise(() => {})),
-  getProjectDefaults: vi.fn((): Promise<unknown> => new Promise(() => {})),
+const mockSettingsData = {
+  data: { useSubagents: true, maxReviewIterations: 3 } as
+    | { useSubagents: boolean; maxReviewIterations: number }
+    | undefined,
 };
 
-vi.mock("@/lib/api", () => ({
-  api: mockApi,
+const mockDefaultsData = {
+  data: undefined as
+    | { paths: { plan?: string; plans?: string }; workflow: Record<string, unknown> }
+    | undefined,
+};
+
+vi.mock("@/hooks/useSettings", () => ({
+  useSettings: () => ({ data: mockSettingsData.data }),
+  useProjectDefaults: () => ({ data: mockDefaultsData.data }),
 }));
 
 vi.mock("@/hooks/useTasks", () => ({
@@ -24,6 +32,8 @@ const { AddTaskForm } = await import("@/components/kanban/AddTaskForm");
 describe("AddTaskForm", () => {
   beforeEach(() => {
     mutateCreateTask.mockClear();
+    mockSettingsData.data = { useSubagents: true, maxReviewIterations: 3 };
+    mockDefaultsData.data = undefined;
   });
 
   it("uses autoMode=true by default", () => {
@@ -127,18 +137,13 @@ describe("AddTaskForm", () => {
     });
   });
 
-  it("loads plan path default from project config", async () => {
-    mockApi.getProjectDefaults.mockResolvedValueOnce({
+  it("loads plan path default from project config", () => {
+    mockDefaultsData.data = {
       paths: { plan: "custom/MY_PLAN.md" },
       workflow: {},
-    });
+    };
 
     render(<AddTaskForm projectId="p-1" />);
-
-    await act(async () => {
-      // wait for useEffect to resolve
-      await new Promise((r) => setTimeout(r, 0));
-    });
 
     fireEvent.click(screen.getByText("Add task"));
     fireEvent.click(screen.getByRole("button", { name: "Planner settings" }));
@@ -147,21 +152,13 @@ describe("AddTaskForm", () => {
     expect(planInput).toBeDefined();
   });
 
-  it("loads plansDir from project config and uses it in full mode slug", async () => {
-    mockApi.getProjectDefaults.mockResolvedValueOnce({
+  it("loads plansDir from project config and uses it in full mode slug", () => {
+    mockDefaultsData.data = {
       paths: { plan: "custom/PLAN.md", plans: "custom/plans/" },
       workflow: {},
-    });
-    mockApi.getSettings.mockResolvedValueOnce({
-      useSubagents: true,
-      maxReviewIterations: 3,
-    });
+    };
 
     render(<AddTaskForm projectId="p-1" />);
-
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 0));
-    });
 
     fireEvent.click(screen.getByText("Add task"));
     fireEvent.click(screen.getByRole("button", { name: "Planner settings" }));
@@ -179,17 +176,13 @@ describe("AddTaskForm", () => {
     );
   });
 
-  it("keeps default plan path when config has no plan path", async () => {
-    mockApi.getProjectDefaults.mockResolvedValueOnce({
+  it("keeps default plan path when config has no plan path", () => {
+    mockDefaultsData.data = {
       paths: {},
       workflow: {},
-    });
+    };
 
     render(<AddTaskForm projectId="p-1" />);
-
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 0));
-    });
 
     fireEvent.click(screen.getByText("Add task"));
     fireEvent.click(screen.getByRole("button", { name: "Planner settings" }));
@@ -198,14 +191,10 @@ describe("AddTaskForm", () => {
     expect(planInput).toBeDefined();
   });
 
-  it("keeps default plan path when project defaults fail", async () => {
-    mockApi.getProjectDefaults.mockRejectedValueOnce(new Error("not found"));
+  it("keeps default plan path when project defaults fail", () => {
+    // mockDefaultsData.data is already undefined (simulates failed/no data)
 
     render(<AddTaskForm projectId="p-1" />);
-
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 0));
-    });
 
     fireEvent.click(screen.getByText("Add task"));
     fireEvent.click(screen.getByRole("button", { name: "Planner settings" }));

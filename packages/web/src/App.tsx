@@ -8,11 +8,11 @@ import { useWebSocket } from "./hooks/useWebSocket";
 import { useProjects } from "./hooks/useProjects";
 import { useTasks } from "./hooks/useTasks";
 import { useTheme } from "./hooks/useTheme";
+import { useAgentReadiness } from "./hooks/useSettings";
 import { ChatBubble } from "./components/chat/ChatBubble";
 import { ChatPanel } from "./components/chat/ChatPanel";
 import { Button } from "./components/ui/button";
 import { calculateTaskMetrics } from "./lib/taskMetrics";
-import { api } from "./lib/api";
 import { readStorage, writeStorage, removeStorage } from "./lib/storage";
 import { STORAGE_KEYS } from "./lib/storageKeys";
 import type { Project } from "@aif/shared/browser";
@@ -30,15 +30,7 @@ function AppContent() {
   useWebSocket();
   const { theme, toggleTheme } = useTheme();
   const { data: projects } = useProjects();
-  const [agentReadiness, setAgentReadiness] = useState<{
-    ready: boolean;
-    hasApiKey: boolean;
-    hasClaudeAuth: boolean;
-    authSource: "api_key" | "claude_profile" | "both" | "none";
-    detectedPath: string | null;
-    message: string;
-    checkedAt: string;
-  } | null>(null);
+  const { data: agentReadiness = null } = useAgentReadiness();
   const [project, setProject] = useState<Project | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [commandOpen, setCommandOpen] = useState(false);
@@ -128,30 +120,6 @@ function AppContent() {
 
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const fetchReadiness = async () => {
-      try {
-        const status = await api.getAgentReadiness();
-        if (cancelled) return;
-        setAgentReadiness(status);
-      } catch (error) {
-        if (cancelled) return;
-        setAgentReadiness(null);
-        console.debug("[app] Agent readiness check failed:", error);
-      }
-    };
-
-    void fetchReadiness();
-    const intervalId = window.setInterval(fetchReadiness, 60_000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
-    };
   }, []);
 
   const handleSelectProject = useCallback((p: Project) => {

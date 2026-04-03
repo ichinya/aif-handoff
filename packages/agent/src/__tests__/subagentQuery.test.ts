@@ -101,6 +101,36 @@ function makeDelayedSuccess(delayMs: number, result: string) {
   };
 }
 
+describe("executeSubagentQuery attribution", () => {
+  beforeEach(() => {
+    queryMock.mockReset();
+  });
+
+  it("passes empty attribution to suppress Co-Authored-By trailers", async () => {
+    queryMock.mockImplementation(async function* () {
+      yield {
+        type: "result",
+        subtype: "success",
+        result: "done",
+        usage: {},
+        total_cost_usd: 0,
+      };
+    });
+
+    await executeSubagentQuery({
+      taskId: "task-attr",
+      projectRoot: "/tmp/project",
+      agentName: "implement-coordinator",
+      prompt: "run",
+    });
+
+    const callOptions = queryMock.mock.calls[0][0].options;
+    expect(callOptions.settings).toEqual(
+      expect.objectContaining({ attribution: { commit: "", pr: "" } }),
+    );
+  });
+});
+
 describe("executeSubagentQuery query_start_timeout retry", () => {
   const baseOptions = {
     taskId: "task-1",

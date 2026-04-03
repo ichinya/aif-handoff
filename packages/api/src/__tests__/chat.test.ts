@@ -42,6 +42,16 @@ vi.mock("@aif/data", () => ({
   toChatMessageResponse: vi.fn((row: unknown) => row),
 }));
 
+const mockInvalidateCache = vi.fn();
+
+vi.mock("../services/sessionCache.js", () => ({
+  getCached: () => undefined,
+  setCached: () => undefined,
+  invalidateCache: (...args: unknown[]) => mockInvalidateCache(...args),
+  invalidateAllSessionCaches: () => undefined,
+  sessionCacheKey: (dir: string) => `sdk-sessions:${dir}`,
+}));
+
 vi.mock("@aif/shared", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@aif/shared")>();
   return {
@@ -78,6 +88,7 @@ describe("chat API", () => {
     mockSendToClient.mockReset();
     mockFindTaskById.mockReset();
     mockToTaskResponse.mockReset();
+    mockInvalidateCache.mockReset();
     mockFindProjectById.mockReturnValue({
       id: "project-1",
       rootPath: "/tmp/project-1",
@@ -233,6 +244,7 @@ describe("chat API", () => {
     });
     expect(firstRes.status).toBe(200);
     expect(mockUpdate).toHaveBeenCalledWith("auto-sess", { agentSessionId: "agent-session-123" });
+    expect(mockInvalidateCache).toHaveBeenCalledWith("sdk-sessions:/tmp/project-1");
 
     // Second call: session now has the agentSessionId from first call
     mockFind

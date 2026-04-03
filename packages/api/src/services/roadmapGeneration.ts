@@ -108,6 +108,7 @@ export async function generateRoadmapFile(
       options: {
         cwd: project.rootPath,
         env: { ...process.env, HANDOFF_MODE: "1" },
+        settings: { attribution: { commit: "", pr: "" } },
         settingSources: ["project"],
         ...modelOption("sonnet"),
         systemPrompt: {
@@ -241,6 +242,7 @@ export async function generateRoadmapTasks(
       options: {
         cwd: project.rootPath,
         env: { ...process.env, HANDOFF_MODE: "1" },
+        settings: { attribution: { commit: "", pr: "" } },
         settingSources: ["project"],
         ...modelOption("haiku"),
         systemPrompt: {

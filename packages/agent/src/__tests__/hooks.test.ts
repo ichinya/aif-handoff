@@ -21,8 +21,13 @@ vi.mock("@aif/shared", async (importOriginal) => {
 const { getEnv } = await import("@aif/shared");
 const mockedGetEnv = vi.mocked(getEnv);
 
-const { logActivity, flushActivityQueue, flushAllActivityQueues, disposeActivityQueue } =
-  await import("../hooks.js");
+const {
+  logActivity,
+  flushActivityQueue,
+  flushAllActivityQueues,
+  disposeActivityQueue,
+  sanitizeForActivityLog,
+} = await import("../hooks.js");
 
 const PROJECT_ID = "test-project";
 const TASK_ID = "test-task-1";
@@ -222,5 +227,41 @@ describe("hooks - activity logging", () => {
       // Further flush should be a no-op (queue cleared)
       flushActivityQueue(TASK_ID);
     });
+  });
+});
+
+describe("sanitizeForActivityLog", () => {
+  it("returns single-line strings unchanged", () => {
+    expect(sanitizeForActivityLog("git status")).toBe("git status");
+  });
+
+  it("truncates multiline strings to first line with count", () => {
+    const multiline = "git commit -m \"$(cat <<'EOF'\nFix bug\n\nCo-Authored-By: ...\nEOF\n)\"";
+    const result = sanitizeForActivityLog(multiline);
+    expect(result).toContain("git commit -m \"$(cat <<'EOF'");
+    expect(result).toMatch(/\[\+\d+ lines\]$/);
+  });
+
+  it("handles heredoc-style commands cleanly", () => {
+    const heredoc = "git commit -m \"$(cat <<'EOF'\ncommit message\nEOF\n)\"";
+    const result = sanitizeForActivityLog(heredoc);
+    expect(result).not.toContain("\\n");
+    expect(result).not.toContain("EOF\n)");
+  });
+
+  it("respects maxLen parameter", () => {
+    const long = "a".repeat(300);
+    expect(sanitizeForActivityLog(long, 50).length).toBeLessThanOrEqual(60);
+  });
+
+  it("returns empty string for empty input", () => {
+    expect(sanitizeForActivityLog("")).toBe("");
+    expect(sanitizeForActivityLog("\n\n")).toBe("");
+  });
+
+  it("strips blank lines from line count", () => {
+    const input = "line1\n\nline2\n\nline3";
+    const result = sanitizeForActivityLog(input);
+    expect(result).toBe("line1 [+2 lines]");
   });
 });

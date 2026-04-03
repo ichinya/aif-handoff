@@ -38,6 +38,12 @@ export function useWebSocket() {
   const invalidateTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const pendingTaskIds = useRef<Set<string>>(new Set());
   const { settings } = useNotificationSettings();
+  // Keep settings in a ref so the connect callback doesn't depend on them.
+  // This prevents WebSocket churn when notification settings change.
+  const settingsRef = useRef(settings);
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
 
   const findTaskStatusInCache = useCallback(
     (taskId: string): TaskStatus | null => {
@@ -116,7 +122,7 @@ export function useWebSocket() {
         statusCacheRef.current.set(movedTask.id, movedTask.status);
 
         if (previousStatus && previousStatus !== movedTask.status) {
-          if (settings.desktop) {
+          if (settingsRef.current.desktop) {
             try {
               showTaskMovedNotification(
                 movedTask.id,
@@ -128,7 +134,7 @@ export function useWebSocket() {
               console.debug("[ws] Failed to show desktop notification:", error);
             }
           }
-          if (settings.sound) {
+          if (settingsRef.current.sound) {
             void playStatusChangeBeep().catch((error) => {
               console.debug("[ws] Failed to play notification sound:", error);
             });
@@ -153,13 +159,13 @@ export function useWebSocket() {
 
         if (data.type === "roadmap:complete" && isRecord(data.payload)) {
           const p = data.payload as { roadmapAlias?: string; created?: number };
-          if (settings.desktop && Notification.permission === "granted") {
+          if (settingsRef.current.desktop && Notification.permission === "granted") {
             new Notification("Roadmap ready", {
               body: `${p.roadmapAlias}: ${p.created ?? 0} task(s) created`,
               tag: "roadmap-complete",
             });
           }
-          if (settings.sound) {
+          if (settingsRef.current.sound) {
             void playStatusChangeBeep().catch(() => {});
           }
         }
@@ -193,7 +199,7 @@ export function useWebSocket() {
     };
 
     wsRef.current = ws;
-  }, [findTaskStatusInCache, queryClient, settings.desktop, settings.sound]);
+  }, [findTaskStatusInCache, queryClient]);
 
   useEffect(() => {
     connectRef.current = connect;

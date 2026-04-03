@@ -14,6 +14,7 @@ import {
   probeClaudeCliFailure,
 } from "./claudeDiagnostics.js";
 import { PROJECT_SCOPE_SYSTEM_APPEND } from "./constants.js";
+import { getActiveStageAbortController } from "./stageAbort.js";
 import type { HookCallback } from "@anthropic-ai/claude-agent-sdk";
 
 const log = logger("subagent-query");
@@ -37,6 +38,8 @@ export interface SubagentQueryOptions {
   queryStartTimeoutMs?: number;
   /** Optional override for tests/tuning: delay before retrying after query_start_timeout. */
   queryStartRetryDelayMs?: number;
+  /** AbortController for cancelling a running query from outside (e.g. stage timeout). */
+  abortController?: AbortController;
 }
 
 export interface SubagentQueryResult {
@@ -124,7 +127,11 @@ async function runQueryAttempt(
     agent,
     skipReview = false,
     extraSubagentStartHooks = [],
+    abortController: explicitAbort,
   } = options;
+
+  // Use explicitly provided AbortController, or fall back to the coordinator's active one
+  const abortController = explicitAbort ?? getActiveStageAbortController() ?? undefined;
 
   const subagentStartHooks: Array<{ hooks: HookCallback[] }> = [
     { hooks: [createSubagentLogger(taskId)] },
@@ -139,6 +146,7 @@ async function runQueryAttempt(
   const stream = query({
     prompt,
     options: {
+      ...(abortController ? { abortController } : {}),
       cwd: projectRoot,
       env: {
         ...process.env,
@@ -147,6 +155,7 @@ async function runQueryAttempt(
         ...(skipReview ? { HANDOFF_SKIP_REVIEW: "1" } : {}),
       },
       ...(getClaudePath() ? { pathToClaudeCodeExecutable: getClaudePath() } : {}),
+      settings: { attribution: { commit: "", pr: "" } },
       settingSources: ["project"],
       permissionMode: bypassPermissions ? "bypassPermissions" : "acceptEdits",
       ...(bypassPermissions ? { allowDangerouslySkipPermissions: true } : {}),

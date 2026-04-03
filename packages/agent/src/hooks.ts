@@ -173,6 +173,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === "object" && !Array.isArray(value);
 }
 
+/**
+ * Sanitize a multiline string for single-line display in activity logs.
+ * Truncates to the first meaningful line if it contains newlines,
+ * replacing the rest with a continuation marker.
+ */
+export function sanitizeForActivityLog(raw: string, maxLen = 200): string {
+  const lines = raw
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return "";
+  const first = lines[0].slice(0, maxLen);
+  if (lines.length === 1) return first;
+  return `${first} [+${lines.length - 1} lines]`;
+}
+
 /** Extract a concise detail from tool_input based on tool name. */
 function summarizeToolInput(
   toolName: string,
@@ -182,7 +198,7 @@ function summarizeToolInput(
 
   switch (toolName) {
     case "Bash": {
-      const cmd = String(toolInput.command ?? "").slice(0, 200);
+      const cmd = sanitizeForActivityLog(String(toolInput.command ?? ""));
       return cmd ? ` \`${cmd}\`` : "";
     }
     case "Read":

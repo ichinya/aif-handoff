@@ -3,7 +3,7 @@ import { listProjects } from "@aif/data";
 import { getEnv, logger } from "@aif/shared";
 import { pollAndProcess } from "./coordinator.js";
 import { flushAllActivityQueues } from "./hooks.js";
-import { connectWakeChannel, closeWakeChannel } from "./wakeChannel.js";
+import { connectWakeChannel, closeWakeChannel, waitForApiReady } from "./wakeChannel.js";
 
 const log = logger("agent");
 
@@ -60,13 +60,15 @@ async function triggerWake(reason: string): Promise<void> {
 }
 
 if (env.AGENT_WAKE_ENABLED) {
-  log.info("Wake transport enabled — connecting to API WebSocket");
-  const initiated = connectWakeChannel((reason) => {
-    void triggerWake(reason);
+  log.info("Wake transport enabled — probing API readiness before connecting WebSocket");
+  void waitForApiReady().then(() => {
+    const initiated = connectWakeChannel((reason) => {
+      void triggerWake(reason);
+    });
+    if (!initiated) {
+      log.warn("Wake channel connection could not be initiated — falling back to polling only");
+    }
   });
-  if (!initiated) {
-    log.warn("Wake channel connection could not be initiated — falling back to polling only");
-  }
 } else {
   log.info("Wake transport disabled (AGENT_WAKE_ENABLED=false) — using polling only");
 }

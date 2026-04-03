@@ -32,6 +32,7 @@ export async function runCommitQuery(projectId: string): Promise<void> {
         ...(CLAUDE_PATH ? { pathToClaudeCodeExecutable: CLAUDE_PATH } : {}),
         cwd: project.rootPath,
         env: { ...process.env, HANDOFF_MODE: "1" },
+        settings: { attribution: { commit: "", pr: "" } },
         settingSources: ["project"],
         permissionMode: bypassPermissions ? "bypassPermissions" : "acceptEdits",
         ...(bypassPermissions ? { allowDangerouslySkipPermissions: true } : {}),

@@ -21,6 +21,7 @@ import { flushActivityQueue } from "./hooks.js";
 import { notifyTaskBroadcast, type TaskNotificationInfo } from "./notifier.js";
 import { handleAutoReviewGate } from "./autoReviewHandler.js";
 import { classifyStageError } from "./stageErrorHandler.js";
+import { setActiveStageAbortController } from "./stageAbort.js";
 import { releaseDueBlockedTasks, recoverStaleInProgressTasks } from "./taskWatchdog.js";
 
 const log = logger("coordinator");
@@ -84,11 +85,25 @@ async function runStageWithTimeout(
   projectRoot: string,
   stageLabel: string,
 ): Promise<void> {
-  await withTimeout(
-    runner(taskId, projectRoot),
-    STAGE_RUN_TIMEOUT_MS,
-    `Stage ${stageLabel} timed out after ${STAGE_RUN_TIMEOUT_MS}ms`,
-  );
+  const abort = new AbortController();
+  setActiveStageAbortController(abort);
+
+  try {
+    await withTimeout(
+      runner(taskId, projectRoot),
+      STAGE_RUN_TIMEOUT_MS,
+      `Stage ${stageLabel} timed out after ${STAGE_RUN_TIMEOUT_MS}ms`,
+    );
+  } catch (err) {
+    // On timeout, abort the running subagent process so it doesn't become a zombie
+    if (!abort.signal.aborted) {
+      abort.abort();
+      log.warn({ taskId, stage: stageLabel }, "Aborted subagent process after stage timeout");
+    }
+    throw err;
+  } finally {
+    setActiveStageAbortController(null);
+  }
 }
 
 /** Update task status with optional field overrides and broadcast. */

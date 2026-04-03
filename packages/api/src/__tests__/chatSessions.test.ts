@@ -55,6 +55,17 @@ vi.mock("../ws.js", () => ({
   broadcast: (...args: unknown[]) => mockBroadcast(...args),
 }));
 
+const mockInvalidateCache = vi.fn();
+
+// Bypass session cache — always return cache miss so tests use fresh mocks
+vi.mock("../services/sessionCache.js", () => ({
+  getCached: () => undefined,
+  setCached: () => undefined,
+  invalidateCache: (...args: unknown[]) => mockInvalidateCache(...args),
+  invalidateAllSessionCaches: () => undefined,
+  sessionCacheKey: (dir: string) => `sdk-sessions:${dir}`,
+}));
+
 vi.mock("@aif/shared", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@aif/shared")>();
   return {

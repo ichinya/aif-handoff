@@ -28,6 +28,12 @@ import { chatRequestSchema, createChatSessionSchema, updateChatSessionSchema } f
 import { persistAttachments } from "../services/attachmentPersistence.js";
 import { readAttachment } from "../services/attachmentStorage.js";
 import { broadcast, sendToClient } from "../ws.js";
+import {
+  getCached,
+  setCached,
+  invalidateCache,
+  sessionCacheKey,
+} from "../services/sessionCache.js";
 import type { WsEvent, Task } from "@aif/shared";
 
 const PROJECT_SCOPE_SYSTEM_APPEND =
@@ -183,12 +189,17 @@ chatRouter.get("/sessions", async (c) => {
     dbRows.map((r) => r.agentSessionId).filter(Boolean) as string[],
   );
 
-  // SDK sessions (CLI + agent) — scoped to project directory
+  // SDK sessions (CLI + agent) — scoped to project directory, cached with TTL
   let sdkSessions: ChatSession[] = [];
   try {
     const project = findProjectById(projectId);
     if (project) {
-      const sdkList = await listSessions({ dir: project.rootPath });
+      const cacheKey = sessionCacheKey(project.rootPath);
+      let sdkList = getCached<Awaited<ReturnType<typeof listSessions>>>(cacheKey);
+      if (!sdkList) {
+        sdkList = await listSessions({ dir: project.rootPath });
+        setCached(cacheKey, sdkList);
+      }
       log.debug(
         "SDK listSessions returned %d sessions for dir=%s",
         sdkList.length,
@@ -538,6 +549,7 @@ chatRouter.post("/", zValidator("json", chatRequestSchema as any), async (c) => 
         env: { ...process.env, HANDOFF_MODE: "1", ...(taskId ? { HANDOFF_TASK_ID: taskId } : {}) },
         permissionMode: getEnv().AGENT_BYPASS_PERMISSIONS ? "bypassPermissions" : "acceptEdits",
         ...(getEnv().AGENT_BYPASS_PERMISSIONS ? { allowDangerouslySkipPermissions: true } : {}),
+        settings: { attribution: { commit: "", pr: "" } },
         settingSources: ["project"],
         includePartialMessages: true,
         systemPrompt: {
@@ -577,6 +589,8 @@ chatRouter.post("/", zValidator("json", chatRequestSchema as any), async (c) => 
         if (chatSessionId) {
           updateChatSession(chatSessionId, { agentSessionId });
         }
+        // New SDK session file exists on disk — invalidate cached listing
+        invalidateCache(sessionCacheKey(project.rootPath));
         log.debug(
           { agentSessionId, resumeAgentSessionId, conversationId: chatConversationId },
           "Chat agent session initialized",

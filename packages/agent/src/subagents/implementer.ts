@@ -125,6 +125,7 @@ Requirements:
     options: {
       cwd: input.projectRoot,
       env: { ...process.env, HANDOFF_MODE: "1", HANDOFF_TASK_ID: input.task.id },
+      settings: { attribution: { commit: "", pr: "" } },
       settingSources: ["project"],
       ...modelOption("haiku"),
       systemPrompt: {

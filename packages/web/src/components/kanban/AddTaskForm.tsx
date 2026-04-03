@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useCreateTask } from "@/hooks/useTasks";
-import { api } from "@/lib/api";
+import { useSettings, useProjectDefaults } from "@/hooks/useSettings";
 import { generatePlanPath } from "@aif/shared/browser";
 
 interface Props {
@@ -21,15 +21,11 @@ export function AddTaskForm({ projectId }: Props) {
   const [isFix, setIsFix] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [plannerMode, setPlannerMode] = useState<"full" | "fast">("fast");
-  const [defaultPlanPath, setDefaultPlanPath] = useState(DEFAULT_PLAN_PATH);
-  const [plansDir, setPlansDir] = useState(".ai-factory/plans/");
   const [planPath, setPlanPath] = useState(DEFAULT_PLAN_PATH);
   const [planDocs, setPlanDocs] = useState(false);
   const [planTests, setPlanTests] = useState(false);
   const [skipReview, setSkipReview] = useState(false);
-  const [useSubagentsDefault, setUseSubagentsDefault] = useState(true);
   const [useSubagents, setUseSubagents] = useState(true);
-  const [maxReviewIterationsDefault, setMaxReviewIterationsDefault] = useState(3);
   const [maxReviewIterations, setMaxReviewIterations] = useState(3);
   const createTask = useCreateTask();
 
@@ -37,15 +33,37 @@ export function AddTaskForm({ projectId }: Props) {
   // When true, the auto-set effect will not overwrite their edit.
   const userOverride = useRef(false);
 
+  const { data: settings } = useSettings();
+  const { data: defaults } = useProjectDefaults(projectId);
+
+  // Derive defaults from server data (no setState in effects)
+  const useSubagentsDefault = settings?.useSubagents ?? true;
+  const maxReviewIterationsDefault = settings?.maxReviewIterations ?? 3;
+  const defaultPlanPath = defaults?.paths?.plan ?? DEFAULT_PLAN_PATH;
+  const plansDir = defaults?.paths?.plans ?? ".ai-factory/plans/";
+
+  // A generation counter that triggers sync of server defaults into local form state.
+  // Bumped when the form opens; the sync effect reacts to it.
+  const [syncGen, setSyncGen] = useState(0);
+
   // Listen for global task:create event (Ctrl+N)
   useEffect(() => {
     const handleCreateTask = () => {
+      setSyncGen((g) => g + 1);
       setIsOpen(true);
-      // Focus will be handled by autoFocus on the input
     };
     window.addEventListener("task:create", handleCreateTask);
     return () => window.removeEventListener("task:create", handleCreateTask);
   }, []);
+
+  // Sync local form state with server defaults when form opens (syncGen changes)
+  useEffect(() => {
+    if (syncGen === 0) return;
+    setUseSubagents(useSubagentsDefault);
+    setMaxReviewIterations(maxReviewIterationsDefault);
+    setPlanPath(defaultPlanPath);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncGen]);
 
   // Close form on Escape key
   useEffect(() => {
@@ -60,39 +78,6 @@ export function AddTaskForm({ projectId }: Props) {
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isOpen]);
-
-  useEffect(() => {
-    api
-      .getSettings()
-      .then((s) => {
-        setUseSubagentsDefault(s.useSubagents);
-        setUseSubagents(s.useSubagents);
-        setMaxReviewIterationsDefault(s.maxReviewIterations);
-        setMaxReviewIterations(s.maxReviewIterations);
-      })
-      .catch(() => {
-        // keep defaults on failure
-      });
-  }, []);
-
-  // Load project-specific defaults from config.yaml
-  useEffect(() => {
-    if (!projectId) return;
-    api
-      .getProjectDefaults(projectId)
-      .then((d) => {
-        if (d.paths?.plan) {
-          setDefaultPlanPath(d.paths.plan);
-          setPlanPath(d.paths.plan);
-        }
-        if (d.paths?.plans) {
-          setPlansDir(d.paths.plans);
-        }
-      })
-      .catch(() => {
-        // keep hardcoded defaults when config.yaml absent
-      });
-  }, [projectId]);
 
   // Auto-update planPath when title or mode changes (unless user manually edited the field).
   // Called from onChange handlers rather than useEffect to avoid cascading renders.
@@ -168,7 +153,10 @@ export function AddTaskForm({ projectId }: Props) {
         variant="ghost"
         size="sm"
         className="w-full justify-center gap-1 border border-dashed border-border text-muted-foreground hover:border-primary/40 hover:text-foreground"
-        onClick={() => setIsOpen(true)}
+        onClick={() => {
+          setSyncGen((g) => g + 1);
+          setIsOpen(true);
+        }}
         type="button"
       >
         <Plus className="h-4 w-4" />

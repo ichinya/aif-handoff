@@ -37,6 +37,7 @@ Rules:
       cwd: input.projectRoot,
       env: { ...process.env, HANDOFF_MODE: "1", HANDOFF_TASK_ID: input.taskId },
       ...(getClaudePath() ? { pathToClaudeCodeExecutable: getClaudePath() } : {}),
+      settings: { attribution: { commit: "", pr: "" } },
       settingSources: ["project"],
       ...modelOption("haiku"),
       systemPrompt: {

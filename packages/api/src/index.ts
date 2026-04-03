@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
 import { logger, getEnv } from "@aif/shared";
-import { listProjects } from "@aif/data";
+import { listProjects, listStaleInProgressTasks } from "@aif/data";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -94,6 +94,34 @@ app.get("/agent/readiness", (c) => {
     message: ready
       ? "Agent authentication is configured."
       : "Claude authentication not found. Set ANTHROPIC_API_KEY in .env or sign in via Claude Code profile (~/.claude).",
+    checkedAt: new Date().toISOString(),
+  });
+});
+
+// Agent status: running tasks, heartbeat lag, uptime
+app.get("/agent/status", (c) => {
+  const now = Date.now();
+  const activeTasks = listStaleInProgressTasks().map((t) => {
+    const heartbeatAt = t.lastHeartbeatAt ? new Date(t.lastHeartbeatAt).getTime() : null;
+    const updatedAt = t.updatedAt ? new Date(t.updatedAt).getTime() : now;
+    const lagMs = heartbeatAt ? now - heartbeatAt : now - updatedAt;
+
+    return {
+      id: t.id,
+      title: t.title,
+      status: t.status,
+      lastHeartbeatAt: t.lastHeartbeatAt,
+      heartbeatLagMs: lagMs,
+      heartbeatStale: lagMs > 5 * 60 * 1000, // > 5 min without heartbeat
+      updatedAt: t.updatedAt,
+    };
+  });
+
+  return c.json({
+    uptime: Math.floor((Date.now() - startTime) / 1000),
+    activeTasks,
+    activeTaskCount: activeTasks.length,
+    staleTasks: activeTasks.filter((t) => t.heartbeatStale).length,
     checkedAt: new Date().toISOString(),
   });
 });
