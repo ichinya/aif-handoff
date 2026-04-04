@@ -14,6 +14,9 @@ import type {
   UpdateChatSessionInput,
   ChatSessionMessage,
   ChatMessageAttachment,
+  RuntimeProfile,
+  CreateRuntimeProfileInput,
+  UpdateRuntimeProfileInput,
 } from "@aif/shared/browser";
 
 export interface AifConfig {
@@ -63,6 +66,42 @@ const API_BASE = "/tasks";
 const REQUEST_TIMEOUT_MS = 15000;
 const FAST_FIX_TIMEOUT_MS = 120000;
 
+export interface SettingsResponse {
+  useSubagents: boolean;
+  maxReviewIterations: number;
+  runtimeReadiness: {
+    availableRuntimeCount: number;
+    runtimeProfileCount: number;
+    enabledRuntimeProfileCount: number;
+  };
+  runtimeDefaults: {
+    modules: string[];
+    openAiBaseUrlConfigured: boolean;
+    agentApiBaseUrlConfigured: boolean;
+    codexCliPathConfigured: boolean;
+  };
+}
+
+export interface AgentReadinessResponse {
+  ready: boolean;
+  hasApiKey: boolean;
+  hasAnthropicApiKey: boolean;
+  hasOpenAiApiKey: boolean;
+  hasClaudeAuth: boolean;
+  authSource: "api_key" | "profile" | "both" | "none";
+  detectedPath: string | null;
+  runtimeCount: number;
+  enabledRuntimeProfileCount: number;
+  runtimes: Array<{
+    id: string;
+    providerId: string;
+    displayName: string;
+    capabilities: Record<string, boolean>;
+  }>;
+  message: string;
+  checkedAt: string;
+}
+
 async function request<T>(
   url: string,
   options?: RequestInit,
@@ -96,20 +135,12 @@ async function request<T>(
 }
 
 export const api = {
-  getSettings(): Promise<{ useSubagents: boolean; maxReviewIterations: number }> {
+  getSettings(): Promise<SettingsResponse> {
     console.debug("[api] GET /settings");
     return request("/settings");
   },
 
-  getAgentReadiness(): Promise<{
-    ready: boolean;
-    hasApiKey: boolean;
-    hasClaudeAuth: boolean;
-    authSource: "api_key" | "claude_profile" | "both" | "none";
-    detectedPath: string | null;
-    message: string;
-    checkedAt: string;
-  }> {
+  getAgentReadiness(): Promise<AgentReadinessResponse> {
     console.debug("[api] GET /agent/readiness");
     return request("/agent/readiness");
   },
@@ -370,5 +401,114 @@ export const api = {
   deleteChatSession(id: string): Promise<void> {
     console.debug("[api] DELETE /chat/sessions/%s", id);
     return request(`/chat/sessions/${id}`, { method: "DELETE" });
+  },
+
+  // Runtime profiles
+  listRuntimeProfiles(params?: {
+    projectId?: string;
+    includeGlobal?: boolean;
+    enabledOnly?: boolean;
+  }): Promise<RuntimeProfile[]> {
+    const qs = new URLSearchParams();
+    if (params?.projectId) qs.set("projectId", params.projectId);
+    if (params?.includeGlobal !== undefined) qs.set("includeGlobal", String(params.includeGlobal));
+    if (params?.enabledOnly !== undefined) qs.set("enabledOnly", String(params.enabledOnly));
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return request<RuntimeProfile[]>(`/runtime-profiles${suffix}`);
+  },
+
+  listRuntimes(): Promise<
+    Array<{
+      id: string;
+      providerId: string;
+      displayName: string;
+      description: string | null;
+      capabilities: Record<string, boolean>;
+    }>
+  > {
+    return request("/runtime-profiles/runtimes");
+  },
+
+  createRuntimeProfile(input: CreateRuntimeProfileInput): Promise<RuntimeProfile> {
+    return request("/runtime-profiles", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+
+  updateRuntimeProfile(id: string, input: UpdateRuntimeProfileInput): Promise<RuntimeProfile> {
+    return request(`/runtime-profiles/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    });
+  },
+
+  deleteRuntimeProfile(id: string): Promise<{ success: boolean }> {
+    return request(`/runtime-profiles/${id}`, {
+      method: "DELETE",
+    });
+  },
+
+  validateRuntimeProfile(input: {
+    projectId?: string;
+    profileId?: string;
+    profile?: CreateRuntimeProfileInput;
+    modelOverride?: string | null;
+    runtimeOptions?: Record<string, unknown> | null;
+    apiKey?: string;
+    forceRefresh?: boolean;
+  }): Promise<{
+    ok: boolean;
+    message: string;
+    details: Record<string, unknown> | null;
+    profile: Record<string, unknown>;
+  }> {
+    return request("/runtime-profiles/validate", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+
+  listRuntimeModels(input: {
+    projectId?: string;
+    profileId?: string;
+    profile?: CreateRuntimeProfileInput;
+    modelOverride?: string | null;
+    runtimeOptions?: Record<string, unknown> | null;
+    apiKey?: string;
+    forceRefresh?: boolean;
+  }): Promise<{
+    models: Array<{
+      id: string;
+      label?: string;
+      supportsStreaming?: boolean;
+      metadata?: Record<string, unknown>;
+    }>;
+    profile: Record<string, unknown>;
+  }> {
+    return request("/runtime-profiles/models", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+
+  getEffectiveTaskRuntime(taskId: string): Promise<{
+    source: string;
+    profile: RuntimeProfile | null;
+    taskRuntimeProfileId: string | null;
+    projectRuntimeProfileId: string | null;
+    systemRuntimeProfileId: string | null;
+  }> {
+    return request(`/runtime-profiles/effective/task/${taskId}`);
+  },
+
+  getEffectiveChatRuntime(projectId: string): Promise<{
+    source: string;
+    profile: RuntimeProfile | null;
+    taskRuntimeProfileId: string | null;
+    projectRuntimeProfileId: string | null;
+    systemRuntimeProfileId: string | null;
+  }> {
+    return request(`/runtime-profiles/effective/chat/${projectId}`);
   },
 };

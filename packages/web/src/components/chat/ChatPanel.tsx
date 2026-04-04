@@ -435,7 +435,7 @@ export function ChatPanel({ isOpen, projectId, taskId, onClose, onOpenTask }: Ch
                   Usage Limit Reached
                 </Badge>
                 <p className="mt-1 text-xs text-amber-700/90 dark:text-amber-200/90">
-                  Claude usage limit is currently exhausted. Wait for reset time and send again.
+                  Runtime usage limit is currently exhausted. Wait for reset time and send again.
                 </p>
               </div>
             </div>

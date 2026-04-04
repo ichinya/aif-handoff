@@ -148,7 +148,7 @@ describe("ChatPanel", () => {
     expect(screen.getByText("Usage Limit Reached")).toBeDefined();
     expect(
       screen.getByText(
-        "Claude usage limit is currently exhausted. Wait for reset time and send again.",
+        "Runtime usage limit is currently exhausted. Wait for reset time and send again.",
       ),
     ).toBeDefined();
   });

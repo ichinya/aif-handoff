@@ -16,6 +16,7 @@ import { calculateTaskMetrics } from "./lib/taskMetrics";
 import { readStorage, writeStorage, removeStorage } from "./lib/storage";
 import { STORAGE_KEYS } from "./lib/storageKeys";
 import type { Project } from "@aif/shared/browser";
+import { ProjectRuntimeSettings } from "./components/project/ProjectRuntimeSettings";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -166,10 +167,12 @@ function AppContent() {
       >
         {agentReadiness && !agentReadiness.ready ? (
           <div className="mb-4 rounded border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-800 dark:text-red-200">
-            Claude auth is not configured. Set <code>ANTHROPIC_API_KEY</code> in <code>.env</code>{" "}
-            or sign in via Claude Code profile (<code>~/.claude</code>) to run AI stages.
+            Runtime execution is not configured.{" "}
+            {agentReadiness.message ||
+              "Configure at least one enabled runtime profile or provider credential to run AI stages."}
           </div>
         ) : null}
+        {project && <ProjectRuntimeSettings key={project.id} project={project} />}
         {project ? (
           <Board
             projectId={project.id}

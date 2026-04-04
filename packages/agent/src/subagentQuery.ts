@@ -11,6 +11,7 @@ import {
 import {
   assertRuntimeCapabilities,
   createClaudeRuntimeAdapter,
+  createCodexRuntimeAdapter,
   createRuntimeRegistry,
   createRuntimeWorkflowSpec,
   redactResolvedRuntimeProfile,
@@ -116,7 +117,7 @@ async function getRuntimeRegistry(): Promise<RuntimeRegistry> {
     const env = getEnv();
     const registry = createRuntimeRegistry({
       logger: createRuntimeRegistryLogger(),
-      builtInAdapters: [createClaudeRuntimeAdapter()],
+      builtInAdapters: [createClaudeRuntimeAdapter(), createCodexRuntimeAdapter()],
     });
 
     for (const moduleSpecifier of env.AIF_RUNTIME_MODULES) {

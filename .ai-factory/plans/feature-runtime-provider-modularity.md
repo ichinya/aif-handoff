@@ -68,10 +68,10 @@ Patterns and constraints to preserve:
 - [x] Task 5: Introduce a runtime-independent workflow spec layer
 - [x] Task 6: Extract a full-parity `ClaudeRuntimeAdapter`
 - [x] Task 7: Refactor the agent pipeline to run through the runtime registry
-- [ ] Task 8: Refactor chat, one-shot AI services, and readiness contracts to the shared runtime layer
-- [ ] Task 9: Add runtime profile CRUD, validation, and discovery endpoints
-- [ ] Task 10: Implement `CodexRuntimeAdapter` and prove the extension path
-- [ ] Task 11: Add runtime profile management and selection UI
+- [x] Task 8: Refactor chat, one-shot AI services, and readiness contracts to the shared runtime layer
+- [x] Task 9: Add runtime profile CRUD, validation, and discovery endpoints
+- [x] Task 10: Implement `CodexRuntimeAdapter` and prove the extension path
+- [x] Task 11: Add runtime profile management and selection UI
 - [ ] Task 12: Keep MCP and external task clients in sync with the new contracts
 - [ ] Task 13: Add regression coverage for migrations, adapters, capability gates, and UI selection
 - [ ] Task 14: Update architecture/config docs and run full verification

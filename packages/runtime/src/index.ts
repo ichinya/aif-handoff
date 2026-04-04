@@ -94,3 +94,9 @@ export {
   type ClaudeRuntimeAdapterLogger,
   type CreateClaudeRuntimeAdapterOptions,
 } from "./adapters/claude/index.js";
+
+export {
+  createCodexRuntimeAdapter,
+  type CodexRuntimeAdapterLogger,
+  type CreateCodexRuntimeAdapterOptions,
+} from "./adapters/codex/index.js";

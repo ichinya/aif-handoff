@@ -377,6 +377,17 @@ async function runClaudeQueryAttempt(
     const streamedText = extractStreamingText(message);
     if (streamedText) {
       outputText += streamedText;
+      const streamEvent: RuntimeEvent = {
+        type: "stream:text",
+        timestamp: new Date().toISOString(),
+        level: "debug",
+        message: streamedText,
+        data: {
+          text: streamedText,
+        },
+      };
+      events.push(streamEvent);
+      internal.execution.onEvent?.(streamEvent);
       return;
     }
 
