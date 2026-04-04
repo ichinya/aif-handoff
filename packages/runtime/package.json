@@ -12,8 +12,8 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "vitest run --passWithNoTests",
-    "coverage": "vitest run --coverage --passWithNoTests",
+    "test": "vitest run",
+    "coverage": "vitest run --coverage",
     "lint": "eslint \"src/**/*.ts\"",
     "test:watch": "vitest"
   },

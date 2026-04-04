@@ -18,6 +18,11 @@ Node packages (`@aif/api`, `@aif/agent`, `@aif/data`, `@aif/shared`) auto-load e
 | Variable                           | Type    | Default             | Description                                                                                                                                                                                                                                                             |
 | ---------------------------------- | ------- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ANTHROPIC_API_KEY`                | string  | _(optional)_        | Anthropic API key. The Agent SDK uses `~/.claude/` credentials by default, so this is only needed if you want to use a separate key                                                                                                                                     |
+| `OPENAI_API_KEY`                   | string  | _(optional)_        | API key used by OpenAI-compatible runtime profiles (for example Codex/OpenAI adapters)                                                                                                                                                                                  |
+| `OPENAI_BASE_URL`                  | string  | _(optional)_        | Default base URL for OpenAI-compatible runtime profiles                                                                                                                                                                                                                 |
+| `CODEX_CLI_PATH`                   | string  | _(optional)_        | Absolute path to the Codex CLI binary used by CLI-based runtime adapters                                                                                                                                                                                                |
+| `AGENTAPI_BASE_URL`                | string  | _(optional)_        | Base URL for AgentAPI transport used by runtime adapters                                                                                                                                                                                                                |
+| `AIF_RUNTIME_MODULES`              | string  | _(optional)_        | Comma-separated runtime module specifiers loaded at startup via `registerRuntimeModule(registry)`                                                                                                                                                                       |
 | `PORT`                             | number  | `3009`              | API server port                                                                                                                                                                                                                                                         |
 | `WEB_PORT`                         | number  | `5180`              | Web UI dev server port (Vite)                                                                                                                                                                                                                                           |
 | `POLL_INTERVAL_MS`                 | number  | `30000`             | How often the agent coordinator polls for tasks (milliseconds)                                                                                                                                                                                                          |
@@ -48,6 +53,12 @@ The Agent SDK supports two authentication methods:
 
 1. **Default (recommended):** Uses your active Claude subscription credentials from `~/.claude/`. No configuration needed.
 2. **API Key:** Set `ANTHROPIC_API_KEY` in `.env` to use a dedicated key.
+
+For runtime/provider modularity, OpenAI-compatible profiles can use:
+
+- `OPENAI_API_KEY` for authentication
+- `OPENAI_BASE_URL` for custom OpenAI-compatible endpoints
+- `AIF_RUNTIME_MODULES` for loading additional runtime modules at startup
 
 ### Runtime Readiness Check
 
