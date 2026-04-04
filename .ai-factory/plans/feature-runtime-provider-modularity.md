@@ -72,9 +72,9 @@ Patterns and constraints to preserve:
 - [x] Task 9: Add runtime profile CRUD, validation, and discovery endpoints
 - [x] Task 10: Implement `CodexRuntimeAdapter` and prove the extension path
 - [x] Task 11: Add runtime profile management and selection UI
-- [ ] Task 12: Keep MCP and external task clients in sync with the new contracts
-- [ ] Task 13: Add regression coverage for migrations, adapters, capability gates, and UI selection
-- [ ] Task 14: Update architecture/config docs and run full verification
+- [x] Task 12: Keep MCP and external task clients in sync with the new contracts
+- [x] Task 13: Add regression coverage for migrations, adapters, capability gates, and UI selection
+- [x] Task 14: Update architecture/config docs and run full verification
 
 ### Phase 1: Runtime Foundation
 

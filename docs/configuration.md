@@ -18,6 +18,7 @@ Node packages (`@aif/api`, `@aif/agent`, `@aif/data`, `@aif/shared`) auto-load e
 | Variable                           | Type    | Default             | Description                                                                                                                                                                                                                                                             |
 | ---------------------------------- | ------- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ANTHROPIC_API_KEY`                | string  | _(optional)_        | Anthropic API key. The Agent SDK uses `~/.claude/` credentials by default, so this is only needed if you want to use a separate key                                                                                                                                     |
+| `ANTHROPIC_BASE_URL`               | string  | _(optional)_        | Optional Anthropic-compatible proxy endpoint. When set, proxy/backend can decide model mapping for Claude requests                                                                                                                                                      |
 | `OPENAI_API_KEY`                   | string  | _(optional)_        | API key used by OpenAI-compatible runtime profiles (for example Codex/OpenAI adapters)                                                                                                                                                                                  |
 | `OPENAI_BASE_URL`                  | string  | _(optional)_        | Default base URL for OpenAI-compatible runtime profiles                                                                                                                                                                                                                 |
 | `CODEX_CLI_PATH`                   | string  | _(optional)_        | Absolute path to the Codex CLI binary used by CLI-based runtime adapters                                                                                                                                                                                                |
@@ -49,24 +50,37 @@ Environment validation is handled by Zod in `packages/shared/src/env.ts`. The ap
 
 ## Authentication
 
-The Agent SDK supports two authentication methods:
+Runtime profiles support provider-specific auth setup. Common flows:
 
-1. **Default (recommended):** Uses your active Claude subscription credentials from `~/.claude/`. No configuration needed.
-2. **API Key:** Set `ANTHROPIC_API_KEY` in `.env` to use a dedicated key.
+1. **Claude profile auth (recommended for local Claude runtime):** uses credentials from `~/.claude/`.
+2. **Anthropic API key:** set `ANTHROPIC_API_KEY`.
+3. **OpenAI-compatible API key:** set `OPENAI_API_KEY` (plus `OPENAI_BASE_URL` for custom endpoint).
 
-For runtime/provider modularity, OpenAI-compatible profiles can use:
+Optional runtime defaults:
 
-- `OPENAI_API_KEY` for authentication
-- `OPENAI_BASE_URL` for custom OpenAI-compatible endpoints
-- `AIF_RUNTIME_MODULES` for loading additional runtime modules at startup
+- `CODEX_CLI_PATH` for CLI transport adapters
+- `AGENTAPI_BASE_URL` for AgentAPI transport adapters
+- `AIF_RUNTIME_MODULES` for loading additional runtime modules at startup (`registerRuntimeModule(registry)`)
 
 ### Runtime Readiness Check
 
 API exposes `GET /agent/readiness` to verify auth state at runtime:
 
-- `ready=true`: agent can run AI stages.
-- `ready=false`: neither `ANTHROPIC_API_KEY` nor Claude profile auth was detected.
-- The web app shows a warning banner when `ready=false`.
+- `ready=true`: runtime registry is available and at least one execution path is configured (enabled profile, usable auth, or Codex CLI path).
+- `ready=false`: no usable runtime execution path detected.
+- Response includes runtime descriptor list, enabled profile count, and auth source diagnostics.
+
+## Runtime Profile Defaults
+
+Runtime profiles are persisted in SQLite (`runtime_profiles`) and can be selected at three levels:
+
+1. task override (`tasks.runtime_profile_id`)
+2. project default (`projects.default_task_runtime_profile_id` / `default_chat_runtime_profile_id`)
+3. optional system default used by runtime resolution services
+
+Only non-secret fields are persisted (`baseUrl`, `apiKeyEnvVar`, headers/options metadata, default model). Secret values remain in environment variables or temporary validation payloads.
+
+For concrete profile payloads and adapter capability differences, see [Providers](providers.md).
 
 ## Database
 
