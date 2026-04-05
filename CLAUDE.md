@@ -111,6 +111,12 @@ data/                    # SQLite database files (gitignored)
   - `implementer.ts` → `implement-coordinator` (spawns `implement-worker` + quality sidecars)
   - `reviewer.ts` → `review-sidecar` + `security-sidecar` (parallel review)
 
+## UI Component Rules
+
+- **Reuse existing components first.** Before creating a new UI component, check `packages/web/src/components/ui/` for an existing primitive that fits the need. Compose existing primitives (e.g. `Dialog` + `Button`) instead of writing new wrappers.
+- **Pencil sync required for new components.** If a new UI component is genuinely needed, its design must be synced with the Pencil design system (`.pen` files) using the `pencil` MCP tools (`batch_design`, `get_guidelines`). Never add a visual component to the codebase without a corresponding Pencil representation.
+- **UI primitives live in `packages/web/src/components/ui/`.** Domain-specific compositions belong in their feature folder (e.g. `components/task/`, `components/kanban/`).
+
 ## Project Rules
 
 - Every package must maintain at least 70% test coverage (measured by @vitest/coverage-v8)
