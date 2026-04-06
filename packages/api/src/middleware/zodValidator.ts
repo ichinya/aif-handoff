@@ -1,16 +1,13 @@
-import type { MiddlewareHandler } from "hono";
 import { zValidator } from "@hono/zod-validator";
-import type { ZodType } from "zod";
+import { z } from "zod";
 
 /**
- * Typed wrapper around @hono/zod-validator that avoids `as never` / `as any`
- * casts caused by Hono ↔ Zod generic mismatch.
- *
- * Usage:
- *   jsonValidator(myZodSchema)
- *
- * Validated data is available via `c.req.valid("json")`.
+ * Typed JSON body validator for Hono routes.
+ * Wraps @hono/zod-validator's zValidator with "json" target.
+ * The double-cast resolves the Zod v3/v4 generic mismatch that makes
+ * the direct call fail on stricter TypeScript configurations.
  */
-export function jsonValidator<T extends ZodType>(schema: T): MiddlewareHandler {
-  return zValidator("json", schema as never);
+export function jsonValidator<T extends z.ZodTypeAny>(schema: T) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return zValidator("json", schema as any);
 }
