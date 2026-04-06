@@ -95,7 +95,14 @@ describe("runClaudeCli", () => {
     // Verify spawn args
     expect(spawn).toHaveBeenCalledWith(
       "claude",
-      expect.arrayContaining(["--output-format", "json", "--yes", "-p", "Implement the feature"]),
+      expect.arrayContaining([
+        "--output-format",
+        "json",
+        "--permission-mode",
+        "acceptEdits",
+        "-p",
+        "Implement the feature",
+      ]),
       expect.objectContaining({ cwd: "/tmp/project" }),
     );
   });
@@ -151,7 +158,7 @@ describe("runClaudeCli", () => {
 
     const spawnArgs = (spawn as ReturnType<typeof vi.fn>).mock.calls[0][1] as string[];
     expect(spawnArgs).toContain("--dangerously-skip-permissions");
-    expect(spawnArgs).not.toContain("--yes");
+    expect(spawnArgs).not.toContain("acceptEdits");
   });
 
   it("throws classified error on non-zero exit code", async () => {

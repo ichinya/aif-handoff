@@ -134,11 +134,11 @@ function buildCliArgs(input: RuntimeRunInput): string[] {
     args.push("--append-system-prompt", systemAppend);
   }
 
-  // Accept edits / bypass permissions
+  // Permission mode
   if (execution?.bypassPermissions) {
     args.push("--dangerously-skip-permissions");
   } else {
-    args.push("--yes");
+    args.push("--permission-mode", "acceptEdits");
   }
 
   // Prompt
