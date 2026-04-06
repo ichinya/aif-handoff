@@ -5,6 +5,7 @@ import {
   useCallback,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import { useOutsideClick } from "@/hooks/useOutsideClick";
 import {
   Send,
@@ -166,7 +167,7 @@ export function ChatPanel({ isOpen, projectId, taskId, onClose, onOpenTask }: Ch
   const activeRuntimeModel =
     effectiveChatRuntime?.resolved?.model ?? effectiveChatRuntime?.profile?.defaultModel ?? "auto";
 
-  return (
+  const content = (
     <div
       ref={panelRef}
       className={cn(
@@ -379,4 +380,6 @@ export function ChatPanel({ isOpen, projectId, taskId, onClose, onOpenTask }: Ch
       </div>
     </div>
   );
+
+  return createPortal(content, document.body);
 }

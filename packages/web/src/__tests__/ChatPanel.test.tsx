@@ -220,11 +220,10 @@ describe("ChatPanel", () => {
   });
 
   it("is hidden when isOpen is false", () => {
-    const { container } = render(
-      <ChatPanel isOpen={false} projectId="p-1" taskId={null} onClose={mockOnClose} />,
-    );
-    const panel = container.firstChild as HTMLElement;
-    expect(panel.className).toContain("-translate-x-full");
+    render(<ChatPanel isOpen={false} projectId="p-1" taskId={null} onClose={mockOnClose} />);
+    // Portal renders to document.body
+    const panel = document.body.querySelector("[class*='-translate-x-full']");
+    expect(panel).not.toBeNull();
   });
 
   it("renders a single attachment badge on a user message", () => {
@@ -317,13 +316,10 @@ describe("ChatPanel", () => {
 
   it("does not render attachment section when message has no attachments", () => {
     mockMessages = [{ role: "user", content: "Plain message" }];
-    const { container } = render(
-      <ChatPanel isOpen={true} projectId="p-1" taskId={null} onClose={mockOnClose} />,
-    );
-    // No paperclip icons in message bubbles (only in input area)
-    const messageBubbles = container.querySelectorAll(".bg-blue-600\\/15");
+    render(<ChatPanel isOpen={true} projectId="p-1" taskId={null} onClose={mockOnClose} />);
+    // Portal renders to document.body — query there
+    const messageBubbles = document.body.querySelectorAll(".bg-blue-600\\/15");
     expect(messageBubbles.length).toBe(1);
-    // The message bubble should not contain any nested flex-wrap div for attachments
     expect(messageBubbles[0].querySelector(".flex-wrap")).toBeNull();
   });
 });

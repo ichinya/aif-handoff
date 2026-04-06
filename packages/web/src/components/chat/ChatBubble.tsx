@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import { Bot } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -10,7 +11,7 @@ interface ChatBubbleProps {
 export function ChatBubble({ isOpen, onToggle }: ChatBubbleProps) {
   if (isOpen) return null;
 
-  return (
+  return createPortal(
     <Button
       onClick={onToggle}
       size="icon"
@@ -21,6 +22,7 @@ export function ChatBubble({ isOpen, onToggle }: ChatBubbleProps) {
       aria-label="Open chat"
     >
       <Bot className="h-6 w-6" />
-    </Button>
+    </Button>,
+    document.body,
   );
 }
