@@ -366,7 +366,7 @@ export async function executeSubagentQuery(
     logActivity(
       taskId,
       "Agent",
-      `${agentName} started (runtime=${context.runtimeId}, transport=${context.transport}, model=${context.model ?? "default"})`,
+      `${agentName} started (runtime=${context.runtimeId}, transport=${context.transport}, profile=${context.profileId ?? "default"}, model=${context.model ?? "default"})`,
     );
     const existingSessionId = context.canResume ? getTaskSessionId(taskId) : null;
     const shouldResume = Boolean(existingSessionId && context.canResume);
@@ -461,7 +461,7 @@ export async function executeSubagentQuery(
     logActivity(
       taskId,
       "Agent",
-      `${agentName} complete (runtime=${context.runtimeId}, profile=${context.profileId ?? "default"}, model=${context.model ?? "default"})`,
+      `${agentName} complete (runtime=${context.runtimeId}, transport=${context.transport}, profile=${context.profileId ?? "default"}, model=${context.model ?? "default"})`,
     );
 
     return { resultText };

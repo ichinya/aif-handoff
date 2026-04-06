@@ -5,6 +5,7 @@ export type ActivityFilter = "all" | "tool" | "error" | "agent";
 
 export interface RuntimeMeta {
   runtimeId?: string;
+  transport?: string;
   profileId?: string;
   model?: string;
 }
@@ -47,14 +48,20 @@ export function parseEntry(line: string): ParsedEntry {
 }
 
 function parseRuntimeMeta(content: string): RuntimeMeta | undefined {
-  const match = content.match(
-    /\(runtime=([^,)]+)(?:,\s*profile=([^,)]+))?(?:,\s*model=([^,)]+))?\)/,
-  );
+  const match = content.match(/\(runtime=([^,)]+)/);
   if (!match) return undefined;
+
+  const block = content.match(/\([^)]*\)$/)?.[0] ?? "";
+  const get = (key: string) => {
+    const m = block.match(new RegExp(`${key}=([^,)]+)`));
+    return m && m[1] !== "default" ? m[1] : undefined;
+  };
+
   return {
-    runtimeId: match[1] !== "default" ? match[1] : undefined,
-    profileId: match[2] !== "default" ? match[2] : undefined,
-    model: match[3] !== "default" ? match[3] : undefined,
+    runtimeId: get("runtime"),
+    transport: get("transport"),
+    profileId: get("profile"),
+    model: get("model"),
   };
 }
 
