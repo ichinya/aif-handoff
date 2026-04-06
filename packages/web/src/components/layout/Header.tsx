@@ -200,7 +200,11 @@ export function Header({
         project={selectedProject}
         onImportComplete={onRoadmapImportComplete}
       />
-      <GlobalSettingsDialog open={globalSettingsOpen} onOpenChange={setGlobalSettingsOpen} />
+      <GlobalSettingsDialog
+        open={globalSettingsOpen}
+        onOpenChange={setGlobalSettingsOpen}
+        projectId={selectedProject?.id ?? null}
+      />
     </header>
   );
 }
