@@ -63,7 +63,10 @@ function bridgeSubagentStartHook(onSubagentStart: RuntimeSubagentStartCallback):
   return async (input) => {
     if (!isRecord(input)) return {};
     const data = input as Record<string, unknown>;
-    const name = String(data.agent_name ?? data.subagent_type ?? data.description ?? "unknown");
+    // SDK sends agent_type (e.g. "plan-coordinator") and agent_id
+    const name = String(
+      data.agent_type ?? data.agent_name ?? data.subagent_type ?? data.description ?? "unknown",
+    );
     const id = String(data.agent_id ?? data.session_id ?? "");
     onSubagentStart(name, id);
     return {};

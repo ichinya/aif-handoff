@@ -356,7 +356,6 @@ export async function executeSubagentQuery(
   const { taskId, projectRoot, agentName } = options;
   const stderrCollector = createStderrCollector();
   const heartbeatTimer = startHeartbeat(taskId);
-  logActivity(taskId, "Agent", `${agentName} started`);
 
   let runtimeIdForError = getEnv().AIF_DEFAULT_RUNTIME_ID;
   let adapter: RuntimeAdapter | null = null;
@@ -364,6 +363,11 @@ export async function executeSubagentQuery(
   try {
     const context = await resolveExecutionContext(options);
     runtimeIdForError = context.runtimeId;
+    logActivity(
+      taskId,
+      "Agent",
+      `${agentName} started (runtime=${context.runtimeId}, transport=${context.transport}, model=${context.model ?? "default"})`,
+    );
     const existingSessionId = context.canResume ? getTaskSessionId(taskId) : null;
     const shouldResume = Boolean(existingSessionId && context.canResume);
 
