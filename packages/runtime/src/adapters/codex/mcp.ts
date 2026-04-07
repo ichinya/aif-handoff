@@ -12,6 +12,18 @@ const CODEX_CONFIG_PATH = join(homedir(), ".codex", "config.toml");
  * Does not depend on a full TOML library.
  */
 
+function parseTomlString(rawValue: string): string {
+  try {
+    return JSON.parse(rawValue);
+  } catch {
+    return rawValue.replace(/^"(.*)"$/, "$1");
+  }
+}
+
+function serializeTomlString(value: string): string {
+  return JSON.stringify(value);
+}
+
 function parseMcpServers(toml: string): Record<string, { command: string; args: string[] }> {
   const servers: Record<string, { command: string; args: string[] }> = {};
   const sectionRegex = /^\[mcp_servers\.([^\]]+)\]\s*$/;
@@ -36,7 +48,7 @@ function parseMcpServers(toml: string): Record<string, { command: string; args: 
     if (!kvMatch) continue;
     const [, key, rawValue] = kvMatch;
     if (key === "command") {
-      currentCommand = rawValue.replace(/^"(.*)"$/, "$1");
+      currentCommand = parseTomlString(rawValue);
     } else if (key === "args") {
       try {
         currentArgs = JSON.parse(rawValue.replace(/'/g, '"'));
@@ -53,9 +65,9 @@ function parseMcpServers(toml: string): Record<string, { command: string; args: 
 
 function serializeMcpSection(name: string, entry: { command: string; args?: string[] }): string {
   const lines = [`[mcp_servers.${name}]`];
-  lines.push(`command = "${entry.command}"`);
+  lines.push(`command = ${serializeTomlString(entry.command)}`);
   if (entry.args && entry.args.length > 0) {
-    const argsStr = entry.args.map((a) => `"${a}"`).join(", ");
+    const argsStr = entry.args.map((a) => serializeTomlString(a)).join(", ");
     lines.push(`args = [ ${argsStr} ]`);
   }
   return lines.join("\n");
