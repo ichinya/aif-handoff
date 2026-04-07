@@ -12,20 +12,20 @@ Created: 2026-04-07
 ## Roadmap Linkage
 
 Milestone: "OpenRouter Runtime Adapter"
-Rationale: Расширение поддерживаемых AI-провайдеров — OpenRouter даёт доступ к 200+ моделям через единый API.
+Rationale: Expand supported AI providers — OpenRouter gives access to 200+ models via a single API.
 
 ## Overview
 
-Добавить built-in OpenRouter runtime adapter в `@aif/runtime`. OpenRouter — это OpenAI-совместимый API-прокси, дающий доступ к моделям Anthropic, OpenAI, Google, Meta и других провайдеров через единый endpoint. Адаптер использует только API transport (HTTP), поддерживает streaming (SSE) и model discovery.
+Add a built-in OpenRouter runtime adapter to `@aif/runtime`. OpenRouter is an OpenAI-compatible API proxy providing access to models from Anthropic, OpenAI, Google, Meta, and other providers through a single endpoint. The adapter uses API transport only (HTTP), supports streaming (SSE) and model discovery.
 
-### Ключевые решения
+### Key Decisions
 
-- **Только API transport** — OpenRouter не имеет CLI или SDK, только REST API
-- **OpenAI-совместимый формат** — chat completions, SSE streaming, `/models` endpoint
-- **Специфичные заголовки** — `HTTP-Referer` и `X-Title` (рекомендуемые OpenRouter)
-- **Модели в формате `provider/model`** — напр. `anthropic/claude-sonnet-4`, `openai/gpt-4o`
-- **`lightModel: null`** — пользователь настраивает через runtime profile (слишком много вариантов)
-- **Default base URL** — `https://openrouter.ai/api/v1` (с возможностью override для self-hosted)
+- **API transport only** — OpenRouter has no CLI or SDK, only a REST API
+- **OpenAI-compatible format** — chat completions, SSE streaming, `/models` endpoint
+- **Provider-specific headers** — `HTTP-Referer` and `X-Title` (recommended by OpenRouter)
+- **Models in `provider/model` format** — e.g. `anthropic/claude-sonnet-4`, `openai/gpt-4o`
+- **`lightModel: null`** — user configures via runtime profile (too many options to pick a default)
+- **Default base URL** — `https://openrouter.ai/api/v1` (overridable for self-hosted proxies)
 
 ### Capabilities
 
