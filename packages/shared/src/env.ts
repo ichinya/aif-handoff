@@ -34,7 +34,6 @@ const envSchema = z.object({
   OPENAI_BASE_URL: z.string().optional(),
   OPENAI_MODEL: z.string().optional(),
   CODEX_CLI_PATH: z.string().optional(),
-  AGENTAPI_BASE_URL: z.string().optional(),
   AIF_RUNTIME_MODULES: z.preprocess(parseRuntimeModules, z.array(z.string())).default([]),
   AIF_DEFAULT_RUNTIME_ID: z.string().default("claude"),
   AIF_DEFAULT_PROVIDER_ID: z.string().default("anthropic"),
@@ -138,13 +137,6 @@ function warnOnRuntimeDefaults(env: Env): void {
     );
   }
 
-  if (env.AGENTAPI_BASE_URL && !env.OPENAI_API_KEY) {
-    log.warn(
-      { hasAgentApiBaseUrl: true, hasOpenAiApiKey: false },
-      "AGENTAPI_BASE_URL is configured without OPENAI_API_KEY",
-    );
-  }
-
   const deduplicatedModules = [...new Set(env.AIF_RUNTIME_MODULES)];
   if (deduplicatedModules.length !== env.AIF_RUNTIME_MODULES.length) {
     log.warn(
@@ -176,7 +168,6 @@ export function getEnv(): Env {
       hasAnthropicBaseUrl: Boolean(_env.ANTHROPIC_BASE_URL),
       hasAnthropicModel: Boolean(_env.ANTHROPIC_MODEL),
       hasOpenAiBaseUrl: Boolean(_env.OPENAI_BASE_URL),
-      hasAgentApiBaseUrl: Boolean(_env.AGENTAPI_BASE_URL),
       hasCodexCliPath: Boolean(_env.CODEX_CLI_PATH),
     },
     "Runtime environment defaults resolved",

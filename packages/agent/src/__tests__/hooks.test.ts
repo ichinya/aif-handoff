@@ -38,7 +38,6 @@ function makeEnv(overrides: Record<string, unknown> = {}) {
     OPENAI_API_KEY: undefined,
     OPENAI_BASE_URL: undefined,
     CODEX_CLI_PATH: undefined,
-    AGENTAPI_BASE_URL: undefined,
     AIF_RUNTIME_MODULES: [],
     AIF_DEFAULT_RUNTIME_ID: "claude",
     AIF_DEFAULT_PROVIDER_ID: "anthropic",

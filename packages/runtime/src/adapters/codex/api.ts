@@ -44,12 +44,9 @@ function resolveAgentApiBaseUrl(input: RuntimeRunInput | RuntimeConnectionValida
   const baseUrl =
     readString(options.agentApiBaseUrl) ??
     readString(options.baseUrl) ??
-    readString(process.env.AGENTAPI_BASE_URL) ??
     readString(process.env.OPENAI_BASE_URL);
   if (!baseUrl) {
-    throw classifyCodexRuntimeError(
-      "Codex API transport requires agentApiBaseUrl/baseUrl/AGENTAPI_BASE_URL",
-    );
+    throw classifyCodexRuntimeError("Codex API transport requires baseUrl or OPENAI_BASE_URL");
   }
   return baseUrl.replace(/\/+$/, "");
 }
@@ -110,7 +107,7 @@ export async function runCodexAgentApi(
       transport: "api",
       url,
     },
-    "Starting Codex AgentAPI run",
+    "Starting Codex OpenAI API run",
   );
 
   try {
@@ -133,7 +130,7 @@ export async function runCodexAgentApi(
 
     const rawText = await response.text();
     if (!response.ok) {
-      throw new Error(`AgentAPI HTTP ${response.status}: ${rawText}`);
+      throw new Error(`OpenAI API HTTP ${response.status}: ${rawText}`);
     }
 
     const payload = rawText.trim().length > 0 ? JSON.parse(rawText) : {};
@@ -165,12 +162,12 @@ export async function validateCodexAgentApiConnection(
     if (!response.ok) {
       return {
         ok: false,
-        message: `AgentAPI health check failed with status ${response.status}`,
+        message: `OpenAI API health check failed with status ${response.status}`,
       };
     }
     return {
       ok: true,
-      message: "AgentAPI connection validated",
+      message: "OpenAI API connection validated",
     };
   } catch (error) {
     throw classifyCodexRuntimeError(error);
@@ -192,7 +189,7 @@ export async function listCodexAgentApiModels(
       headers: buildHeaders(inputWithOptions),
     });
     if (!response.ok) {
-      throw new Error(`AgentAPI model listing failed with status ${response.status}`);
+      throw new Error(`OpenAI API model listing failed with status ${response.status}`);
     }
     const payload = (await response.json()) as {
       models?: Array<{

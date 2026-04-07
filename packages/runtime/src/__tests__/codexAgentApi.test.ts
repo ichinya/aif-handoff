@@ -126,7 +126,7 @@ describe("codex agentapi transport", () => {
       options: { agentApiBaseUrl: "https://agent.example.com" },
     });
 
-    expect(result).toEqual({ ok: true, message: "AgentAPI connection validated" });
+    expect(result).toEqual({ ok: true, message: "OpenAI API connection validated" });
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("https://agent.example.com/v1/models");
     expect(init.method).toBe("GET");
@@ -181,7 +181,7 @@ describe("codex agentapi transport", () => {
   });
 
   it("uses env fallback for base url and API key", async () => {
-    vi.stubEnv("AGENTAPI_BASE_URL", "https://agent.env/");
+    vi.stubEnv("OPENAI_BASE_URL", "https://api.env/");
     vi.stubEnv("OPENAI_API_KEY", "env-key");
     fetchMock.mockResolvedValueOnce(new Response("ok", { status: 200 }));
 
@@ -192,7 +192,7 @@ describe("codex agentapi transport", () => {
     });
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("https://agent.env/v1/models");
+    expect(url).toBe("https://api.env/v1/models");
     const headers = new Headers(init.headers);
     expect(headers.get("authorization")).toBe("Bearer env-key");
   });

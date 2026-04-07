@@ -46,7 +46,6 @@ describe("env validation", () => {
     expect(result.OPENAI_BASE_URL).toBeUndefined();
     expect(result.OPENAI_MODEL).toBeUndefined();
     expect(result.CODEX_CLI_PATH).toBeUndefined();
-    expect(result.AGENTAPI_BASE_URL).toBeUndefined();
     expect(result.AIF_RUNTIME_MODULES).toEqual([]);
     expect(result.AGENT_QUERY_AUDIT_ENABLED).toBe(true);
     expect(result.LOG_LEVEL).toBe("debug");

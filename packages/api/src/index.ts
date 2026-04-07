@@ -121,7 +121,6 @@ app.get("/settings", (c) => {
         runtimeDefaults: {
           modules: env.AIF_RUNTIME_MODULES,
           openAiBaseUrlConfigured: Boolean(env.OPENAI_BASE_URL),
-          agentApiBaseUrlConfigured: Boolean(env.AGENTAPI_BASE_URL),
           codexCliPathConfigured: Boolean(env.CODEX_CLI_PATH),
         },
       });
@@ -141,7 +140,6 @@ app.get("/settings", (c) => {
         runtimeDefaults: {
           modules: env.AIF_RUNTIME_MODULES,
           openAiBaseUrlConfigured: Boolean(env.OPENAI_BASE_URL),
-          agentApiBaseUrlConfigured: Boolean(env.AGENTAPI_BASE_URL),
           codexCliPathConfigured: Boolean(env.CODEX_CLI_PATH),
         },
       });

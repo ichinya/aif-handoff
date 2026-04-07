@@ -25,7 +25,6 @@ Node packages (`@aif/api`, `@aif/agent`, `@aif/data`, `@aif/shared`) auto-load e
 | `OPENAI_BASE_URL`                  | string  | _(optional)_                   | Default base URL for OpenAI-compatible runtime profiles                                                                                                                                                                                                                 |
 | `OPENAI_MODEL`                     | string  | _(optional)_                   | Default OpenAI/Codex model alias/id used when runtime profile does not set `defaultModel`                                                                                                                                                                               |
 | `CODEX_CLI_PATH`                   | string  | _(optional)_                   | Absolute path to the Codex CLI binary used by CLI-based runtime adapters                                                                                                                                                                                                |
-| `AGENTAPI_BASE_URL`                | string  | _(optional)_                   | Base URL for AgentAPI transport used by runtime adapters                                                                                                                                                                                                                |
 | `OPENROUTER_API_KEY`               | string  | _(optional)_                   | OpenRouter API key for the built-in OpenRouter adapter                                                                                                                                                                                                                  |
 | `OPENROUTER_BASE_URL`              | string  | `https://openrouter.ai/api/v1` | Custom OpenRouter-compatible endpoint (for self-hosted proxies)                                                                                                                                                                                                         |
 | `OPENROUTER_MODEL`                 | string  | _(optional)_                   | Default OpenRouter model (e.g. `anthropic/claude-sonnet-4`) when profile does not set `defaultModel`                                                                                                                                                                    |
@@ -60,7 +59,7 @@ Runtime profiles support provider-specific auth setup. Each adapter resolves cre
 
 1. **Claude adapter (SDK transport):** uses credentials from `~/.claude/` or `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`.
 2. **Codex adapter (CLI transport):** uses `OPENAI_API_KEY` (plus `OPENAI_BASE_URL` for custom endpoint).
-3. **Codex adapter (API transport):** uses `OPENAI_API_KEY` + `AGENTAPI_BASE_URL` for remote execution.
+3. **Codex adapter (API transport):** uses `OPENAI_API_KEY` + `OPENAI_BASE_URL` for remote execution.
 4. **OpenRouter adapter (API transport):** uses `OPENROUTER_API_KEY` + `OPENROUTER_BASE_URL` (defaults to `https://openrouter.ai/api/v1`). Models use `provider/model` format.
 5. **Custom adapters:** loaded via `AIF_RUNTIME_MODULES`, each adapter resolves its own env vars.
 
@@ -69,7 +68,6 @@ The default runtime can be changed via `AIF_DEFAULT_RUNTIME_ID` and `AIF_DEFAULT
 Optional runtime defaults:
 
 - `CODEX_CLI_PATH` for CLI transport adapters
-- `AGENTAPI_BASE_URL` for AgentAPI transport adapters
 - `AIF_RUNTIME_MODULES` for loading additional runtime modules at startup (`registerRuntimeModule(registry)`)
 
 ### Runtime Readiness Check

@@ -28,7 +28,6 @@ export interface RuntimeResolutionEnv {
   OPENROUTER_BASE_URL?: string;
   OPENROUTER_MODEL?: string;
   CODEX_CLI_PATH?: string;
-  AGENTAPI_BASE_URL?: string;
   [key: string]: string | undefined;
 }
 
@@ -177,13 +176,6 @@ function applyTransportDefaults(
     }
   }
 
-  if (transport === RuntimeTransport.API) {
-    const agentApiBaseUrl = normalizeString(env.AGENTAPI_BASE_URL);
-    if (agentApiBaseUrl && options.agentApiBaseUrl == null) {
-      return { ...options, agentApiBaseUrl };
-    }
-  }
-
   return options;
 }
 
@@ -315,7 +307,7 @@ export function validateResolvedRuntimeProfile(
       );
     }
     if (!resolved.baseUrl && typeof resolved.options.agentApiBaseUrl !== "string") {
-      warnings.push("API transport requires a base URL (set profile baseUrl or AGENTAPI_BASE_URL)");
+      warnings.push("API transport requires a base URL (set profile baseUrl or OPENAI_BASE_URL)");
     }
   }
 

@@ -78,7 +78,6 @@ export interface SettingsResponse {
   runtimeDefaults: {
     modules: string[];
     openAiBaseUrlConfigured: boolean;
-    agentApiBaseUrlConfigured: boolean;
     codexCliPathConfigured: boolean;
   };
 }

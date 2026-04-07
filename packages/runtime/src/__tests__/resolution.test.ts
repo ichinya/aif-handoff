@@ -24,7 +24,6 @@ describe("resolveRuntimeProfile", () => {
       env: {
         OPENAI_API_KEY: "sk-test",
         OPENAI_BASE_URL: "https://api.openai.com/v1",
-        AGENTAPI_BASE_URL: "http://localhost:8080",
       },
       modelOverride: "gpt-5.4-mini",
       runtimeOptionsOverride: { approvalMode: "manual", region: "us" },
@@ -39,7 +38,6 @@ describe("resolveRuntimeProfile", () => {
     expect(resolved.options).toEqual({
       approvalMode: "manual",
       region: "us",
-      agentApiBaseUrl: "http://localhost:8080",
     });
   });
 
