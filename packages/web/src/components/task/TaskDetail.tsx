@@ -226,7 +226,7 @@ export function TaskDetail({ taskId, onClose }: TaskDetailProps) {
               size="sm"
               onClick={() => {
                 actions.setShowStartAiConfirm(false);
-                actions.triggerStartAi();
+                actions.triggerStartAi({ deletePlanFile: true });
               }}
             >
               Overwrite & Re-plan
