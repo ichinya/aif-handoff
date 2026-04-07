@@ -126,6 +126,26 @@ describe("codex api transport (OpenAI Chat Completions)", () => {
     });
   });
 
+  it("retries non-stream request on retryable 5xx response", async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response("temporary failure", { status: 500 }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          id: "chatcmpl-retry",
+          choices: [{ message: { role: "assistant", content: "recovered" } }],
+        }),
+      );
+
+    const result = await runCodexAgentApi(
+      createRunInput({
+        options: { baseUrl: "https://api.openai.com/v1", apiRetryCount: 2 },
+      }),
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.outputText).toBe("recovered");
+  });
+
   it("validates connection via /models endpoint", async () => {
     fetchMock.mockResolvedValueOnce(new Response("ok", { status: 200 }));
 
@@ -289,5 +309,32 @@ describe("codex api transport (OpenAI Chat Completions)", () => {
     expect(events).toHaveLength(2);
     expect(events[0].message).toBe("Hello");
     expect(events[1].message).toBe(" world");
+  });
+
+  it("retries streaming request on retryable 5xx response", async () => {
+    const sseBody = [
+      'data: {"id":"chatcmpl-2","choices":[{"delta":{"content":"ok"}}]}',
+      "data: [DONE]",
+      "",
+    ].join("\n");
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(sseBody));
+        controller.close();
+      },
+    });
+
+    fetchMock
+      .mockResolvedValueOnce(new Response("temporary failure", { status: 502 }))
+      .mockResolvedValueOnce(new Response(stream, { status: 200 }));
+
+    const result = await runCodexAgentApiStreaming(
+      createRunInput({
+        options: { baseUrl: "https://api.openai.com/v1", apiRetryCount: 2 },
+      }),
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.outputText).toBe("ok");
   });
 });

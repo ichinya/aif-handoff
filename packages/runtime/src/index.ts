@@ -128,3 +128,15 @@ export {
   type CodexRuntimeAdapterLogger,
   type CreateCodexRuntimeAdapterOptions,
 } from "./adapters/codex/index.js";
+
+export {
+  createOpenCodeRuntimeAdapter,
+  type CreateOpenCodeRuntimeAdapterOptions,
+  type OpenCodeRuntimeAdapterLogger,
+} from "./adapters/opencode/index.js";
+
+export {
+  createOpenRouterRuntimeAdapter,
+  type CreateOpenRouterRuntimeAdapterOptions,
+  type OpenRouterAdapterLogger,
+} from "./adapters/openrouter/index.js";

@@ -207,6 +207,7 @@ export function createCodexRuntimeAdapter(
 
   async function runByTransport(input: RuntimeRunInput): Promise<RuntimeRunResult> {
     const transport = resolveTransport({ transport: input.transport, options: input.options });
+    const wantsStreaming = input.execution?.onEvent != null;
     logger.info?.(
       {
         runtimeId,
@@ -221,7 +222,6 @@ export function createCodexRuntimeAdapter(
     }
 
     if (transport === RuntimeTransport.API) {
-      const wantsStreaming = input.execution?.onEvent != null;
       if (wantsStreaming) {
         return runCodexAgentApiStreaming({ ...input, transport }, logger);
       }

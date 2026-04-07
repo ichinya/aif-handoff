@@ -232,6 +232,40 @@ describe("useChat", () => {
     expect(result.current.isStreaming).toBe(false);
   });
 
+  it("does not duplicate error message when ws chat:error and http failure happen together", async () => {
+    let rejectSend: ((reason?: unknown) => void) | null = null;
+    mockSendChatMessage.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectSend = reject;
+        }),
+    );
+
+    const { result } = renderHook(() => useChat("p-1"));
+
+    const sendPromise = act(async () => {
+      await result.current.sendMessage("Hello");
+    });
+
+    const conversationId = mockSendChatMessage.mock.calls[0][0].conversationId as string;
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("chat:error", {
+          detail: { conversationId, message: "Chat request failed" },
+        }),
+      );
+    });
+
+    rejectSend!(new Error("Chat request failed"));
+    await sendPromise;
+
+    const assistantErrors = result.current.messages.filter(
+      (m) => m.role === "assistant" && m.content === "Chat request failed",
+    );
+    expect(assistantErrors).toHaveLength(1);
+  });
+
   it("toggles explore mode", () => {
     const { result } = renderHook(() => useChat("p-1"));
 

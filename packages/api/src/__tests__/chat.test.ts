@@ -242,6 +242,13 @@ describe("chat API", () => {
     const resumeInput = mockAdapterResume.mock.calls[0][0] as RuntimeRunInput;
     expect(resumeInput.prompt).toContain("/aif-explore investigate this");
     expect(resumeInput.sessionId).toBe("runtime-session-prev");
+    expect(mockCreateChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session-1",
+        role: "assistant",
+        content: "resumed output",
+      }),
+    );
   });
 
   it("returns 429 and emits chat:error for usage-limit failures", async () => {

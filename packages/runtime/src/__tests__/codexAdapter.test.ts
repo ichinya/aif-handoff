@@ -74,6 +74,40 @@ describe("Codex runtime adapter", () => {
     expect(runCodexCliMock).not.toHaveBeenCalled();
   });
 
+  it("does not fall back from CLI to API on websocket 500 even when API config is present", async () => {
+    runCodexCliMock.mockRejectedValueOnce(
+      new Error(
+        "Codex CLI exited with code 1: ... responses_websocket ... HTTP error: 500 Internal Server Error, url: wss://api.openai.com/v1/responses",
+      ),
+    );
+    const adapter = createCodexRuntimeAdapter();
+    await expect(
+      adapter.run(
+        createRunInput({
+          options: {
+            apiKey: "sk-test",
+            baseUrl: "https://api.openai.com/v1",
+          },
+        }),
+      ),
+    ).rejects.toThrow(/responses_websocket/i);
+    expect(runCodexCliMock).toHaveBeenCalledTimes(1);
+    expect(runCodexAgentApiMock).not.toHaveBeenCalled();
+  });
+
+  it("does not fall back when CLI fails but API config is missing", async () => {
+    runCodexCliMock.mockRejectedValueOnce(
+      new Error(
+        "Codex CLI exited with code 1: ... responses_websocket ... HTTP error: 500 Internal Server Error, url: wss://api.openai.com/v1/responses",
+      ),
+    );
+    const adapter = createCodexRuntimeAdapter();
+
+    await expect(adapter.run(createRunInput())).rejects.toThrow(/responses_websocket/i);
+    expect(runCodexCliMock).toHaveBeenCalledTimes(1);
+    expect(runCodexAgentApiMock).not.toHaveBeenCalled();
+  });
+
   it("resumes sessions using selected transport", async () => {
     const adapter = createCodexRuntimeAdapter();
     await adapter.resume!(

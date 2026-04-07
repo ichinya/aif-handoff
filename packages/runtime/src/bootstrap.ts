@@ -1,5 +1,6 @@
 import { createClaudeRuntimeAdapter } from "./adapters/claude/index.js";
 import { createCodexRuntimeAdapter } from "./adapters/codex/index.js";
+import { createOpenCodeRuntimeAdapter } from "./adapters/opencode/index.js";
 import { createOpenRouterRuntimeAdapter } from "./adapters/openrouter/index.js";
 import {
   createRuntimeRegistry,
@@ -25,6 +26,7 @@ export async function bootstrapRuntimeRegistry(
     builtInAdapters: [
       createClaudeRuntimeAdapter(),
       createCodexRuntimeAdapter(),
+      createOpenCodeRuntimeAdapter(),
       createOpenRouterRuntimeAdapter(),
     ],
     logger: options.logger,

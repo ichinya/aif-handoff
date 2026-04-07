@@ -59,7 +59,7 @@ describe("codex cli transport", () => {
     vi.unstubAllEnvs();
   });
 
-  it("runs codex cli with default args and writes prompt to stdin", async () => {
+  it("runs codex cli with default args and passes prompt as positional arg", async () => {
     const child = createMockChildProcess();
     spawnMock.mockReturnValueOnce(child);
 
@@ -68,8 +68,8 @@ describe("codex cli transport", () => {
     expect(spawnMock).toHaveBeenCalledTimes(1);
     const [cliPath, args] = spawnMock.mock.calls[0] as [string, string[]];
     expect(cliPath).toBe("codex");
-    expect(args).toEqual(["exec", "--json", "--model", "gpt-5.4"]);
-    expect(child.stdin.write).toHaveBeenCalledWith("Implement feature");
+    expect(args).toEqual(["exec", "--json", "--model", "gpt-5.4", "Implement feature"]);
+    expect(child.stdin.write).not.toHaveBeenCalled();
 
     child.stdout.emit("data", "plain output");
     child.emit("close", 0);
@@ -87,7 +87,15 @@ describe("codex cli transport", () => {
     const runPromise = runCodexCli(createRunInput({ resume: true, sessionId: "thread-abc" }));
 
     const [, args] = spawnMock.mock.calls[0] as [string, string[]];
-    expect(args).toEqual(["exec", "resume", "thread-abc", "--json", "--model", "gpt-5.4"]);
+    expect(args).toEqual([
+      "exec",
+      "resume",
+      "thread-abc",
+      "--json",
+      "--model",
+      "gpt-5.4",
+      "Implement feature",
+    ]);
 
     child.stdout.emit("data", "resumed output");
     child.emit("close", 0);
@@ -182,6 +190,28 @@ describe("codex cli transport", () => {
       name: "CodexRuntimeAdapterError",
       adapterCode: "CODEX_CLI_NOT_FOUND",
     });
+  });
+
+  it("excludes OPENAI_BASE_URL from child env to prevent deprecated endpoint override", async () => {
+    const child = createMockChildProcess();
+    spawnMock.mockReturnValueOnce(child);
+
+    vi.stubEnv("OPENAI_API_KEY", "sk-test");
+    vi.stubEnv("OPENAI_BASE_URL", "https://api.openai.com/v1");
+
+    const runPromise = runCodexCli(createRunInput());
+
+    const [, , spawnOptions] = spawnMock.mock.calls[0] as [
+      string,
+      string[],
+      { env?: Record<string, string> },
+    ];
+    expect(spawnOptions.env?.OPENAI_API_KEY).toBe("sk-test");
+    expect(spawnOptions.env?.OPENAI_BASE_URL).toBeUndefined();
+
+    child.stdout.emit("data", "ok");
+    child.emit("close", 0);
+    await runPromise;
   });
 
   it("kills process and throws timeout error when run exceeds timeout", async () => {

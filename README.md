@@ -8,6 +8,17 @@
 
 Built on top of [AI Factory](https://github.com/lee-to/ai-factory) workflow and powered by runtime profiles through `@aif/runtime` (Claude and Codex adapters included). Tasks flow through stages automatically: **Backlog → Planning → Plan Ready → Implementing → Review → Done** — each stage orchestrated by specialized AI subagents following the AIF methodology. In auto mode, review feedback can also trigger an automatic rework loop: **Review → request_changes → Implementing**.
 
+## Runtime Providers Out of the Box
+
+Use the runtime that fits your stack today, then switch per project/task without changing orchestration logic:
+
+- **Claude (`anthropic`)** — SDK, CLI, API transports
+- **Codex (`openai`)** — SDK, CLI, API transports
+- **OpenRouter (`openrouter`)** — API transport
+- **OpenCode (`opencode`)** — API transport
+
+Need something custom? Add your own runtime adapter module and load it at startup via `AIF_RUNTIME_MODULES` (comma-separated module specifiers). No fork required.
+
 ## Key Features
 
 - **Fully autonomous pipeline** — create a task, AI plans, implements, and reviews it
@@ -61,6 +72,26 @@ The agent coordinator reacts to task events via WebSocket in near real-time and 
   Copy the URL and open it in your browser. **Important:** the terminal wraps long URLs across lines — remove any line breaks and spaces before pasting, otherwise OAuth will fail with `invalid code_challenge`. Then restart to apply. Credentials are stored in a persistent `claude-auth` Docker volume.
 
 For Codex/OpenAI-compatible profiles, configure `OPENAI_API_KEY` and optionally `OPENAI_BASE_URL` (or set profile-level `apiKeyEnvVar` / `baseUrl`). See [Providers](docs/providers.md).
+
+### OpenCode Quick Setup
+
+1. Start OpenCode server (example with password):
+
+```bash
+OPENCODE_SERVER_PASSWORD='your-strong-password' opencode serve --hostname 127.0.0.1 --port 60661
+```
+
+2. Create/update runtime profile in AIF Handoff:
+
+- `runtimeId`: `opencode`
+- `providerId`: `opencode`
+- `baseUrl`: `http://127.0.0.1:60661`
+- `options.serverPassword`: same password as above
+- `defaultModel`: use exact value from `GET /config/providers`, for example `openrouter/anthropic/claude-sonnet-4.6`
+
+3. Validate profile connection in UI and use it for chat/task stages.
+
+Full OpenCode options and examples: [Providers](docs/providers.md#opencode-api).
 
 ## Architecture
 

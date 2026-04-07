@@ -2,6 +2,14 @@ import { RuntimeExecutionError, type RuntimeErrorCategory } from "../../errors.j
 
 const USAGE_LIMIT_PATTERNS = ["usage limit", "out of extra usage", "rate limit", "quota"];
 const PERMISSION_PATTERNS = ["permission denied", "write permission", "blocked by permissions"];
+const AUTH_PATTERNS = [
+  "authentication_error",
+  "invalid authentication credentials",
+  "failed to authenticate",
+  "unauthorized",
+  "invalid api key",
+  "401",
+];
 
 function messageFromUnknown(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -15,6 +23,9 @@ function classify(message: string): { adapterCode: string; category: RuntimeErro
   }
   if (PERMISSION_PATTERNS.some((p) => lowered.includes(p))) {
     return { adapterCode: "CLAUDE_PERMISSION_DENIED", category: "permission" };
+  }
+  if (AUTH_PATTERNS.some((p) => lowered.includes(p))) {
+    return { adapterCode: "CLAUDE_AUTH_ERROR", category: "auth" };
   }
   if (lowered.includes("query_start_timeout")) {
     return { adapterCode: "CLAUDE_QUERY_START_TIMEOUT", category: "timeout" };
@@ -46,6 +57,9 @@ export class ClaudeRuntimeAdapterError extends RuntimeExecutionError {
 }
 
 export function classifyClaudeRuntimeError(error: unknown): ClaudeRuntimeAdapterError {
+  if (error instanceof ClaudeRuntimeAdapterError) {
+    return error;
+  }
   const message = messageFromUnknown(error);
   const { adapterCode, category } = classify(message);
   return new ClaudeRuntimeAdapterError(message, adapterCode, category, error);

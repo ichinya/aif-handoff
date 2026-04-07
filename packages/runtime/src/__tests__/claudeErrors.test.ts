@@ -17,6 +17,14 @@ describe("Claude runtime error classification", () => {
     expect(classified.adapterCode).toBe("CLAUDE_PERMISSION_DENIED");
   });
 
+  it("classifies auth failures", () => {
+    const classified = classifyClaudeRuntimeError(
+      new Error("Failed to authenticate. API Error: 401 authentication_error"),
+    );
+    expect(classified.adapterCode).toBe("CLAUDE_AUTH_ERROR");
+    expect(classified.category).toBe("auth");
+  });
+
   it("classifies query start timeout failures", () => {
     const classified = classifyClaudeRuntimeError("query_start_timeout while waiting for output");
     expect(classified.adapterCode).toBe("CLAUDE_QUERY_START_TIMEOUT");
@@ -36,6 +44,16 @@ describe("Claude runtime error classification", () => {
     const classified = classifyClaudeResultSubtype("tool_failed");
     expect(classified.message).toContain("tool_failed");
     expect(classified.adapterCode).toBe("CLAUDE_RUNTIME_ERROR");
+  });
+
+  it("does not re-wrap existing claude adapter errors", () => {
+    const original = new ClaudeRuntimeAdapterError(
+      "Failed to authenticate",
+      "CLAUDE_AUTH_ERROR",
+      "auth",
+    );
+    const classified = classifyClaudeRuntimeError(original);
+    expect(classified).toBe(original);
   });
 
   it("includes result detail for non-success subtype classification", () => {

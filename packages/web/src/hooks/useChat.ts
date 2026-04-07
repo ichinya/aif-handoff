@@ -34,6 +34,8 @@ export function useChat(
   const sessionStreamsRef = useRef<Map<string, SessionStreamState>>(new Map());
   // Track conversationId used when no session exists (for matching events)
   const conversationIdForNoSession = useRef<string | null>(null);
+  // Deduplicate WS and HTTP error handling for the same conversation.
+  const handledErrorConversationsRef = useRef<Set<string>>(new Set());
 
   // Check if a specific session is currently streaming
   const isSessionStreaming = useCallback((sid: string | null) => {
@@ -149,6 +151,7 @@ export function useChat(
       if (isCurrentStream(streamKey)) {
         setIsStreaming(false);
       }
+      handledErrorConversationsRef.current.delete(conversationId);
     };
 
     const handleError = (e: Event) => {
@@ -158,6 +161,7 @@ export function useChat(
 
       const state = sessionStreamsRef.current.get(streamKey);
       if (state) state.errorHandled = true;
+      handledErrorConversationsRef.current.add(conversationId);
 
       console.debug("[useChat] Stream error for %s", streamKey);
       activeStreamsRef.current.delete(conversationId);
@@ -295,12 +299,14 @@ export function useChat(
         const errorHandled = sessionStreamsRef.current.get(streamKey)?.errorHandled ?? false;
         sessionStreamsRef.current.delete(streamKey);
         setIsStreaming(false);
-        if (!errorHandled) {
+        const wsHandled = handledErrorConversationsRef.current.has(newConversationId);
+        if (!errorHandled && !wsHandled) {
           const message =
             err instanceof Error ? err.message : "Failed to get a response. Please try again.";
           setChatErrorCode(null);
           setMessages((prev) => [...prev, { role: "assistant", content: message }]);
         }
+        handledErrorConversationsRef.current.delete(newConversationId);
       }
     },
     [projectId, sessionId, messages, isStreaming, explore, taskId],

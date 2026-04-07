@@ -54,6 +54,7 @@ The API exposes effective selection endpoints:
 | ------------ | ------------ | ------------- | -------------- | -------------- | ------------- | ------------------- | ------------------------- |
 | `claude`     | `anthropic`  | SDK, CLI, API | Yes (SDK/CLI)  | Yes (SDK/CLI)  | Yes (SDK/CLI) | `claude-haiku-3-5`  | Built-in                  |
 | `codex`      | `openai`     | SDK, CLI, API | Yes (SDK only) | Yes (SDK only) | No            | default             | Built-in                  |
+| `opencode`   | `opencode`   | API           | Yes            | Yes            | No            | null (configurable) | Built-in                  |
 | `openrouter` | `openrouter` | API           | No             | No             | No            | null (configurable) | Built-in                  |
 | Custom       | Any          | Any           | Configurable   | Configurable   | Configurable  | Configurable        | Via `AIF_RUNTIME_MODULES` |
 
@@ -200,6 +201,45 @@ Environment variables:
 - `OPENROUTER_APP_TITLE` — recommended app title header for rankings
 
 Model IDs use the `provider/model` format (e.g. `anthropic/claude-sonnet-4`, `openai/gpt-4o`, `google/gemini-2.0-flash-001`). Some models are available for free (suffixed with `:free`).
+
+### OpenCode (API)
+
+OpenCode integration uses the local or remote `opencode serve` HTTP server. This is the recommended mode for `@aif/runtime` because it provides session APIs and event streams through a stable OpenAPI surface.
+
+```json
+{
+  "projectId": "PROJECT_UUID",
+  "name": "OpenCode API",
+  "runtimeId": "opencode",
+  "providerId": "opencode",
+  "transport": "api",
+  "baseUrl": "http://127.0.0.1:4096",
+  "defaultModel": "anthropic/claude-sonnet-4",
+  "enabled": true
+}
+```
+
+OpenCode-specific options:
+
+- `baseUrl` — OpenCode server URL (defaults to `OPENCODE_BASE_URL` or `http://127.0.0.1:4096`)
+- `serverUsername` — Basic auth username for protected servers (defaults to `opencode`)
+- `serverPassword` — Basic auth password for protected servers (or set `OPENCODE_SERVER_PASSWORD`)
+- `timeoutMs` — Request timeout override for OpenCode API calls
+
+Environment variables:
+
+- `OPENCODE_BASE_URL` — default OpenCode server URL for API transport
+- `OPENCODE_SERVER_USERNAME` — default username for basic auth
+- `OPENCODE_SERVER_PASSWORD` — password for basic auth protected servers
+- `OPENCODE_PROVIDER_ID` — default provider ID when runtime profile model does not include `provider/model`
+
+Quick start:
+
+```bash
+opencode serve --hostname 127.0.0.1 --port 4096
+```
+
+For Dockerized deployments, expose the OpenCode server and set profile `baseUrl` to the container/network address.
 
 ## Capability Gates
 

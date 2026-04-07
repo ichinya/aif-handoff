@@ -16,6 +16,8 @@ export interface CodexAgentApiLogger {
   warn?(context: Record<string, unknown>, message: string): void;
 }
 
+const DEFAULT_API_RETRY_COUNT = 2;
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -73,6 +75,101 @@ function buildHeaders(input: RuntimeRunInput | RuntimeConnectionValidationInput)
   }
 
   return headers;
+}
+
+function resolveApiRetryCount(input: RuntimeRunInput): number {
+  const options = asRecord(input.options);
+  const fromOptions = options.apiRetryCount;
+  const fromEnv = process.env.CODEX_API_RETRY_COUNT;
+  const raw =
+    typeof fromOptions === "number"
+      ? fromOptions
+      : typeof fromOptions === "string"
+        ? Number.parseInt(fromOptions, 10)
+        : fromEnv
+          ? Number.parseInt(fromEnv, 10)
+          : DEFAULT_API_RETRY_COUNT;
+
+  if (!Number.isFinite(raw) || raw < 0) {
+    return DEFAULT_API_RETRY_COUNT;
+  }
+  return Math.floor(raw);
+}
+
+function isRetryableStatus(status: number): boolean {
+  return status >= 500 && status < 600;
+}
+
+function isRetryableFetchError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  const lowered = message.toLowerCase();
+  return (
+    lowered.includes("fetch failed") ||
+    lowered.includes("network") ||
+    lowered.includes("econnreset") ||
+    lowered.includes("econnrefused") ||
+    lowered.includes("timed out") ||
+    lowered.includes("etimedout")
+  );
+}
+
+function retryBackoffMs(attempt: number): number {
+  return 150 * (attempt + 1);
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithRetries(
+  input: RuntimeRunInput,
+  url: string,
+  init: RequestInit,
+  logger: CodexAgentApiLogger | undefined,
+  requestType: "non-stream" | "stream",
+): Promise<Response> {
+  const maxRetries = resolveApiRetryCount(input);
+
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      const response = await fetch(url, init);
+      if (isRetryableStatus(response.status) && attempt < maxRetries) {
+        const delayMs = retryBackoffMs(attempt);
+        logger?.warn?.(
+          {
+            runtimeId: input.runtimeId,
+            status: response.status,
+            attempt: attempt + 1,
+            maxRetries,
+            delayMs,
+            requestType,
+          },
+          "OpenAI API returned retryable status, retrying",
+        );
+        await sleep(delayMs);
+        continue;
+      }
+      return response;
+    } catch (error) {
+      if (attempt < maxRetries && isRetryableFetchError(error)) {
+        const delayMs = retryBackoffMs(attempt);
+        logger?.warn?.(
+          {
+            runtimeId: input.runtimeId,
+            error: error instanceof Error ? error.message : String(error),
+            attempt: attempt + 1,
+            maxRetries,
+            delayMs,
+            requestType,
+          },
+          "OpenAI API request failed with retryable transport error, retrying",
+        );
+        await sleep(delayMs);
+        continue;
+      }
+      throw error;
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -165,11 +262,17 @@ export async function runCodexAgentApi(
   );
 
   try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: buildHeaders(input),
-      body: JSON.stringify(buildRequestBody(input, false)),
-    });
+    const response = await fetchWithRetries(
+      input,
+      url,
+      {
+        method: "POST",
+        headers: buildHeaders(input),
+        body: JSON.stringify(buildRequestBody(input, false)),
+      },
+      logger,
+      "non-stream",
+    );
 
     const rawText = await response.text();
     if (!response.ok) {
@@ -225,11 +328,17 @@ export async function runCodexAgentApiStreaming(
   );
 
   try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: buildHeaders(input),
-      body: JSON.stringify(buildRequestBody(input, true)),
-    });
+    const response = await fetchWithRetries(
+      input,
+      url,
+      {
+        method: "POST",
+        headers: buildHeaders(input),
+        body: JSON.stringify(buildRequestBody(input, true)),
+      },
+      logger,
+      "stream",
+    );
 
     if (!response.ok) {
       const rawText = await response.text();

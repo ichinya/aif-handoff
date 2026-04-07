@@ -51,6 +51,9 @@ function normalizeCliArgs(input: RuntimeRunInput): string[] {
   if (input.model) {
     args.push("--model", input.model);
   }
+  if (input.prompt) {
+    args.push(input.prompt);
+  }
   return args;
 }
 
@@ -75,10 +78,19 @@ const ALLOWED_ENV_PREFIXES = [
   "NO_COLOR",
 ];
 
+/**
+ * Env vars that must NOT be forwarded to the Codex CLI even if they match
+ * an allowed prefix.  `OPENAI_BASE_URL` is deprecated by the Codex CLI —
+ * it causes a WebSocket endpoint mis-derivation (`wss://.../v1/responses`)
+ * and 500 errors.  The CLI reads `openai_base_url` from `config.toml` instead.
+ */
+const BLOCKED_ENV_KEYS = new Set(["OPENAI_BASE_URL"]);
+
 function buildCuratedEnv(apiKeyEnvVar: string): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (value == null) continue;
+    if (BLOCKED_ENV_KEYS.has(key)) continue;
     if (
       key === apiKeyEnvVar ||
       ALLOWED_ENV_PREFIXES.some((prefix) => key === prefix || key.startsWith(prefix))
@@ -257,7 +269,10 @@ function parseCliResult(stdout: string, fallbackSessionId: string | null): Runti
   };
 }
 
-function shouldWritePromptToStdin(args: string[]): boolean {
+function shouldWritePromptToStdin(args: string[], prompt: string): boolean {
+  if (prompt && args.includes(prompt)) {
+    return false;
+  }
   return !args.some(
     (arg) => arg.includes("{prompt}") || arg === "--prompt" || arg.startsWith("--prompt="),
   );
@@ -341,7 +356,7 @@ export async function runCodexCli(
     child.stdin.on("error", () => {
       // Ignore broken-pipe errors — the child may exit before stdin is fully written
     });
-    if (shouldWritePromptToStdin(args)) {
+    if (shouldWritePromptToStdin(args, input.prompt)) {
       child.stdin.write(input.prompt);
     }
     child.stdin.end();

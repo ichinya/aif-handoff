@@ -182,6 +182,8 @@ export interface RuntimeSessionListInput {
   profileId?: string | null;
   projectRoot?: string;
   limit?: number;
+  options?: Record<string, unknown>;
+  headers?: Record<string, string>;
 }
 
 export interface RuntimeSessionGetInput {
@@ -190,6 +192,8 @@ export interface RuntimeSessionGetInput {
   profileId?: string | null;
   projectRoot?: string;
   sessionId: string;
+  options?: Record<string, unknown>;
+  headers?: Record<string, string>;
 }
 
 export interface RuntimeSessionEventsInput extends RuntimeSessionGetInput {

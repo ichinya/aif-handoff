@@ -12,6 +12,11 @@ const mockToChatSessionResponse = vi.fn((row: Record<string, unknown>) => row);
 const mockToChatMessageResponse = vi.fn((row: Record<string, unknown>) => row);
 const mockFindProjectById = vi.fn();
 const mockFindRuntimeProfileById = vi.fn();
+const mockToRuntimeProfileResponse = vi.fn((row: Record<string, unknown>) => ({
+  ...row,
+  headers: row.headersJson ? JSON.parse(row.headersJson as string) : {},
+  options: row.optionsJson ? JSON.parse(row.optionsJson as string) : {},
+}));
 const mockBroadcast = vi.fn();
 const mockResolveApiRuntimeContext = vi.fn();
 const mockGetApiRuntimeRegistry = vi.fn();
@@ -58,6 +63,7 @@ vi.mock("@aif/data", () => ({
   createChatMessage: vi.fn(),
   updateChatSessionTimestamp: vi.fn(),
   findRuntimeProfileById: (id: string) => mockFindRuntimeProfileById(id),
+  toRuntimeProfileResponse: (row: Record<string, unknown>) => mockToRuntimeProfileResponse(row),
 }));
 
 vi.mock("../services/runtime.js", () => ({
@@ -286,6 +292,47 @@ describe("chat session API", () => {
       expect(body).toHaveLength(2);
       expect(body[0].role).toBe("user");
       expect(body[1].role).toBe("assistant");
+    });
+
+    it("passes runtime profile options and headers when loading linked runtime session events", async () => {
+      mockFindChatSessionById.mockReturnValue({
+        ...SESSION_ROW,
+        runtimeProfileId: "profile-oc",
+        runtimeSessionId: "runtime-linked",
+      });
+      mockFindRuntimeProfileById.mockReturnValue({
+        id: "profile-oc",
+        projectId: null,
+        name: "OpenCode",
+        runtimeId: "opencode",
+        providerId: "opencode",
+        transport: "api",
+        baseUrl: "http://127.0.0.1:60661",
+        apiKeyEnvVar: null,
+        defaultModel: null,
+        headersJson: JSON.stringify({ "x-custom": "1" }),
+        optionsJson: JSON.stringify({ serverPassword: "secret" }),
+        enabled: 1,
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      });
+      mockListSessionEvents.mockResolvedValue([]);
+
+      const res = await app.request("/chat/sessions/session-1/messages");
+      expect(res.status).toBe(200);
+      expect(mockListSessionEvents).toHaveBeenCalledWith(
+        expect.objectContaining({
+          runtimeId: "opencode",
+          providerId: "opencode",
+          profileId: "profile-oc",
+          sessionId: "runtime-linked",
+          options: expect.objectContaining({
+            serverPassword: "secret",
+            baseUrl: "http://127.0.0.1:60661",
+          }),
+          headers: { "x-custom": "1" },
+        }),
+      );
     });
   });
 

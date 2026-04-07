@@ -2,7 +2,13 @@ import { RuntimeExecutionError, type RuntimeErrorCategory } from "../../errors.j
 
 const CLI_NOT_FOUND_PATTERNS = ["enoent", "not recognized", "not found", "no such file"];
 const TIMEOUT_PATTERNS = ["timed out", "timeout", "etimedout"];
-const AUTH_PATTERNS = ["unauthorized", "invalid api key", "forbidden", "401", "403"];
+const AUTH_PATTERNS = [
+  "unauthorized",
+  "invalid api key",
+  "forbidden",
+  "authentication_error",
+  "invalid authentication credentials",
+];
 const TRANSPORT_PATTERNS = ["connection refused", "econnrefused", "network", "fetch failed"];
 const THREAD_PATTERNS = [
   "thread not found",
@@ -34,7 +40,15 @@ function classify(message: string): { adapterCode: string; category: RuntimeErro
   if (TIMEOUT_PATTERNS.some((p) => lowered.includes(p))) {
     return { adapterCode: "CODEX_TIMEOUT", category: "timeout" };
   }
-  if (AUTH_PATTERNS.some((p) => lowered.includes(p))) {
+  if (
+    AUTH_PATTERNS.some((p) => lowered.includes(p)) ||
+    lowered.includes("http 401") ||
+    lowered.includes("http error: 401") ||
+    lowered.includes("status: 401") ||
+    lowered.includes("http 403") ||
+    lowered.includes("http error: 403") ||
+    lowered.includes("status: 403")
+  ) {
     return { adapterCode: "CODEX_AUTH_ERROR", category: "auth" };
   }
   if (TRANSPORT_PATTERNS.some((p) => lowered.includes(p))) {
@@ -62,6 +76,9 @@ export class CodexRuntimeAdapterError extends RuntimeExecutionError {
 }
 
 export function classifyCodexRuntimeError(error: unknown): CodexRuntimeAdapterError {
+  if (error instanceof CodexRuntimeAdapterError) {
+    return error;
+  }
   const message = messageFromUnknown(error);
   const { adapterCode, category } = classify(message);
   return new CodexRuntimeAdapterError(message, adapterCode, category, error);
