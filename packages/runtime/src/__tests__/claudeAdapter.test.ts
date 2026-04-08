@@ -118,7 +118,7 @@ function discoverySession(
   };
 }
 
-function hangingDiscoverySession(returnSpy: () => void) {
+function hangingDiscoverySession(returnSpy: () => void, closeSpy?: () => void) {
   return {
     async supportedModels() {
       await new Promise<never>(() => {
@@ -135,6 +135,9 @@ function hangingDiscoverySession(returnSpy: () => void) {
     },
     async throw(error?: unknown) {
       throw error;
+    },
+    close() {
+      closeSpy?.();
     },
     [Symbol.asyncIterator]() {
       return this;
@@ -506,7 +509,8 @@ describe("Claude runtime adapter", () => {
   it("falls back to defaults when model discovery times out and still cleans up session", async () => {
     vi.useFakeTimers();
     const returnSpy = vi.fn();
-    queryMock.mockImplementation(() => hangingDiscoverySession(returnSpy));
+    const closeSpy = vi.fn();
+    queryMock.mockImplementation(() => hangingDiscoverySession(returnSpy, closeSpy));
     const logger = {
       debug: vi.fn(),
       info: vi.fn(),
@@ -529,11 +533,13 @@ describe("Claude runtime adapter", () => {
     const models = await modelsPromise;
 
     expect(models.map((model) => model.id)).toEqual(["opus", "sonnet", "haiku"]);
-    expect(returnSpy).toHaveBeenCalledTimes(1);
+    expect(closeSpy).toHaveBeenCalledTimes(1);
+    expect(returnSpy).not.toHaveBeenCalled();
     expect(logger.warn).toHaveBeenCalledWith(
       expect.objectContaining({ timeoutMs: 10 }),
       "WARN [runtime:claude] Claude model discovery timed out, falling back to built-in list",
     );
+    vi.useRealTimers();
   });
 
   it("logs unexpected model discovery failures after cleanup and falls back", async () => {

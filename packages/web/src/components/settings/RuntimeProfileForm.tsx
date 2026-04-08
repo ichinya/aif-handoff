@@ -253,15 +253,14 @@ export function RuntimeProfileForm({
   useEffect(() => {
     let cancelled = false;
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const requestId = ++modelLoadRequestIdRef.current;
     if (!supportsModelDiscovery) {
-      modelLoadRequestIdRef.current += 1;
       setDiscoveredModels([]);
       setModelsError(null);
       return;
     }
 
     const run = async () => {
-      const requestId = ++modelLoadRequestIdRef.current;
       const preferredModelPlaceholder = currentRuntime?.defaultModelPlaceholder ?? null;
       setDiscoveredModels([]);
       setModelsError(null);

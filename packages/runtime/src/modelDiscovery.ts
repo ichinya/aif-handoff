@@ -35,13 +35,11 @@ export interface RuntimeModelDiscoveryService {
 
 function normalizeCacheValue(value: unknown): unknown {
   if (value == null) return null;
-  if (
-    typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "boolean" ||
-    typeof value === "bigint"
-  ) {
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
     return value;
+  }
+  if (typeof value === "bigint") {
+    return value.toString();
   }
   if (value instanceof Date) {
     return value.toISOString();

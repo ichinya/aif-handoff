@@ -189,9 +189,17 @@ async function withTimeout<T>(
 ): Promise<T> {
   return await new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
-      onTimeout();
+      try {
+        onTimeout();
+      } catch (error) {
+        reject(error);
+        return;
+      }
       reject(new Error(`Claude model discovery timed out after ${timeoutMs}ms`));
     }, timeoutMs);
+    if (typeof timer === "object" && "unref" in timer) {
+      timer.unref();
+    }
 
     void operation().then(
       (value) => {
@@ -222,7 +230,30 @@ async function listClaudeModels(
       configuredCliPath ?? adapterDefaults?.pathToClaudeCodeExecutable,
     ),
   });
-  const queryOptions = buildClaudeQueryOptions(discoveryInput, execution, logger);
+  const modelDiscoveryAbortController = new AbortController();
+  const upstreamAbortController = execution.abortController;
+  let removeAbortRelay: (() => void) | null = null;
+  if (upstreamAbortController) {
+    const relayAbort = () => {
+      modelDiscoveryAbortController.abort(upstreamAbortController.signal.reason);
+    };
+    if (upstreamAbortController.signal.aborted) {
+      relayAbort();
+    } else {
+      upstreamAbortController.signal.addEventListener("abort", relayAbort, { once: true });
+      removeAbortRelay = () => {
+        upstreamAbortController.signal.removeEventListener("abort", relayAbort);
+      };
+    }
+  }
+  const queryOptions = buildClaudeQueryOptions(
+    discoveryInput,
+    {
+      ...execution,
+      abortController: modelDiscoveryAbortController,
+    },
+    logger,
+  );
   const env = queryOptions.env;
   const envRecord =
     env && typeof env === "object" && !Array.isArray(env) ? (env as Record<string, unknown>) : {};
@@ -260,6 +291,7 @@ async function listClaudeModels(
       timeoutMs,
       () => {
         timedOut = true;
+        modelDiscoveryAbortController.abort();
       },
     );
     logger.debug?.(
@@ -293,8 +325,13 @@ async function listClaudeModels(
   } catch (error) {
     discoveryError = error;
   } finally {
+    removeAbortRelay?.();
     try {
-      await session?.return?.();
+      if (timedOut) {
+        session?.close?.();
+      } else {
+        await session?.return?.();
+      }
     } catch (cleanupError) {
       logger.error?.(
         {

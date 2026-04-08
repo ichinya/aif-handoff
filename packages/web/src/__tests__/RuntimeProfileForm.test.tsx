@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { RuntimeDescriptor } from "@aif/shared/browser";
 
 const mockRuntimeModels = {
@@ -52,6 +52,10 @@ describe("RuntimeProfileForm", () => {
       models: [],
       profile: {},
     });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("uses runtime default transport, keeps manual model input, and stores codex effort separately", async () => {
@@ -354,6 +358,92 @@ describe("RuntimeProfileForm", () => {
       expect(screen.getByDisplayValue("gpt-5.4-custom")).toBeInTheDocument();
     });
     expect(screen.queryByDisplayValue("gpt-5.4")).toBeNull();
+  });
+
+  it("ignores stale manual refresh results after profile inputs change", async () => {
+    const manualRefresh = createDeferredResult();
+
+    mockRuntimeModels.mutateAsync
+      .mockResolvedValueOnce({
+        models: [
+          {
+            id: "gpt-5.4",
+            label: "GPT-5.4",
+            metadata: {
+              isDefault: true,
+              supportedEffortLevels: ["minimal", "low", "medium", "high", "xhigh"],
+            },
+          },
+        ],
+        profile: {},
+      })
+      .mockImplementationOnce(() => manualRefresh.promise)
+      .mockResolvedValueOnce({
+        models: [],
+        profile: {},
+      });
+
+    render(
+      <RuntimeProfileForm
+        mode="create"
+        projectId="project-1"
+        runtimes={[
+          createRuntimeDescriptor({
+            id: "codex",
+            providerId: "openai",
+            displayName: "Codex",
+            defaultTransport: "cli",
+            defaultApiKeyEnvVar: "OPENAI_API_KEY",
+            defaultModelPlaceholder: "gpt-5.4",
+            supportedTransports: ["sdk", "cli", "api"],
+          }),
+        ]}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("gpt-5.4")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    fireEvent.change(screen.getByPlaceholderText("https://..."), {
+      target: { value: "https://proxy.example.com/v1" },
+    });
+
+    await act(async () => {
+      manualRefresh.resolve({
+        models: [
+          {
+            id: "stale-model",
+            label: "Stale Model",
+            metadata: { isDefault: true },
+          },
+        ],
+        profile: {},
+      });
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByDisplayValue("stale-model")).toBeNull();
+    expect(screen.getByDisplayValue("gpt-5.4")).toBeInTheDocument();
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 350));
+    });
+
+    await waitFor(() => {
+      expect(mockRuntimeModels.mutateAsync).toHaveBeenNthCalledWith(
+        3,
+        expect.objectContaining({
+          projectId: "project-1",
+          forceRefresh: false,
+          profile: expect.objectContaining({
+            baseUrl: "https://proxy.example.com/v1",
+          }),
+        }),
+      );
+    });
   });
 
   it("shows model filter for large catalogs and filters case-insensitively", async () => {

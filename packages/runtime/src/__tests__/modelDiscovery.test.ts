@@ -361,6 +361,40 @@ describe("runtime model discovery service", () => {
     });
   });
 
+  it("stringifies bigint options before fingerprinting discovery cache keys", async () => {
+    const listModelsMock = vi.fn(async (): Promise<RuntimeModel[]> => [{ id: "model-1" }]);
+    const adapter: RuntimeAdapter = {
+      descriptor: {
+        id: "stub-runtime",
+        providerId: "stub-provider",
+        displayName: "Stub Runtime",
+        capabilities: {
+          supportsResume: true,
+          supportsSessionList: false,
+          supportsAgentDefinitions: false,
+          supportsStreaming: false,
+          supportsModelDiscovery: true,
+          supportsApprovals: false,
+          supportsCustomEndpoint: false,
+        },
+      },
+      run: async () => ({ outputText: "ok" }),
+      listModels: listModelsMock,
+      validateConnection: async () => ({ ok: true }),
+    };
+
+    const registry = createRuntimeRegistry({ builtInAdapters: [adapter] });
+    const service = createRuntimeModelDiscoveryService({ registry });
+    const resolved = createResolvedProfile("stub-runtime", {
+      options: {
+        contextWindowTokens: 200_000n,
+      },
+    });
+
+    await expect(service.listModels(resolved)).resolves.toEqual([{ id: "model-1" }]);
+    expect(listModelsMock).toHaveBeenCalledTimes(1);
+  });
+
   it("caches adapter validateConnection results", async () => {
     const validateConnectionMock = vi
       .fn<(input: unknown) => Promise<RuntimeConnectionValidationResult>>()
