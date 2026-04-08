@@ -109,7 +109,7 @@ function formatCommentsForPrompt(
 }
 
 function buildFixCommandText(taskContext: string): string {
-  return `/aif-fix --plan-first ${JSON.stringify(taskContext)}`;
+  return `aif-fix --plan-first ${JSON.stringify(taskContext)}`;
 }
 
 export async function runPlanner(taskId: string, projectRoot: string): Promise<void> {
@@ -146,14 +146,16 @@ ${commentsForPrompt}`;
   let workflowSpec: ReturnType<typeof createRuntimeWorkflowSpec>;
   const handoffContext = `HANDOFF_MODE: 1\nHANDOFF_TASK_ID: ${taskId}`;
   const scopeConstraint = `IMPORTANT: Your working directory is ${projectRoot}\nAll files must be created and modified inside this directory. Do NOT navigate to parent directories or other projects.`;
-  const plannerSlashCommand = `/aif-plan ${plannerMode} @${planPath} docs:${planDocs} tests:${planTests}`;
+  const plannerSkillCommand = `aif-plan ${plannerMode} @${planPath} docs:${planDocs} tests:${planTests}`;
 
   if (task.isFix) {
-    prompt = `${handoffContext}\n${scopeConstraint}\n\n${buildFixCommandText(taskContext)}`;
+    prompt = `${handoffContext}\n${scopeConstraint}`;
     workflowSpec = createRuntimeWorkflowSpec({
       workflowKind: "planner",
       prompt,
       requiredCapabilities: [],
+      skillCommand: buildFixCommandText(taskContext),
+      skillCommandMode: "always",
       sessionReusePolicy: "resume_if_available",
       systemPromptAppend: scopeConstraint,
     });
@@ -175,7 +177,8 @@ Always write the final plan to @${planPath}.`;
       prompt,
       requiredCapabilities: ["supportsAgentDefinitions"],
       agentDefinitionName: AGENT_NAME,
-      fallbackSlashCommand: plannerSlashCommand,
+      skillCommand: plannerSkillCommand,
+      skillCommandMode: "fallback",
       fallbackStrategy: "slash_command",
       sessionReusePolicy: "resume_if_available",
       systemPromptAppend: scopeConstraint,
@@ -186,13 +189,14 @@ Always write the final plan to @${planPath}.`;
       },
     });
   } else {
-    prompt = `${handoffContext}\n${scopeConstraint}\n\n${plannerSlashCommand}
+    prompt = `${handoffContext}\n${scopeConstraint}\n\n${taskContext}`;
 
-${taskContext}`;
     workflowSpec = createRuntimeWorkflowSpec({
       workflowKind: "planner",
       prompt,
       requiredCapabilities: [],
+      skillCommand: plannerSkillCommand,
+      skillCommandMode: "always",
       sessionReusePolicy: "resume_if_available",
       systemPromptAppend: scopeConstraint,
       metadata: {
@@ -213,7 +217,6 @@ ${taskContext}`;
     agent: task.isFix || !useSubagents ? undefined : AGENT_NAME,
     workflowSpec,
     workflowKind: "planner",
-    fallbackSlashCommand: task.isFix ? undefined : plannerSlashCommand,
   });
 
   const diskPlan = readPlanFromDisk(projectRoot, rawResult, !!task.isFix, planPath);
