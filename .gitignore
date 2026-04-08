@@ -53,10 +53,12 @@ coverage/
 .claude/worktrees
 
 # Codex and other agent
-.codex
-.claude
-.agents
-.github/skills
+/.codex/
+/.agents/
+/.github/skills
+
+# AI Factory (keep tracked files, ignore generated)
+.ai-factory/skill-context/
 
 # HTML docs (generated)
 docs-html/
@@ -65,5 +67,6 @@ docs-html/
 .data
 .projects
 
-.mcp.json
-.ai-factory.json
+# Attachment files (stored inside project .ai-factory/files/)
+.ai-factory/files/
+.ai-factory/PLAN.md
