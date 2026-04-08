@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getCliSpawnInvocation } from "./helpers/cliSpawn.js";
 
 const spawnMock = vi.fn();
 
@@ -30,6 +31,10 @@ function createMockChildProcess(): MockChildProcess {
   }) as MockChildProcess["stdin"];
   child.kill = vi.fn();
   return child;
+}
+
+function getSpawnInvocation() {
+  return getCliSpawnInvocation(spawnMock);
 }
 
 function createRunInput(overrides: Record<string, unknown> = {}) {
@@ -66,7 +71,7 @@ describe("codex cli transport", () => {
     const runPromise = runCodexCli(createRunInput());
 
     expect(spawnMock).toHaveBeenCalledTimes(1);
-    const [cliPath, args] = spawnMock.mock.calls[0] as [string, string[]];
+    const { cliPath, cliArgs: args } = getSpawnInvocation();
     expect(cliPath).toBe("codex");
     expect(args).toEqual(["exec", "--json", "--model", "gpt-5.4", "Implement feature"]);
     expect(child.stdin.write).not.toHaveBeenCalled();
@@ -86,7 +91,7 @@ describe("codex cli transport", () => {
 
     const runPromise = runCodexCli(createRunInput({ resume: true, sessionId: "thread-abc" }));
 
-    const [, args] = spawnMock.mock.calls[0] as [string, string[]];
+    const { cliArgs: args } = getSpawnInvocation();
     expect(args).toEqual([
       "exec",
       "resume",
@@ -126,11 +131,15 @@ describe("codex cli transport", () => {
       }),
     );
 
-    const [cliPath, args, spawnOptions] = spawnMock.mock.calls[0] as [
-      string,
-      string[],
-      { env?: Record<string, string> },
-    ];
+    const {
+      cliPath,
+      cliArgs: args,
+      spawnOptions,
+    } = getSpawnInvocation() as {
+      cliPath: string;
+      cliArgs: string[];
+      spawnOptions: { env?: Record<string, string> };
+    };
     expect(cliPath).toBe("/usr/local/bin/codex");
     expect(args).toEqual([
       "run",
@@ -198,6 +207,7 @@ describe("codex cli transport", () => {
 
     vi.stubEnv("OPENAI_API_KEY", "sk-test");
     vi.stubEnv("OPENAI_BASE_URL", "https://api.openai.com/v1");
+    vi.stubEnv("npm_config_registry", "https://registry.npmjs.org");
 
     const runPromise = runCodexCli(createRunInput());
 
@@ -208,6 +218,7 @@ describe("codex cli transport", () => {
     ];
     expect(spawnOptions.env?.OPENAI_API_KEY).toBe("sk-test");
     expect(spawnOptions.env?.OPENAI_BASE_URL).toBeUndefined();
+    expect(spawnOptions.env?.npm_config_registry).toBeUndefined();
 
     child.stdout.emit("data", "ok");
     child.emit("close", 0);

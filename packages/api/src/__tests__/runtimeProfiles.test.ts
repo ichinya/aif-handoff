@@ -57,6 +57,7 @@ describe("runtimeProfiles API", () => {
         id: "claude",
         providerId: "anthropic",
         displayName: "Claude",
+        defaultTransport: "sdk",
         capabilities: {
           supportsResume: true,
           supportsSessionList: true,
@@ -76,6 +77,7 @@ describe("runtimeProfiles API", () => {
     const body = await res.json();
     expect(body).toHaveLength(1);
     expect(body[0].id).toBe("claude");
+    expect(body[0].defaultTransport).toBe("sdk");
   });
 
   it("creates, updates, fetches and deletes a runtime profile", async () => {

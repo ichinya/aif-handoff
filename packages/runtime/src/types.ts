@@ -227,6 +227,13 @@ export interface RuntimeModelListInput {
   providerId?: string;
   profileId?: string | null;
   projectRoot?: string;
+  model?: string;
+  transport?: RuntimeTransport;
+  headers?: Record<string, string>;
+  options?: Record<string, unknown>;
+  baseUrl?: string | null;
+  apiKeyEnvVar?: string | null;
+  apiKey?: string | null;
 }
 
 export interface RuntimeMcpInput {
@@ -309,7 +316,7 @@ export interface RuntimeAdapter {
 
   // --- Discovery & validation (optional) ---
 
-  /** Check whether the runtime is reachable and configured. Used by /agent/readiness. */
+  /** Check whether the runtime is reachable and configured. */
   validateConnection?(
     input: RuntimeConnectionValidationInput,
   ): Promise<RuntimeConnectionValidationResult>;

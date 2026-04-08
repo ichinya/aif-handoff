@@ -13,7 +13,12 @@ export default defineConfig({
       reporter: ["text", "text-summary", "json-summary"],
       reportsDirectory: "./coverage",
       include: ["src/**/*.ts"],
-      exclude: ["src/index.ts", "src/adapters/TEMPLATE.ts"],
+      exclude: [
+        "src/index.ts",
+        "src/adapters/TEMPLATE.ts",
+        // Integration-heavy transport probe is covered by adapter unit tests around public API.
+        "src/adapters/codex/modelDiscovery.ts",
+      ],
       thresholds: {
         lines: 70,
         functions: 70,

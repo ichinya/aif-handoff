@@ -1,3 +1,4 @@
+import { query } from "@anthropic-ai/claude-agent-sdk";
 import { findClaudePath } from "./findPath.js";
 import {
   RuntimeTransport,
@@ -23,6 +24,7 @@ import {
   getClaudeRuntimeSession,
   listClaudeRuntimeSessions,
 } from "./sessions.js";
+import { buildClaudeQueryOptions, parseExecutionOptions } from "./options.js";
 import { runClaudeRuntime, type ClaudeRuntimeRunLogger } from "./run.js";
 import { runClaudeCli, probeClaudeCli, type ClaudeCliLogger } from "./cli.js";
 
@@ -38,10 +40,37 @@ export interface CreateClaudeRuntimeAdapterOptions {
 }
 
 const DEFAULT_CLAUDE_MODELS: RuntimeModel[] = [
-  { id: "opus", label: "Claude Opus", supportsStreaming: true },
-  { id: "sonnet", label: "Claude Sonnet", supportsStreaming: true },
-  { id: "haiku", label: "Claude Haiku", supportsStreaming: true },
+  {
+    id: "opus",
+    label: "Claude Opus",
+    supportsStreaming: true,
+    metadata: {
+      supportsEffort: true,
+      supportedEffortLevels: ["low", "medium", "high", "max"],
+      supportsAdaptiveThinking: true,
+    },
+  },
+  {
+    id: "sonnet",
+    label: "Claude Sonnet",
+    supportsStreaming: true,
+    metadata: {
+      supportsEffort: true,
+      supportedEffortLevels: ["low", "medium", "high"],
+      supportsAdaptiveThinking: true,
+    },
+  },
+  {
+    id: "haiku",
+    label: "Claude Haiku",
+    supportsStreaming: true,
+    metadata: {
+      supportsEffort: true,
+      supportedEffortLevels: ["low", "medium", "high"],
+    },
+  },
 ];
+const DEFAULT_MODEL_DISCOVERY_TIMEOUT_MS = 8_000;
 
 function createFallbackLogger(): ClaudeRuntimeAdapterLogger {
   return {
@@ -106,6 +135,248 @@ function readStringOption(input: RuntimeConnectionValidationInput, key: string):
   return typeof raw === "string" && raw.trim().length > 0 ? raw.trim() : null;
 }
 
+function normalizeSdkExecutablePath(path: string | null | undefined): string | undefined {
+  if (!path) return undefined;
+  return path.toLowerCase().endsWith(".cmd") ? undefined : path;
+}
+
+function toClaudeModelDiscoveryInput(input: RuntimeModelListInput): RuntimeRunInput {
+  const options = { ...(input.options ?? {}) };
+  if (input.baseUrl && typeof options.baseUrl !== "string") {
+    options.baseUrl = input.baseUrl;
+  }
+  if (input.apiKey && typeof options.apiKey !== "string") {
+    options.apiKey = input.apiKey;
+  }
+  if (input.apiKeyEnvVar && typeof options.apiKeyEnvVar !== "string") {
+    options.apiKeyEnvVar = input.apiKeyEnvVar;
+  }
+  if (input.headers && options.headers == null) {
+    options.headers = input.headers;
+  }
+  return {
+    runtimeId: input.runtimeId,
+    providerId: input.providerId,
+    profileId: input.profileId,
+    transport: input.transport,
+    prompt: "",
+    model: input.model,
+    projectRoot: input.projectRoot,
+    cwd: input.projectRoot,
+    headers: input.headers,
+    options,
+  };
+}
+
+function resolveModelDiscoveryTimeoutMs(input: RuntimeModelListInput): number {
+  const rawTimeout = input.options?.modelDiscoveryTimeoutMs;
+  if (typeof rawTimeout === "number" && Number.isFinite(rawTimeout) && rawTimeout > 0) {
+    return Math.floor(rawTimeout);
+  }
+  if (typeof rawTimeout === "string") {
+    const parsed = Number.parseInt(rawTimeout, 10);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+  return DEFAULT_MODEL_DISCOVERY_TIMEOUT_MS;
+}
+
+async function withTimeout<T>(
+  operation: () => Promise<T>,
+  timeoutMs: number,
+  onTimeout: () => void,
+): Promise<T> {
+  return await new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      try {
+        onTimeout();
+      } catch (error) {
+        reject(error);
+        return;
+      }
+      reject(new Error(`Claude model discovery timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    if (typeof timer === "object" && "unref" in timer) {
+      timer.unref();
+    }
+
+    void operation().then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+async function listClaudeModels(
+  input: RuntimeModelListInput,
+  logger: ClaudeRuntimeAdapterLogger,
+  adapterDefaults?: { pathToClaudeCodeExecutable?: string },
+): Promise<RuntimeModel[]> {
+  const discoveryInput = toClaudeModelDiscoveryInput(input);
+  const configuredCliPath =
+    typeof input.options?.claudeCliPath === "string" &&
+    input.options.claudeCliPath.trim().length > 0
+      ? input.options.claudeCliPath.trim()
+      : null;
+  const execution = parseExecutionOptions(discoveryInput, {
+    pathToClaudeCodeExecutable: normalizeSdkExecutablePath(
+      configuredCliPath ?? adapterDefaults?.pathToClaudeCodeExecutable,
+    ),
+  });
+  const modelDiscoveryAbortController = new AbortController();
+  const upstreamAbortController = execution.abortController;
+  let removeAbortRelay: (() => void) | null = null;
+  if (upstreamAbortController) {
+    const relayAbort = () => {
+      modelDiscoveryAbortController.abort(upstreamAbortController.signal.reason);
+    };
+    if (upstreamAbortController.signal.aborted) {
+      relayAbort();
+    } else {
+      upstreamAbortController.signal.addEventListener("abort", relayAbort, { once: true });
+      removeAbortRelay = () => {
+        upstreamAbortController.signal.removeEventListener("abort", relayAbort);
+      };
+    }
+  }
+  const queryOptions = buildClaudeQueryOptions(
+    discoveryInput,
+    {
+      ...execution,
+      abortController: modelDiscoveryAbortController,
+    },
+    logger,
+  );
+  const env = queryOptions.env;
+  const envRecord =
+    env && typeof env === "object" && !Array.isArray(env) ? (env as Record<string, unknown>) : {};
+  const configuredApiKeyEnvVar =
+    typeof discoveryInput.options?.apiKeyEnvVar === "string"
+      ? discoveryInput.options.apiKeyEnvVar
+      : null;
+  logger.debug?.(
+    {
+      runtimeId: input.runtimeId,
+      profileId: input.profileId ?? null,
+      transport: input.transport ?? RuntimeTransport.SDK,
+      apiKeyEnvVar: configuredApiKeyEnvVar,
+      hasConfiguredApiKey: configuredApiKeyEnvVar
+        ? Boolean(envRecord[configuredApiKeyEnvVar])
+        : false,
+      hasAnthropicApiKey: Boolean(envRecord.ANTHROPIC_API_KEY),
+      hasBaseUrl: typeof envRecord.ANTHROPIC_BASE_URL === "string",
+    },
+    "DEBUG [runtime:claude] Starting Claude model discovery",
+  );
+  let session: ReturnType<typeof query> | null = null;
+  const discoveryStartedAt = Date.now();
+  const timeoutMs = resolveModelDiscoveryTimeoutMs(input);
+  let timedOut = false;
+  let discoveryError: unknown = null;
+
+  try {
+    session = query({
+      prompt: (async function* emptyPrompt() {})(),
+      options: queryOptions as Parameters<typeof query>[0]["options"],
+    });
+    const models = await withTimeout(
+      () => session!.supportedModels(),
+      timeoutMs,
+      () => {
+        timedOut = true;
+        modelDiscoveryAbortController.abort();
+      },
+    );
+    logger.debug?.(
+      {
+        runtimeId: input.runtimeId,
+        profileId: input.profileId ?? null,
+        transport: input.transport ?? RuntimeTransport.SDK,
+        modelCount: models.length,
+        discoveryDurationMs: Date.now() - discoveryStartedAt,
+        timeoutMs,
+      },
+      "DEBUG [runtime:claude] Claude model discovery finished",
+    );
+    if (models.length > 0) {
+      return models.map((model) => ({
+        id: model.value,
+        label: model.displayName,
+        supportsStreaming: true,
+        metadata: {
+          description: model.description,
+          ...(model.supportsEffort ? { supportsEffort: true } : {}),
+          ...(model.supportedEffortLevels
+            ? { supportedEffortLevels: [...model.supportedEffortLevels] }
+            : {}),
+          ...(model.supportsAdaptiveThinking ? { supportsAdaptiveThinking: true } : {}),
+          ...(model.supportsFastMode ? { supportsFastMode: true } : {}),
+          ...(model.supportsAutoMode ? { supportsAutoMode: true } : {}),
+        },
+      }));
+    }
+  } catch (error) {
+    discoveryError = error;
+  } finally {
+    removeAbortRelay?.();
+    try {
+      if (timedOut) {
+        session?.close?.();
+      } else {
+        await session?.return?.();
+      }
+    } catch (cleanupError) {
+      logger.error?.(
+        {
+          runtimeId: input.runtimeId,
+          profileId: input.profileId ?? null,
+          transport: input.transport ?? RuntimeTransport.SDK,
+          error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+        },
+        "ERROR [runtime:claude] Failed to clean up Claude model discovery session",
+      );
+    }
+  }
+
+  if (discoveryError) {
+    const errorMessage =
+      discoveryError instanceof Error ? discoveryError.message : String(discoveryError);
+    if (timedOut) {
+      logger.warn?.(
+        {
+          runtimeId: input.runtimeId,
+          profileId: input.profileId ?? null,
+          transport: input.transport ?? RuntimeTransport.SDK,
+          timeoutMs,
+          discoveryDurationMs: Date.now() - discoveryStartedAt,
+          error: errorMessage,
+        },
+        "WARN [runtime:claude] Claude model discovery timed out, falling back to built-in list",
+      );
+    } else {
+      logger.error?.(
+        {
+          runtimeId: input.runtimeId,
+          profileId: input.profileId ?? null,
+          transport: input.transport ?? RuntimeTransport.SDK,
+          discoveryDurationMs: Date.now() - discoveryStartedAt,
+          error: errorMessage,
+        },
+        "ERROR [runtime:claude] Claude model discovery failed after cleanup, falling back to built-in list",
+      );
+    }
+  }
+
+  return DEFAULT_CLAUDE_MODELS;
+}
+
 async function validateClaudeConnection(
   input: RuntimeConnectionValidationInput,
 ): Promise<RuntimeConnectionValidationResult> {
@@ -154,10 +425,6 @@ async function validateClaudeConnection(
   };
 }
 
-async function listClaudeModels(_input: RuntimeModelListInput): Promise<RuntimeModel[]> {
-  return DEFAULT_CLAUDE_MODELS;
-}
-
 export function createClaudeRuntimeAdapter(
   options: CreateClaudeRuntimeAdapterOptions = {},
 ): RuntimeAdapter {
@@ -191,6 +458,7 @@ export function createClaudeRuntimeAdapter(
       defaultApiKeyEnvVar: "ANTHROPIC_API_KEY",
       defaultBaseUrlEnvVar: "ANTHROPIC_BASE_URL",
       defaultModelPlaceholder: "opus",
+      defaultTransport: RuntimeTransport.SDK,
       supportedTransports: [RuntimeTransport.SDK, RuntimeTransport.CLI, RuntimeTransport.API],
       capabilities: SDK_CAPABILITIES,
     },
@@ -225,7 +493,9 @@ export function createClaudeRuntimeAdapter(
       return validateClaudeConnection(input);
     },
     async listModels(input: RuntimeModelListInput): Promise<RuntimeModel[]> {
-      return listClaudeModels(input);
+      return listClaudeModels(input, logger, {
+        pathToClaudeCodeExecutable: sdkExecutablePath,
+      });
     },
     async diagnoseError(input: RuntimeDiagnoseErrorInput): Promise<string> {
       return diagnoseClaudeError(input, executablePath);

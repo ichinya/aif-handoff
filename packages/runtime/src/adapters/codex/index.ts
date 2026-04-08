@@ -25,6 +25,11 @@ import {
   validateCodexAgentApiConnection,
   type CodexAgentApiLogger,
 } from "./api.js";
+import {
+  enrichCodexDiscoveredModels,
+  getDefaultCodexModels,
+  listCodexAppServerModels,
+} from "./modelDiscovery.js";
 import { runCodexSdk, type CodexSdkLogger } from "./sdk.js";
 import { listCodexSdkSessions, getCodexSdkSession, listCodexSdkSessionEvents } from "./sessions.js";
 import { classifyCodexRuntimeError } from "./errors.js";
@@ -37,12 +42,6 @@ export interface CreateCodexRuntimeAdapterOptions {
   displayName?: string;
   logger?: CodexRuntimeAdapterLogger;
 }
-
-const DEFAULT_CODEX_MODELS: RuntimeModel[] = [
-  { id: "gpt-5.4", label: "GPT-5.4", supportsStreaming: true },
-  { id: "gpt-5.4-mini", label: "GPT-5.4 Mini", supportsStreaming: true },
-  { id: "gpt-5.3-codex", label: "GPT-5.3 Codex", supportsStreaming: true },
-];
 
 function createFallbackLogger(): CodexRuntimeAdapterLogger {
   return {
@@ -333,11 +332,11 @@ export function createCodexRuntimeAdapter(
     },
 
     async listModels(input: RuntimeModelListInput): Promise<RuntimeModel[]> {
-      const options = asRecord(input);
-      const transport = resolveTransport({ transport: undefined, options });
+      const options = asRecord(input.options);
+      const transport = resolveTransport({ transport: input.transport, options });
       if (transport === RuntimeTransport.API) {
         try {
-          const models = await listCodexAgentApiModels(input);
+          const models = enrichCodexDiscoveredModels(await listCodexAgentApiModels(input));
           if (models.length > 0) {
             logger.debug?.(
               {
@@ -359,6 +358,45 @@ export function createCodexRuntimeAdapter(
           );
         }
       }
+
+      if (transport === RuntimeTransport.CLI || transport === RuntimeTransport.SDK) {
+        const slowPathStartedAt = Date.now();
+        logger.debug?.(
+          {
+            runtimeId: input.runtimeId,
+            profileId: input.profileId ?? null,
+            transport,
+          },
+          "DEBUG [runtime:codex] Running app-server model discovery slow path (cache miss at runtime service level)",
+        );
+        try {
+          const models = await listCodexAppServerModels({ ...input, transport }, logger);
+          if (models.length > 0) {
+            logger.debug?.(
+              {
+                runtimeId: input.runtimeId,
+                profileId: input.profileId ?? null,
+                transport,
+                discoveryDurationMs: Date.now() - slowPathStartedAt,
+              },
+              "DEBUG [runtime:codex] Codex app-server model discovery slow path completed",
+            );
+            return models;
+          }
+        } catch (error) {
+          logger.warn?.(
+            {
+              runtimeId: input.runtimeId,
+              profileId: input.profileId ?? null,
+              transport,
+              discoveryDurationMs: Date.now() - slowPathStartedAt,
+              error: error instanceof Error ? error.message : String(error),
+            },
+            "WARN [runtime:codex] Codex app-server model discovery failed, falling back to built-in list",
+          );
+        }
+      }
+
       logger.debug?.(
         {
           runtimeId: input.runtimeId,
@@ -367,7 +405,7 @@ export function createCodexRuntimeAdapter(
         },
         "DEBUG [runtime:codex] Returning built-in model list",
       );
-      return DEFAULT_CODEX_MODELS;
+      return getDefaultCodexModels();
     },
 
     initProject(projectRoot) {

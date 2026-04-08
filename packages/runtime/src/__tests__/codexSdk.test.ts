@@ -7,10 +7,15 @@ const mockThread = {
   id: "thread-abc123",
   runStreamed: mockRunStreamed,
 };
+const mockCodexConstructor = vi.fn();
 const mockStartThread = vi.fn().mockReturnValue(mockThread);
 const mockResumeThread = vi.fn().mockReturnValue(mockThread);
 
 class MockCodex {
+  constructor(options: unknown) {
+    mockCodexConstructor(options);
+  }
+
   startThread = mockStartThread;
   resumeThread = mockResumeThread;
 }
@@ -42,6 +47,7 @@ async function* createMockEvents(
 describe("runCodexSdk", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
     mockStartThread.mockReturnValue(mockThread);
     mockResumeThread.mockReturnValue(mockThread);
   });
@@ -286,5 +292,27 @@ describe("runCodexSdk", () => {
 
     await runCodexSdk(createRunInput({ execution: { onToolUse } }));
     expect(onToolUse).toHaveBeenCalledWith("FileChange", "update src/index.ts, add src/new.ts");
+  });
+
+  it("does not forward npm_ environment keys into Codex SDK env", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "sk-sdk");
+    vi.stubEnv("npm_config_registry", "https://registry.npmjs.org");
+    mockRunStreamed.mockResolvedValue({
+      events: createMockEvents([
+        { type: "thread.started", thread_id: "thread-env" },
+        {
+          type: "turn.completed",
+          usage: { input_tokens: 0, output_tokens: 0, cached_input_tokens: 0 },
+        },
+      ]),
+    });
+
+    await runCodexSdk(createRunInput());
+
+    const constructorOptions = mockCodexConstructor.mock.calls[0][0] as {
+      env?: Record<string, string>;
+    };
+    expect(constructorOptions.env?.OPENAI_API_KEY).toBe("sk-sdk");
+    expect(constructorOptions.env?.npm_config_registry).toBeUndefined();
   });
 });

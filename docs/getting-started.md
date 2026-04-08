@@ -52,6 +52,7 @@ Docker-specific environment variables:
 | `DOMAIN`            | `localhost`  | Domain for SSL certificate (ACME)      |
 | `PORT`              | `3009`       | Host port for API                      |
 | `WEB_PORT`          | `5180`       | Host port for Web UI (dev)             |
+| `WEB_HOST`          | `localhost`  | Web UI dev server host (Vite)          |
 | `HTTP_PORT`         | `80`         | Host port for Web UI (production)      |
 | `HTTPS_PORT`        | `443`        | HTTPS port (production)                |
 | `PROJECTS_DIR`      | `./projects` | Host directory for project files (dev) |
@@ -97,6 +98,7 @@ cp .env.example .env
 | `ANTHROPIC_API_KEY`            | _(optional)_        | API key. Agent SDK uses `~/.claude/` auth by default                                          |
 | `PORT`                         | `3009`              | API server port                                                                               |
 | `WEB_PORT`                     | `5180`              | Web UI dev server port                                                                        |
+| `WEB_HOST`                     | `localhost`         | Web UI dev server host                                                                        |
 | `POLL_INTERVAL_MS`             | `30000`             | Agent coordinator polling interval (ms)                                                       |
 | `AGENT_STAGE_STALE_TIMEOUT_MS` | `5400000`           | Stale-stage watchdog timeout (ms) before auto-recovery                                        |
 | `AGENT_STAGE_STALE_MAX_RETRY`  | `3`                 | Max stale auto-recover attempts before quarantine in `blocked_external`                       |

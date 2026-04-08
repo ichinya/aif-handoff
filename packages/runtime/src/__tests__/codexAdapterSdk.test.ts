@@ -5,6 +5,7 @@ const runCodexCliMock = vi.fn();
 const runCodexAgentApiMock = vi.fn();
 const runCodexSdkMock = vi.fn();
 const validateCodexAgentApiConnectionMock = vi.fn();
+const listCodexAppServerModelsMock = vi.fn();
 
 vi.mock("../adapters/codex/cli.js", () => ({
   runCodexCli: (...args: unknown[]) => runCodexCliMock(...args),
@@ -16,6 +17,16 @@ vi.mock("../adapters/codex/api.js", () => ({
     validateCodexAgentApiConnectionMock(...args),
   listCodexAgentApiModels: vi.fn().mockResolvedValue([]),
 }));
+
+vi.mock("../adapters/codex/modelDiscovery.js", async () => {
+  const actual = await vi.importActual<typeof import("../adapters/codex/modelDiscovery.js")>(
+    "../adapters/codex/modelDiscovery.js",
+  );
+  return {
+    ...actual,
+    listCodexAppServerModels: (...args: unknown[]) => listCodexAppServerModelsMock(...args),
+  };
+});
 
 vi.mock("../adapters/codex/sdk.js", () => ({
   runCodexSdk: (...args: unknown[]) => runCodexSdkMock(...args),
@@ -48,6 +59,8 @@ describe("Codex adapter — SDK transport and capabilities", () => {
     runCodexAgentApiMock.mockResolvedValue({ outputText: "api-output", sessionId: null });
     runCodexSdkMock.mockResolvedValue({ outputText: "sdk-output", sessionId: "thread-1" });
     validateCodexAgentApiConnectionMock.mockResolvedValue({ ok: true });
+    listCodexAppServerModelsMock.mockReset();
+    listCodexAppServerModelsMock.mockResolvedValue([]);
   });
 
   describe("transport routing", () => {
@@ -180,6 +193,43 @@ describe("Codex adapter — SDK transport and capabilities", () => {
       expect(runCodexSdkMock).toHaveBeenCalledTimes(1);
       const callInput = runCodexSdkMock.mock.calls[0][0];
       expect(callInput.resume).toBe(true);
+    });
+  });
+
+  describe("model discovery via SDK", () => {
+    it("uses Codex app-server discovery for SDK transport", async () => {
+      listCodexAppServerModelsMock.mockResolvedValueOnce([
+        {
+          id: "gpt-5.3-codex",
+          label: "GPT-5.3 Codex",
+          supportsStreaming: true,
+          metadata: {
+            supportsEffort: true,
+            supportedEffortLevels: ["minimal", "low", "medium", "high", "xhigh"],
+          },
+        },
+      ]);
+      const adapter = createCodexRuntimeAdapter();
+
+      const models = await adapter.listModels!({
+        runtimeId: "codex",
+        providerId: "openai",
+        profileId: "profile-1",
+        transport: RuntimeTransport.SDK,
+      });
+
+      expect(models).toEqual([
+        {
+          id: "gpt-5.3-codex",
+          label: "GPT-5.3 Codex",
+          supportsStreaming: true,
+          metadata: {
+            supportsEffort: true,
+            supportedEffortLevels: ["minimal", "low", "medium", "high", "xhigh"],
+          },
+        },
+      ]);
+      expect(listCodexAppServerModelsMock).toHaveBeenCalledTimes(1);
     });
   });
 });

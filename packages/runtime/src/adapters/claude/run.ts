@@ -81,7 +81,7 @@ export async function runClaudeRuntime(
   );
 
   try {
-    const attempt = await runClaudeQueryAttempt(input, execution, timeoutMs);
+    const attempt = await runClaudeQueryAttempt(input, execution, timeoutMs, logger);
     logger.info(
       {
         runtimeId: input.runtimeId,
@@ -110,6 +110,7 @@ export async function runClaudeRuntime(
             { ...input, resume: false, sessionId: null },
             execution,
             timeoutMs,
+            logger,
           ),
         );
       } catch (resumeRetryError) {
@@ -139,7 +140,7 @@ export async function runClaudeRuntime(
       );
       await sleep(retryDelayMs);
       try {
-        return toResult(await runClaudeQueryAttempt(input, execution, timeoutMs));
+        return toResult(await runClaudeQueryAttempt(input, execution, timeoutMs, logger));
       } catch (retryError) {
         const classified = classifyClaudeRuntimeError(retryError);
         logger.error(

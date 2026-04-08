@@ -63,7 +63,6 @@ const ALLOWED_ENV_PREFIXES = [
   "AIF_",
   "HANDOFF_",
   "NODE_",
-  "npm_",
   "HOME",
   "USER",
   "LANG",
@@ -86,19 +85,46 @@ const ALLOWED_ENV_PREFIXES = [
  */
 const BLOCKED_ENV_KEYS = new Set(["OPENAI_BASE_URL"]);
 
-function buildCuratedEnv(apiKeyEnvVar: string): Record<string, string> {
+interface CuratedEnvResult {
+  env: Record<string, string>;
+  forwardedCount: number;
+  filteredCount: number;
+  blockedCount: number;
+  droppedDisallowedPrefixKeys: string[];
+}
+
+function buildCuratedEnv(apiKeyEnvVar: string): CuratedEnvResult {
   const env: Record<string, string> = {};
+  let forwardedCount = 0;
+  let filteredCount = 0;
+  let blockedCount = 0;
+  const droppedDisallowedPrefixKeys = new Set<string>();
   for (const [key, value] of Object.entries(process.env)) {
     if (value == null) continue;
-    if (BLOCKED_ENV_KEYS.has(key)) continue;
+    if (BLOCKED_ENV_KEYS.has(key)) {
+      blockedCount += 1;
+      continue;
+    }
     if (
       key === apiKeyEnvVar ||
       ALLOWED_ENV_PREFIXES.some((prefix) => key === prefix || key.startsWith(prefix))
     ) {
       env[key] = value;
+      forwardedCount += 1;
+    } else {
+      filteredCount += 1;
+      if (key.startsWith("npm_")) {
+        droppedDisallowedPrefixKeys.add(key);
+      }
     }
   }
-  return env;
+  return {
+    env,
+    forwardedCount,
+    filteredCount,
+    blockedCount,
+    droppedDisallowedPrefixKeys: [...droppedDisallowedPrefixKeys],
+  };
 }
 
 function resolveCliPath(input: RuntimeRunInput): string {
@@ -288,7 +314,29 @@ export async function runCodexCli(
   const options = asRecord(input.options);
   const apiKeyEnvVar =
     typeof options.apiKeyEnvVar === "string" ? options.apiKeyEnvVar : "OPENAI_API_KEY";
-  const env = buildCuratedEnv(apiKeyEnvVar);
+  const curatedEnv = buildCuratedEnv(apiKeyEnvVar);
+  const env = curatedEnv.env;
+  logger?.debug?.(
+    {
+      runtimeId: input.runtimeId,
+      transport: "cli",
+      forwardedEnvCount: curatedEnv.forwardedCount,
+      filteredEnvCount: curatedEnv.filteredCount,
+      blockedEnvCount: curatedEnv.blockedCount,
+      droppedDisallowedPrefixCount: curatedEnv.droppedDisallowedPrefixKeys.length,
+    },
+    "DEBUG [runtime:codex] Built Codex CLI environment from curated allowlist",
+  );
+  if (curatedEnv.droppedDisallowedPrefixKeys.length > 0) {
+    logger?.warn?.(
+      {
+        runtimeId: input.runtimeId,
+        transport: "cli",
+        droppedDisallowedPrefixKeys: curatedEnv.droppedDisallowedPrefixKeys.slice(0, 10),
+      },
+      "WARN [runtime:codex] Dropped disallowed environment prefix keys while building Codex CLI environment",
+    );
+  }
 
   logger?.info?.(
     {

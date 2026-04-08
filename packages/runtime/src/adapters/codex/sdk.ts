@@ -43,7 +43,6 @@ const ALLOWED_ENV_PREFIXES = [
   "AIF_",
   "HANDOFF_",
   "NODE_",
-  "npm_",
   "HOME",
   "USER",
   "LANG",
@@ -61,8 +60,16 @@ const ALLOWED_ENV_PREFIXES = [
 function buildCuratedEnv(
   apiKeyEnvVar: string,
   executionEnv?: Record<string, string>,
-): Record<string, string> {
+): {
+  env: Record<string, string>;
+  forwardedCount: number;
+  filteredCount: number;
+  droppedDisallowedPrefixKeys: string[];
+} {
   const env: Record<string, string> = {};
+  let forwardedCount = 0;
+  let filteredCount = 0;
+  const droppedDisallowedPrefixKeys = new Set<string>();
   for (const [key, value] of Object.entries(process.env)) {
     if (value == null) continue;
     if (
@@ -70,24 +77,56 @@ function buildCuratedEnv(
       ALLOWED_ENV_PREFIXES.some((prefix) => key === prefix || key.startsWith(prefix))
     ) {
       env[key] = value;
+      forwardedCount += 1;
+    } else {
+      filteredCount += 1;
+      if (key.startsWith("npm_")) {
+        droppedDisallowedPrefixKeys.add(key);
+      }
     }
   }
   Object.assign(env, executionEnv ?? {});
-  return env;
+  return {
+    env,
+    forwardedCount,
+    filteredCount,
+    droppedDisallowedPrefixKeys: [...droppedDisallowedPrefixKeys],
+  };
 }
 
 // ---------------------------------------------------------------------------
 // SDK option builders
 // ---------------------------------------------------------------------------
 
-function buildCodexOptions(input: RuntimeRunInput): CodexOptions {
+function buildCodexOptions(input: RuntimeRunInput, logger?: CodexSdkLogger): CodexOptions {
   const options = asRecord(input.options);
   const execution = input.execution;
   const apiKeyEnvVar =
     typeof options.apiKeyEnvVar === "string" ? options.apiKeyEnvVar : "OPENAI_API_KEY";
+  const curatedEnv = buildCuratedEnv(apiKeyEnvVar, execution?.environment);
+  logger?.debug?.(
+    {
+      runtimeId: input.runtimeId,
+      transport: "sdk",
+      forwardedEnvCount: curatedEnv.forwardedCount,
+      filteredEnvCount: curatedEnv.filteredCount,
+      droppedDisallowedPrefixCount: curatedEnv.droppedDisallowedPrefixKeys.length,
+    },
+    "DEBUG [runtime:codex] Built Codex SDK environment from curated allowlist",
+  );
+  if (curatedEnv.droppedDisallowedPrefixKeys.length > 0) {
+    logger?.warn?.(
+      {
+        runtimeId: input.runtimeId,
+        transport: "sdk",
+        droppedDisallowedPrefixKeys: curatedEnv.droppedDisallowedPrefixKeys.slice(0, 10),
+      },
+      "WARN [runtime:codex] Dropped disallowed environment prefix keys while building Codex SDK environment",
+    );
+  }
 
   const codexOpts: CodexOptions = {
-    env: buildCuratedEnv(apiKeyEnvVar, execution?.environment),
+    env: curatedEnv.env,
   };
 
   // API key — only passed if explicitly provided via profile options or env var.
@@ -339,7 +378,7 @@ export async function runCodexSdk(
   input: RuntimeRunInput,
   logger?: CodexSdkLogger,
 ): Promise<RuntimeRunResult> {
-  const codexOpts = buildCodexOptions(input);
+  const codexOpts = buildCodexOptions(input, logger);
   const threadOpts = buildThreadOptions(input);
   const turnOpts = buildTurnOptions(input.execution);
   const execution = input.execution;

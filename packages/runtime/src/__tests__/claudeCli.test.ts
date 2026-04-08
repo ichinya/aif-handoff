@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeRunInput } from "../types.js";
+import { getCliSpawnInvocation } from "./helpers/cliSpawn.js";
 
 // Mock child_process.spawn
 const mockStdout = { on: vi.fn() };
@@ -55,6 +56,10 @@ function simulateClose(code: number, stdout = "", stderr = "") {
   closeHandler?.(code);
 }
 
+function getSpawnInvocation() {
+  return getCliSpawnInvocation(spawn as ReturnType<typeof vi.fn>);
+}
+
 describe("runClaudeCli", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -92,9 +97,9 @@ describe("runClaudeCli", () => {
     expect(result.usage?.outputTokens).toBe(50);
     expect(result.usage?.costUsd).toBe(0.01);
 
-    // Verify spawn args
-    expect(spawn).toHaveBeenCalledWith(
-      "claude",
+    const { cliPath, cliArgs, spawnOptions } = getSpawnInvocation();
+    expect(cliPath).toBe("claude");
+    expect(cliArgs).toEqual(
       expect.arrayContaining([
         "--output-format",
         "json",
@@ -103,8 +108,8 @@ describe("runClaudeCli", () => {
         "-p",
         "Implement the feature",
       ]),
-      expect.objectContaining({ cwd: "/tmp/project" }),
     );
+    expect(spawnOptions).toEqual(expect.objectContaining({ cwd: "/tmp/project" }));
   });
 
   it("includes --agent flag when agentDefinitionName is set", async () => {
@@ -117,9 +122,9 @@ describe("runClaudeCli", () => {
 
     await promise;
 
-    const spawnArgs = (spawn as ReturnType<typeof vi.fn>).mock.calls[0][1] as string[];
-    expect(spawnArgs).toContain("--agent");
-    expect(spawnArgs[spawnArgs.indexOf("--agent") + 1]).toBe("plan-coordinator");
+    const { cliArgs } = getSpawnInvocation();
+    expect(cliArgs).toContain("--agent");
+    expect(cliArgs[cliArgs.indexOf("--agent") + 1]).toBe("plan-coordinator");
   });
 
   it("includes --model flag when model is set", async () => {
@@ -130,9 +135,9 @@ describe("runClaudeCli", () => {
 
     await promise;
 
-    const spawnArgs = (spawn as ReturnType<typeof vi.fn>).mock.calls[0][1] as string[];
-    expect(spawnArgs).toContain("--model");
-    expect(spawnArgs).toContain("claude-opus-4-1");
+    const { cliArgs } = getSpawnInvocation();
+    expect(cliArgs).toContain("--model");
+    expect(cliArgs).toContain("claude-opus-4-1");
   });
 
   it("includes --resume flag for session continuation", async () => {
@@ -143,9 +148,9 @@ describe("runClaudeCli", () => {
 
     await promise;
 
-    const spawnArgs = (spawn as ReturnType<typeof vi.fn>).mock.calls[0][1] as string[];
-    expect(spawnArgs).toContain("--resume");
-    expect(spawnArgs).toContain("sess-existing");
+    const { cliArgs } = getSpawnInvocation();
+    expect(cliArgs).toContain("--resume");
+    expect(cliArgs).toContain("sess-existing");
   });
 
   it("uses --dangerously-skip-permissions when bypassPermissions is true", async () => {
@@ -156,9 +161,9 @@ describe("runClaudeCli", () => {
 
     await promise;
 
-    const spawnArgs = (spawn as ReturnType<typeof vi.fn>).mock.calls[0][1] as string[];
-    expect(spawnArgs).toContain("--dangerously-skip-permissions");
-    expect(spawnArgs).not.toContain("acceptEdits");
+    const { cliArgs } = getSpawnInvocation();
+    expect(cliArgs).toContain("--dangerously-skip-permissions");
+    expect(cliArgs).not.toContain("acceptEdits");
   });
 
   it("throws classified error on non-zero exit code", async () => {
@@ -199,7 +204,8 @@ describe("runClaudeCli", () => {
 
     await promise;
 
-    expect(spawn).toHaveBeenCalledWith("/custom/bin/claude", expect.any(Array), expect.any(Object));
+    const { cliPath } = getSpawnInvocation();
+    expect(cliPath).toBe("/custom/bin/claude");
   });
 
   it("calls onStderr callback for stderr output", async () => {

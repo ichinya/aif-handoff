@@ -1,7 +1,7 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { RuntimeEvent, RuntimeRunInput, RuntimeUsage } from "../../types.js";
 import { classifyClaudeResultSubtype } from "./errors.js";
-import type { ClaudeRuntimeExecutionOptions } from "./options.js";
+import type { ClaudeOptionsLogger, ClaudeRuntimeExecutionOptions } from "./options.js";
 import { buildClaudeQueryOptions } from "./options.js";
 
 const QUERY_START_TIMEOUT_CODE = "query_start_timeout";
@@ -140,8 +140,9 @@ export async function runClaudeQueryAttempt(
   input: RuntimeRunInput,
   execution: ClaudeRuntimeExecutionOptions,
   timeoutMs: number,
+  logger?: ClaudeOptionsLogger,
 ): Promise<ClaudeQueryAttemptResult> {
-  const options = buildClaudeQueryOptions(input, execution);
+  const options = buildClaudeQueryOptions(input, execution, logger);
   const queryImpl = resolveQueryImplementation();
   const stream = queryImpl({ prompt: input.prompt, options });
 

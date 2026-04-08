@@ -17,6 +17,7 @@ if (existsSync(rootEnv)) dotenvConfig({ path: rootEnv, override: true });
 if (existsSync(rootEnvLocal)) dotenvConfig({ path: rootEnvLocal, override: true });
 
 const WEB_PORT = Number(process.env.WEB_PORT) || 5180;
+const WEB_HOST = process.env.WEB_HOST?.trim() || "localhost";
 const API_PORT = Number(process.env.PORT) || 3009;
 const apiTarget = `http://localhost:${API_PORT}`;
 
@@ -61,6 +62,7 @@ export default defineConfig({
   },
   server: {
     port: WEB_PORT,
+    host: WEB_HOST,
     proxy: {
       "/projects": apiTarget,
       "/tasks": apiTarget,

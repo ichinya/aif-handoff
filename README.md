@@ -17,6 +17,8 @@ Use the runtime that fits your stack today, then switch per project/task without
 - **OpenRouter (`openrouter`)** — API transport
 - **OpenCode (`opencode`)** — API transport
 
+> **⚠️ Warning:** Anthropic prohibits using Claude Max / Pro subscriptions outside of the official Claude Code CLI. The SDK transport for Claude calls the Agent SDK directly, which may violate these terms. Use it at your own risk — consider API transport with an `ANTHROPIC_API_KEY` for production use.
+
 Need something custom? Add your own runtime adapter module and load it at startup via `AIF_RUNTIME_MODULES` (comma-separated module specifiers). No fork required.
 
 ## Key Features
@@ -177,6 +179,7 @@ Only ports 80/443 are exposed. API is bound to localhost only. Includes security
 | `DOMAIN`            | `localhost`  | Domain for SSL certificate (ACME)      |
 | `PORT`              | `3009`       | Host port for API                      |
 | `WEB_PORT`          | `5180`       | Host port for Web UI (dev)             |
+| `WEB_HOST`          | `localhost`  | Web UI dev server host (Vite)          |
 | `HTTP_PORT`         | `80`         | Host port for Web UI (production)      |
 | `HTTPS_PORT`        | `443`        | HTTPS port (production)                |
 | `PROJECTS_DIR`      | `./projects` | Host directory for project files (dev) |
