@@ -29,6 +29,7 @@ interface RuntimeModelOption {
 }
 
 const MANAGED_OPTION_KEYS = ["effort", "modelReasoningEffort"] as const;
+const MODEL_DISCOVERY_DEBOUNCE_MS = 300;
 
 function parseJsonObject(raw: string): Record<string, unknown> {
   if (!raw.trim()) return {};
@@ -251,6 +252,7 @@ export function RuntimeProfileForm({
 
   useEffect(() => {
     let cancelled = false;
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     if (!supportsModelDiscovery) {
       modelLoadRequestIdRef.current += 1;
       setDiscoveredModels([]);
@@ -288,9 +290,15 @@ export function RuntimeProfileForm({
       }
     };
 
-    void run();
+    debounceTimer = setTimeout(() => {
+      void run();
+    }, MODEL_DISCOVERY_DEBOUNCE_MS);
+
     return () => {
       cancelled = true;
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+      }
     };
   }, [
     projectId,
