@@ -169,6 +169,9 @@ export function createExampleRuntimeAdapter(
       id: runtimeId,
       providerId,
       displayName: options.displayName ?? "Example Runtime",
+      // Set both fields when this runtime should participate in `ai-factory init`.
+      // supportsProjectInit: true,
+      // projectInitAgentName: "example",
       lightModel: null, // cheap model for review-gate etc., or null for default
       defaultApiKeyEnvVar: "MY_API_KEY", // env var name shown in UI placeholder
       defaultModelPlaceholder: "my-model-v1", // model name shown in UI placeholder

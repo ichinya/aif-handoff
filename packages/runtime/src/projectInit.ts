@@ -1,10 +1,13 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { execFileSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { initBaseProjectDirectory, logger } from "@aif/shared";
 import type { RuntimeRegistry } from "./registry.js";
 
 const log = logger("runtime-project-init");
+const moduleRequire = createRequire(import.meta.url);
+const IS_WINDOWS = process.platform === "win32";
 
 export interface InitProjectOptions {
   /** Project root directory path. */
@@ -18,6 +21,37 @@ export interface InitProjectOptions {
 export interface InitProjectResult {
   ok: boolean;
   error?: string;
+}
+
+interface AiFactoryCommand {
+  command: string;
+  args: string[];
+}
+
+function quoteForCmd(value: string): string {
+  return `"${value.replace(/"/g, '""')}"`;
+}
+
+function resolveAiFactoryCommand(agentIds: string): AiFactoryCommand {
+  try {
+    const aiFactoryBin = moduleRequire.resolve("ai-factory/bin/ai-factory.js");
+    return {
+      command: process.execPath,
+      args: [aiFactoryBin, "init", "--agents", agentIds],
+    };
+  } catch {
+    if (IS_WINDOWS) {
+      return {
+        command: process.env.ComSpec ?? "cmd.exe",
+        args: ["/d", "/c", `npx ai-factory init --agents ${quoteForCmd(agentIds)}`],
+      };
+    }
+
+    return {
+      command: "npx",
+      args: ["ai-factory", "init", "--agents", agentIds],
+    };
+  }
 }
 
 /**
@@ -50,11 +84,25 @@ export function initProject(options: InitProjectOptions): InitProjectResult {
   const initCapable = descriptors.filter((d) => d.supportsProjectInit);
   const targets = runtimeIds ? initCapable.filter((d) => runtimeIds.includes(d.id)) : initCapable;
 
-  const agentIds = targets.map((d) => d.id).join(",");
+  const agentIds = [
+    ...new Set(
+      targets.flatMap((descriptor) => {
+        const agentName = descriptor.projectInitAgentName?.trim();
+        if (agentName) return [agentName];
+
+        log.warn(
+          { projectRoot, runtimeId: descriptor.id },
+          "Skipping runtime during ai-factory init because projectInitAgentName is missing",
+        );
+        return [];
+      }),
+    ),
+  ].join(",");
   if (!agentIds) return { ok: true };
 
   try {
-    execFileSync("npx", ["ai-factory", "init", "--agents", agentIds], {
+    const command = resolveAiFactoryCommand(agentIds);
+    execFileSync(command.command, command.args, {
       cwd: projectRoot,
       stdio: "ignore",
       timeout: 60_000,

@@ -133,6 +133,7 @@ export function createOpenCodeRuntimeAdapter(
       providerId,
       displayName: options.displayName ?? "OpenCode",
       supportsProjectInit: true,
+      projectInitAgentName: "opencode",
       lightModel: null,
       defaultBaseUrlEnvVar: "OPENCODE_BASE_URL",
       defaultModelPlaceholder: "anthropic/claude-sonnet-4",

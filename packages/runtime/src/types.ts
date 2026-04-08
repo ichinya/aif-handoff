@@ -72,6 +72,11 @@ export interface RuntimeDescriptor {
    * API-only runtimes (e.g. OpenRouter) that have no local agent tooling should set this to false or omit it.
    */
   supportsProjectInit?: boolean;
+  /**
+   * Agent identifier passed to `ai-factory init --agents`.
+   * Required for runtimes that set `supportsProjectInit: true`.
+   */
+  projectInitAgentName?: string;
 }
 
 /** Generic tool-use callback — adapter converts its native format to this. */

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeRegistry } from "../registry.js";
 
 const execFileSyncMock = vi.fn();
+const aiFactoryResolveMock = vi.fn();
 
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
@@ -14,22 +15,45 @@ vi.mock("node:child_process", async (importOriginal) => {
   };
 });
 
+vi.mock("node:module", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:module")>();
+  return {
+    ...actual,
+    createRequire: () => ({
+      resolve: (...args: unknown[]) => aiFactoryResolveMock(...args),
+    }),
+  };
+});
+
 const { initProject } = await import("../projectInit.js");
 
 function createMockRegistry(
   runtimeIds: string[] = ["claude", "codex"],
-  overrides?: Record<string, { supportsProjectInit?: boolean }>,
+  overrides?: Record<string, { supportsProjectInit?: boolean; projectInitAgentName?: string }>,
 ): RuntimeRegistry {
   return {
     resolveRuntime: vi.fn(),
     listRuntimes: vi.fn(() =>
-      runtimeIds.map((id) => ({
-        id,
-        providerId: id,
-        displayName: id,
-        capabilities: {},
-        supportsProjectInit: overrides?.[id]?.supportsProjectInit ?? true,
-      })),
+      runtimeIds.map((id) => {
+        const override = overrides?.[id];
+        const hasAgentNameOverride = Object.prototype.hasOwnProperty.call(
+          override ?? {},
+          "projectInitAgentName",
+        );
+
+        return {
+          id,
+          providerId: id,
+          displayName: id,
+          capabilities: {},
+          supportsProjectInit: override?.supportsProjectInit ?? true,
+          projectInitAgentName: hasAgentNameOverride
+            ? override?.projectInitAgentName
+            : override?.supportsProjectInit === false
+              ? undefined
+              : id,
+        };
+      }),
     ),
     registerRuntimeModule: vi.fn(),
   } as unknown as RuntimeRegistry;
@@ -41,6 +65,8 @@ describe("initProject (runtime)", () => {
   beforeEach(() => {
     projectRoot = mkdtempSync(join(tmpdir(), "aif-runtime-init-"));
     execFileSyncMock.mockReset();
+    aiFactoryResolveMock.mockReset();
+    aiFactoryResolveMock.mockReturnValue("C:\\fake\\ai-factory\\bin\\ai-factory.js");
   });
 
   afterEach(() => {
@@ -54,8 +80,8 @@ describe("initProject (runtime)", () => {
 
     expect(result.ok).toBe(true);
     expect(execFileSyncMock).toHaveBeenCalledWith(
-      "npx",
-      ["ai-factory", "init", "--agents", "claude,codex"],
+      process.execPath,
+      ["C:\\fake\\ai-factory\\bin\\ai-factory.js", "init", "--agents", "claude,codex"],
       expect.objectContaining({ cwd: projectRoot, timeout: 60_000 }),
     );
   });
@@ -73,14 +99,14 @@ describe("initProject (runtime)", () => {
   it("returns error when ai-factory init fails", () => {
     const registry = createMockRegistry();
     execFileSyncMock.mockImplementation(() => {
-      throw new Error("npx: command not found");
+      throw new Error("ai-factory init exited with code 1");
     });
 
     const result = initProject({ projectRoot, registry });
 
     expect(result.ok).toBe(false);
     expect(result.error).toContain("ai-factory init");
-    expect(result.error).toContain("npx: command not found");
+    expect(result.error).toContain("ai-factory init exited with code 1");
     // .ai-factory/ should NOT exist so retry is possible
     expect(existsSync(join(projectRoot, ".ai-factory"))).toBe(false);
   });
@@ -93,8 +119,8 @@ describe("initProject (runtime)", () => {
     initProject({ projectRoot, registry, runtimeIds: ["claude"] });
 
     expect(execFileSyncMock).toHaveBeenCalledWith(
-      "npx",
-      ["ai-factory", "init", "--agents", "claude"],
+      process.execPath,
+      ["C:\\fake\\ai-factory\\bin\\ai-factory.js", "init", "--agents", "claude"],
       expect.any(Object),
     );
   });
@@ -107,8 +133,23 @@ describe("initProject (runtime)", () => {
     initProject({ projectRoot, registry });
 
     expect(execFileSyncMock).toHaveBeenCalledWith(
-      "npx",
-      ["ai-factory", "init", "--agents", "claude,codex"],
+      process.execPath,
+      ["C:\\fake\\ai-factory\\bin\\ai-factory.js", "init", "--agents", "claude,codex"],
+      expect.any(Object),
+    );
+  });
+
+  it("skips runtimes without projectInitAgentName even if supportsProjectInit is true", () => {
+    const registry = createMockRegistry(["claude", "openrouter"], {
+      openrouter: { supportsProjectInit: true, projectInitAgentName: undefined },
+    });
+
+    const result = initProject({ projectRoot, registry });
+
+    expect(result.ok).toBe(true);
+    expect(execFileSyncMock).toHaveBeenCalledWith(
+      process.execPath,
+      ["C:\\fake\\ai-factory\\bin\\ai-factory.js", "init", "--agents", "claude"],
       expect.any(Object),
     );
   });
