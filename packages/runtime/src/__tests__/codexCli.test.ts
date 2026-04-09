@@ -63,7 +63,7 @@ describe("codex cli transport", () => {
     vi.unstubAllEnvs();
   });
 
-  it("runs codex cli with default args and passes prompt as positional arg", async () => {
+  it("runs codex cli with default args and passes prompt via stdin", async () => {
     const child = createMockChildProcess();
     spawnMock.mockReturnValueOnce(child);
 
@@ -72,8 +72,8 @@ describe("codex cli transport", () => {
     expect(spawnMock).toHaveBeenCalledTimes(1);
     const { cliPath, cliArgs: args } = getSpawnInvocation();
     expect(cliPath).toBe("codex");
-    expect(args).toEqual(["exec", "--json", "--model", "gpt-5.4", "Implement feature"]);
-    expect(child.stdin.write).not.toHaveBeenCalled();
+    expect(args).toEqual(["exec", "--json", "--model", "gpt-5.4"]);
+    expect(child.stdin.write).toHaveBeenCalledWith("Implement feature");
 
     child.stdout.emit("data", "plain output");
     child.emit("close", 0);
@@ -91,15 +91,8 @@ describe("codex cli transport", () => {
     const runPromise = runCodexCli(createRunInput({ resume: true, sessionId: "thread-abc" }));
 
     const { cliArgs: args } = getSpawnInvocation();
-    expect(args).toEqual([
-      "exec",
-      "resume",
-      "thread-abc",
-      "--json",
-      "--model",
-      "gpt-5.4",
-      "Implement feature",
-    ]);
+    expect(args).toEqual(["exec", "resume", "thread-abc", "--json", "--model", "gpt-5.4"]);
+    expect(child.stdin.write).toHaveBeenCalledWith("Implement feature");
 
     child.stdout.emit("data", "resumed output");
     child.emit("close", 0);

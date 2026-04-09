@@ -58,9 +58,6 @@ function normalizeCliArgs(input: RuntimeRunInput): string[] {
   if (input.model) {
     args.push("--model", input.model);
   }
-  if (input.prompt) {
-    args.push(input.prompt);
-  }
   return args;
 }
 
