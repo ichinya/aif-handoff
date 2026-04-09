@@ -260,11 +260,11 @@ TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
 TELEGRAM_USER_ID=987654321
 ```
 
-| Variable               | Type   | Default                    | Description                                                             |
-| ---------------------- | ------ | -------------------------- | ----------------------------------------------------------------------- |
-| `TELEGRAM_BOT_API_URL` | string | `https://api.telegram.org` | Telegram Bot API base URL or proxy, for example `https://mytgserver.ru` |
-| `TELEGRAM_BOT_TOKEN`   | string | _(optional)_               | Bot token from [@BotFather](https://t.me/BotFather)                     |
-| `TELEGRAM_USER_ID`     | string | _(optional)_               | Your Telegram user ID (the bot sends direct messages to this user)      |
+| Variable               | Type   | Default                    | Description                                                        |
+| ---------------------- | ------ | -------------------------- | ------------------------------------------------------------------ |
+| `TELEGRAM_BOT_API_URL` | string | `https://api.telegram.org` | Telegram Bot API base URL or custom proxy endpoint                 |
+| `TELEGRAM_BOT_TOKEN`   | string | _(optional)_               | Bot token from [@BotFather](https://t.me/BotFather)                |
+| `TELEGRAM_USER_ID`     | string | _(optional)_               | Your Telegram user ID (the bot sends direct messages to this user) |
 
 When both variables are set, every `task:moved` event sends a short message with the task title and status transition. If delivery fails (network error, invalid token, etc.), nothing breaks — failures are logged at `debug` level and silently ignored.
 

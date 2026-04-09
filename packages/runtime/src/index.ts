@@ -111,6 +111,20 @@ export { initProject, type InitProjectOptions, type InitProjectResult } from "./
 export { isValidTrustToken, RUNTIME_TRUST_TOKEN, type RuntimeTrustToken } from "./trust.js";
 
 export {
+  isRetriableTimeoutError,
+  makeProcessRunTimeoutError,
+  makeProcessStartTimeoutError,
+  resolveRetryDelay,
+  sleepMs,
+  TIMEOUT_RETRIABLE_KEY,
+  type ProcessTimeoutResult,
+  type TimeoutIntent,
+  type TimeoutLogger,
+  withProcessTimeouts,
+  withStreamTimeouts,
+} from "./timeouts.js";
+
+export {
   createClaudeRuntimeAdapter,
   type ClaudeRuntimeAdapterLogger,
   type CreateClaudeRuntimeAdapterOptions,

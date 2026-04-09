@@ -15,6 +15,7 @@ describe("sendTelegramNotification", () => {
   });
 
   it("uses the default Telegram API URL", async () => {
+    delete process.env.TELEGRAM_BOT_API_URL;
     vi.stubEnv("TELEGRAM_BOT_TOKEN", "123:ABC");
     vi.stubEnv("TELEGRAM_USER_ID", "999");
 
@@ -38,7 +39,7 @@ describe("sendTelegramNotification", () => {
   });
 
   it("uses TELEGRAM_BOT_API_URL when configured", async () => {
-    vi.stubEnv("TELEGRAM_BOT_API_URL", "https://telegram-bot-api.example.test/");
+    vi.stubEnv("TELEGRAM_BOT_API_URL", "https://telegram-proxy.invalid/");
     vi.stubEnv("TELEGRAM_BOT_TOKEN", "123:ABC");
     vi.stubEnv("TELEGRAM_USER_ID", "999");
 
@@ -52,7 +53,7 @@ describe("sendTelegramNotification", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://telegram-bot-api.example.test/bot123:ABC/sendMessage",
+      "https://telegram-proxy.invalid/bot123:ABC/sendMessage",
       expect.objectContaining({
         method: "POST",
         headers: { "Content-Type": "application/json" },

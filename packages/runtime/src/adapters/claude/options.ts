@@ -23,6 +23,7 @@ export interface ClaudeRuntimeExecutionOptions {
   maxTurns?: number;
   queryStartTimeoutMs?: number;
   queryStartRetryDelayMs?: number;
+  runTimeoutMs?: number;
   environment?: Record<string, string>;
   stderr?: (chunk: string) => void;
   onEvent?: (event: RuntimeEvent) => void;
@@ -116,6 +117,8 @@ export function parseExecutionOptions(
     queryStartRetryDelayMs:
       exec?.startRetryDelayMs ??
       (typeof src.queryStartRetryDelayMs === "number" ? src.queryStartRetryDelayMs : undefined),
+    runTimeoutMs:
+      exec?.runTimeoutMs ?? (typeof src.runTimeoutMs === "number" ? src.runTimeoutMs : undefined),
     environment: {
       ...toStringRecord(toRecord(src.environment)),
       ...exec?.environment,
