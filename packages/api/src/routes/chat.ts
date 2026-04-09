@@ -263,6 +263,7 @@ function mergeRuntimeAndDbMessages(
     matchedRuntimeMessages[matchIndex] = true;
     merged[matchIndex] = {
       ...merged[matchIndex],
+      id: dbMessage.id,
       createdAt: dbMessage.createdAt,
       ...(dbMessage.attachments?.length ? { attachments: dbMessage.attachments } : {}),
     };

@@ -12,17 +12,17 @@ const mockCreateChatMessage = vi.fn();
 const mockUpdateChatSessionTimestamp = vi.fn();
 const mockListChatMessages = vi.fn();
 const mockToChatMessageResponse = vi.fn();
-const mockGetApiRuntimeRegistry = vi.fn();
-const mockListSessionEvents = vi.fn();
 const mockSendToClient = vi.fn();
 const mockBroadcast = vi.fn();
 const mockInvalidateCache = vi.fn();
 const mockResolveApiRuntimeContext = vi.fn();
 const mockAssertApiRuntimeCapabilities = vi.fn();
+const mockGetApiRuntimeRegistry = vi.fn();
 const mockPersistAttachments = vi.fn();
 
 const mockAdapterRun = vi.fn();
 const mockAdapterResume = vi.fn();
+const mockListSessionEvents = vi.fn();
 
 const runtimeAdapter: RuntimeAdapter = {
   descriptor: {
@@ -162,6 +162,7 @@ describe("chat API", () => {
       outputText: "resumed output",
       sessionId: "runtime-session-1",
     });
+    mockListSessionEvents.mockResolvedValue([]);
     mockPersistAttachments.mockResolvedValue([]);
     mockListChatMessages.mockReturnValue([]);
     mockToChatMessageResponse.mockImplementation((row) => row);
@@ -463,7 +464,6 @@ describe("chat API", () => {
       ),
     ).toHaveLength(2);
   });
-
   it("persists incoming chat attachments and stores user message with attachment metadata", async () => {
     mockPersistAttachments.mockResolvedValue([
       {

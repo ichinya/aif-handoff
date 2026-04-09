@@ -103,6 +103,8 @@ cp .env.example .env
 | `AGENT_STAGE_STALE_TIMEOUT_MS` | `5400000`           | Stale-stage watchdog timeout (ms) before auto-recovery                                        |
 | `AGENT_STAGE_STALE_MAX_RETRY`  | `3`                 | Max stale auto-recover attempts before quarantine in `blocked_external`                       |
 | `AGENT_STAGE_RUN_TIMEOUT_MS`   | `3600000`           | Per-stage timeout (ms) before coordinator marks run as failed                                 |
+| `API_RUNTIME_START_TIMEOUT_MS` | `60000`             | Timeout waiting for first output from API one-shot runtime calls                              |
+| `API_RUNTIME_RUN_TIMEOUT_MS`   | `120000`            | Hard timeout for API one-shot runtime calls                                                   |
 | `AGENT_USE_SUBAGENTS`          | `true`              | Default for per-task "Use subagents" toggle. `true`: custom subagents, `false`: aif-\* skills |
 | `DATABASE_URL`                 | `./data/aif.sqlite` | SQLite database path                                                                          |
 | `AGENT_QUERY_AUDIT_ENABLED`    | `true`              | Enable/disable query audit logs in `logs/*.log`                                               |

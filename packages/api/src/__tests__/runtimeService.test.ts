@@ -12,6 +12,8 @@ const mockGetEnv = vi.fn(() => ({
   AIF_RUNTIME_MODULES: [] as string[],
   AIF_DEFAULT_RUNTIME_ID: "claude",
   AIF_DEFAULT_PROVIDER_ID: "anthropic",
+  API_RUNTIME_START_TIMEOUT_MS: 60_000,
+  API_RUNTIME_RUN_TIMEOUT_MS: 120_000,
 }));
 
 const mockCheckRuntimeCapabilities = vi.fn(() => ({ ok: true, missing: [] as string[] }));
@@ -147,6 +149,8 @@ describe("runtime service", () => {
       AIF_RUNTIME_MODULES: [],
       AIF_DEFAULT_RUNTIME_ID: "claude",
       AIF_DEFAULT_PROVIDER_ID: "anthropic",
+      API_RUNTIME_START_TIMEOUT_MS: 60_000,
+      API_RUNTIME_RUN_TIMEOUT_MS: 120_000,
     });
     mockCheckRuntimeCapabilities.mockReturnValue({ ok: true, missing: [] });
     mockRegistryRegisterRuntimeModule.mockReset();
@@ -168,6 +172,8 @@ describe("runtime service", () => {
       AIF_RUNTIME_MODULES: ["@org/runtime-a", "file:///runtime-b.mjs"],
       AIF_DEFAULT_RUNTIME_ID: "claude",
       AIF_DEFAULT_PROVIDER_ID: "anthropic",
+      API_RUNTIME_START_TIMEOUT_MS: 60_000,
+      API_RUNTIME_RUN_TIMEOUT_MS: 120_000,
     });
     const runtimeService = await loadRuntimeService();
 
@@ -383,6 +389,8 @@ describe("runtime service", () => {
           apiKeyEnvVar: "OPENAI_API_KEY",
         }),
         execution: expect.objectContaining({
+          startTimeoutMs: 60_000,
+          runTimeoutMs: 120_000,
           includePartialMessages: true,
           maxTurns: 4,
           environment: {
@@ -408,6 +416,8 @@ describe("runtime service", () => {
       AIF_RUNTIME_MODULES: [],
       AIF_DEFAULT_RUNTIME_ID: "claude",
       AIF_DEFAULT_PROVIDER_ID: "anthropic",
+      API_RUNTIME_START_TIMEOUT_MS: 90_000,
+      API_RUNTIME_RUN_TIMEOUT_MS: 240_000,
     });
 
     await runtimeService.runApiRuntimeOneShot({
@@ -421,6 +431,8 @@ describe("runtime service", () => {
     expect(adapter.run).toHaveBeenCalledWith(
       expect.objectContaining({
         execution: expect.objectContaining({
+          startTimeoutMs: 90_000,
+          runTimeoutMs: 240_000,
           includePartialMessages: false,
           systemPromptAppend: "extra",
           environment: { HANDOFF_MODE: "1" },

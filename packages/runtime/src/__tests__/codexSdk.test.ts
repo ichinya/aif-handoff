@@ -294,6 +294,44 @@ describe("runCodexSdk", () => {
     expect(onToolUse).toHaveBeenCalledWith("FileChange", "update src/index.ts, add src/new.ts");
   });
 
+  it("serializes MCP tool arguments instead of coercing objects to [object Object]", async () => {
+    const onToolUse = vi.fn();
+    const onEvent = vi.fn();
+    mockRunStreamed.mockResolvedValue({
+      events: createMockEvents([
+        { type: "thread.started", thread_id: "thread-mcp-tools" },
+        {
+          type: "item.completed",
+          item: {
+            id: "mcp-1",
+            type: "mcp_tool_call",
+            server: "handoff",
+            tool: "list_mcp_resources",
+            arguments: { cursor: "abc", limit: 20 },
+            status: "completed",
+          },
+        },
+        {
+          type: "turn.completed",
+          usage: { input_tokens: 10, output_tokens: 5, cached_input_tokens: 0 },
+        },
+      ]),
+    });
+
+    await runCodexSdk(createRunInput({ execution: { onToolUse, onEvent } }));
+
+    expect(onToolUse).toHaveBeenCalledWith(
+      "MCP:handoff/list_mcp_resources",
+      '{"cursor":"abc","limit":20}',
+    );
+    expect(onEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "tool:summary",
+        message: 'MCP:handoff/list_mcp_resources: {"cursor":"abc","limit":20}',
+      }),
+    );
+  });
+
   it("does not forward npm_ environment keys into Codex SDK env", async () => {
     vi.stubEnv("OPENAI_API_KEY", "sk-sdk");
     vi.stubEnv("npm_config_registry", "https://registry.npmjs.org");

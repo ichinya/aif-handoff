@@ -48,6 +48,8 @@ function makeEnv(overrides: Record<string, unknown> = {}) {
     AGENT_STAGE_RUN_TIMEOUT_MS: 3600000,
     AGENT_QUERY_START_TIMEOUT_MS: 60000,
     AGENT_QUERY_START_RETRY_DELAY_MS: 1000,
+    API_RUNTIME_START_TIMEOUT_MS: 60000,
+    API_RUNTIME_RUN_TIMEOUT_MS: 120000,
     DATABASE_URL: "./data/aif.sqlite",
     CORS_ORIGIN: "*",
     API_BASE_URL: "http://localhost:3009",

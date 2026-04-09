@@ -38,6 +38,8 @@ Node packages (`@aif/api`, `@aif/agent`, `@aif/data`, `@aif/shared`) auto-load e
 | `AGENT_STAGE_RUN_TIMEOUT_MS`       | number  | `3600000`                      | Per-stage hard timeout (planner/plan-checker/implementer/reviewer) before the coordinator treats it as failed                                                                                                                                                           |
 | `AGENT_QUERY_START_TIMEOUT_MS`     | number  | `60000`                        | Timeout waiting for the first message from Claude query stream before treating startup as hung                                                                                                                                                                          |
 | `AGENT_QUERY_START_RETRY_DELAY_MS` | number  | `1000`                         | Delay before one automatic retry after `query_start_timeout`                                                                                                                                                                                                            |
+| `API_RUNTIME_START_TIMEOUT_MS`     | number  | `60000`                        | Timeout waiting for first output from API-triggered one-shot runtime calls (`0` disables)                                                                                                                                                                               |
+| `API_RUNTIME_RUN_TIMEOUT_MS`       | number  | `120000`                       | Hard timeout for API-triggered one-shot runtime calls such as roadmap/fast-fix/commit generation (`0` disables)                                                                                                                                                         |
 | `DATABASE_URL`                     | string  | `./data/aif.sqlite`            | Path to the SQLite database file                                                                                                                                                                                                                                        |
 | `AGENT_QUERY_AUDIT_ENABLED`        | boolean | `true`                         | Enable/disable writing agent query audit logs to `logs/*.log`                                                                                                                                                                                                           |
 | `LOG_LEVEL`                        | string  | `debug`                        | Pino log level: `fatal`, `error`, `warn`, `info`, `debug`, `trace`                                                                                                                                                                                                      |
@@ -87,6 +89,7 @@ Optional runtime defaults:
 
 - `CODEX_CLI_PATH` for CLI transport adapters
 - `AIF_RUNTIME_MODULES` for loading additional runtime modules at startup (`registerRuntimeModule(registry)`)
+- `API_RUNTIME_START_TIMEOUT_MS` / `API_RUNTIME_RUN_TIMEOUT_MS` for API one-shot runtime calls
 
 ### Runtime Readiness Check
 

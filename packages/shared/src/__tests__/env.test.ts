@@ -13,6 +13,8 @@ describe("env validation", () => {
       POLL_INTERVAL_MS: "30000",
       AGENT_QUERY_START_TIMEOUT_MS: "20000",
       AGENT_QUERY_START_RETRY_DELAY_MS: "250",
+      API_RUNTIME_START_TIMEOUT_MS: "45000",
+      API_RUNTIME_RUN_TIMEOUT_MS: "240000",
       DATABASE_URL: "./data/test.sqlite",
       AGENT_QUERY_AUDIT_ENABLED: "false",
       LOG_LEVEL: "debug",
@@ -23,6 +25,8 @@ describe("env validation", () => {
     expect(result.POLL_INTERVAL_MS).toBe(30000);
     expect(result.AGENT_QUERY_START_TIMEOUT_MS).toBe(20000);
     expect(result.AGENT_QUERY_START_RETRY_DELAY_MS).toBe(250);
+    expect(result.API_RUNTIME_START_TIMEOUT_MS).toBe(45000);
+    expect(result.API_RUNTIME_RUN_TIMEOUT_MS).toBe(240000);
     expect(result.DATABASE_URL).toBe("./data/test.sqlite");
     expect(result.AGENT_QUERY_AUDIT_ENABLED).toBe(false);
     expect(result.LOG_LEVEL).toBe("debug");
@@ -41,6 +45,8 @@ describe("env validation", () => {
     expect(result.AGENT_STAGE_RUN_TIMEOUT_MS).toBe(60 * 60 * 1000);
     expect(result.AGENT_QUERY_START_TIMEOUT_MS).toBe(60 * 1000);
     expect(result.AGENT_QUERY_START_RETRY_DELAY_MS).toBe(1000);
+    expect(result.API_RUNTIME_START_TIMEOUT_MS).toBe(60 * 1000);
+    expect(result.API_RUNTIME_RUN_TIMEOUT_MS).toBe(120 * 1000);
     expect(result.DATABASE_URL).toBe("./data/aif.sqlite");
     expect(result.OPENAI_API_KEY).toBeUndefined();
     expect(result.OPENAI_BASE_URL).toBeUndefined();
