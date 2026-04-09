@@ -23,17 +23,8 @@ function hasIdPayload(value: unknown): value is { id: string } {
 
 function resolveWsUrl(): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  if (!import.meta.env.DEV) {
-    return `${protocol}//${window.location.host}/ws`;
-  }
 
-  const configuredPort = import.meta.env.VITE_API_PORT;
-  const apiPort =
-    typeof configuredPort === "string" && configuredPort.trim().length > 0
-      ? configuredPort.trim()
-      : "3009";
-
-  return `${protocol}//${window.location.hostname}:${apiPort}/ws`;
+  return `${protocol}//${window.location.host}/ws`;
 }
 
 /** Per-client WS identifier assigned by server on connect */
