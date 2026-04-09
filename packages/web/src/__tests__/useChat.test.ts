@@ -4,6 +4,7 @@ import { renderHook, act, waitFor } from "@testing-library/react";
 const mockSendChatMessage = vi.fn();
 const mockGetChatSessionMessages = vi.fn();
 const mockGetWsClientId = vi.fn();
+const WS_CLIENT_ID_WAIT_TIMEOUT_MS = 500;
 
 vi.mock("@/lib/api", () => ({
   api: {
@@ -236,6 +237,7 @@ describe("useChat", () => {
   });
 
   it("falls back to HTTP response when websocket clientId is unavailable", async () => {
+    vi.useFakeTimers();
     mockGetWsClientId.mockReturnValue(null);
     mockSendChatMessage.mockResolvedValueOnce({
       conversationId: "conv-http-1",
@@ -245,23 +247,29 @@ describe("useChat", () => {
 
     const { result } = renderHook(() => useChat("p-1"));
 
-    await act(async () => {
-      await result.current.sendMessage("Hello");
-      await new Promise<void>((resolve) => setTimeout(resolve, 150));
-    });
+    try {
+      await act(async () => {
+        const sendPromise = result.current.sendMessage("Hello");
+        await vi.advanceTimersByTimeAsync(WS_CLIENT_ID_WAIT_TIMEOUT_MS);
+        await sendPromise;
+        await vi.advanceTimersByTimeAsync(150);
+      });
 
-    expect(mockSendChatMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        projectId: "p-1",
-        message: "Hello",
-      }),
-    );
-    expect(mockSendChatMessage.mock.calls[0][0].clientId).toBeUndefined();
-    expect(result.current.messages).toEqual([
-      { role: "user", content: "Hello" },
-      { role: "assistant", content: "HTTP fallback reply" },
-    ]);
-    expect(result.current.isStreaming).toBe(false);
+      expect(mockSendChatMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: "p-1",
+          message: "Hello",
+        }),
+      );
+      expect(mockSendChatMessage.mock.calls[0][0].clientId).toBeUndefined();
+      expect(result.current.messages).toEqual([
+        { role: "user", content: "Hello" },
+        { role: "assistant", content: "HTTP fallback reply" },
+      ]);
+      expect(result.current.isStreaming).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("promotes the resolved session id after the first send", async () => {
@@ -313,6 +321,58 @@ describe("useChat", () => {
       (m) => m.role === "assistant" && m.content === "Chat request failed",
     );
     expect(assistantErrors).toHaveLength(1);
+  });
+
+  it("keeps the websocket stream active after the first token arrives", async () => {
+    vi.useFakeTimers();
+    mockSendChatMessage.mockResolvedValueOnce({
+      conversationId: "conv-stream-1",
+      sessionId: "sess-stream-1",
+      assistantMessage: "HTTP fallback reply",
+    });
+
+    const { result } = renderHook(() => useChat("p-1"));
+
+    try {
+      await act(async () => {
+        await result.current.sendMessage("Hello");
+      });
+
+      const conversationId = mockSendChatMessage.mock.calls[0][0].conversationId as string;
+
+      act(() => {
+        window.dispatchEvent(
+          new CustomEvent("chat:token", {
+            detail: { conversationId, token: "Hello " },
+          }),
+        );
+      });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(600);
+      });
+
+      expect(result.current.isStreaming).toBe(true);
+      expect(result.current.messages[result.current.messages.length - 1]).toEqual({
+        role: "assistant",
+        content: "Hello ",
+      });
+
+      act(() => {
+        window.dispatchEvent(
+          new CustomEvent("chat:token", {
+            detail: { conversationId, token: "world!" },
+          }),
+        );
+      });
+
+      expect(result.current.messages[result.current.messages.length - 1]).toEqual({
+        role: "assistant",
+        content: "Hello world!",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("toggles explore mode", () => {

@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useMemo } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Header } from "./components/layout/Header";
 import { Board } from "./components/kanban/Board";
-import { TaskDetail } from "@/components/task";
+import { TaskDetail } from "./components/task/TaskDetail";
 import { CommandPalette } from "./components/layout/CommandPalette";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { useProjects } from "./hooks/useProjects";

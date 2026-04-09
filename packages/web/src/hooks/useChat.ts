@@ -17,7 +17,13 @@ interface SessionStreamState {
   errorHandled: boolean;
 }
 
-async function waitForWsClientId(timeoutMs = 1500, pollIntervalMs = 50): Promise<string | null> {
+const WS_CLIENT_ID_WAIT_TIMEOUT_MS = 500;
+const WS_CLIENT_ID_POLL_INTERVAL_MS = 50;
+
+async function waitForWsClientId(
+  timeoutMs = WS_CLIENT_ID_WAIT_TIMEOUT_MS,
+  pollIntervalMs = WS_CLIENT_ID_POLL_INTERVAL_MS,
+): Promise<string | null> {
   const existing = getWsClientId();
   if (existing) return existing;
 
@@ -43,15 +49,43 @@ export function useChat(
   const [chatErrorCode, setChatErrorCode] = useState<string | null>(null);
   const currentSessionIdRef = useRef<string | null>(null);
 
-  // Per-session streaming state: conversationId -> streamKey (sessionId or conversationId)
+  // Per-session streaming state: conversationId → streamKey (sessionId or conversationId)
   const activeStreamsRef = useRef<Map<string, string>>(new Map());
-  // Per-session stream data: streamKey -> state
+  // Per-session stream data: streamKey → state
   const sessionStreamsRef = useRef<Map<string, SessionStreamState>>(new Map());
   // Track conversationId used when no session exists (for matching events)
   const conversationIdForNoSession = useRef<string | null>(null);
   // Deduplicate WS and HTTP error handling for the same conversation.
   const handledErrorConversationsRef = useRef<Set<string>>(new Set());
+  // Coordinate HTTP fallback and forced-stop timeouts per conversation.
+  const fallbackTimersRef = useRef<Map<string, number>>(new Map());
+  const forcedStopTimersRef = useRef<Map<string, number>>(new Map());
 
+  const clearConversationTimers = useCallback((conversationId: string) => {
+    const fallbackTimer = fallbackTimersRef.current.get(conversationId);
+    if (fallbackTimer !== undefined) {
+      window.clearTimeout(fallbackTimer);
+      fallbackTimersRef.current.delete(conversationId);
+    }
+
+    const forcedStopTimer = forcedStopTimersRef.current.get(conversationId);
+    if (forcedStopTimer !== undefined) {
+      window.clearTimeout(forcedStopTimer);
+      forcedStopTimersRef.current.delete(conversationId);
+    }
+  }, []);
+
+  const clearAllConversationTimers = useCallback(() => {
+    const conversationIds = new Set([
+      ...fallbackTimersRef.current.keys(),
+      ...forcedStopTimersRef.current.keys(),
+    ]);
+    for (const conversationId of conversationIds) {
+      clearConversationTimers(conversationId);
+    }
+  }, [clearConversationTimers]);
+
+  // Check if a specific session is currently streaming
   const isSessionStreaming = useCallback((sid: string | null) => {
     if (!sid) return false;
     for (const [, streamSid] of activeStreamsRef.current) {
@@ -61,6 +95,7 @@ export function useChat(
   }, []);
 
   const prevSessionIdRef = useRef<string | null>(null);
+  // Load messages when sessionId changes
   useEffect(() => {
     const prevSessionId = prevSessionIdRef.current;
     prevSessionIdRef.current = sessionId;
@@ -82,6 +117,7 @@ export function useChat(
 
     currentSessionIdRef.current = sessionId;
 
+    // If this session is actively streaming, restore its in-flight messages
     const streamState = sessionStreamsRef.current.get(sessionId);
     if (streamState) {
       console.debug("[useChat] Restoring streaming session %s", sessionId);
@@ -91,6 +127,7 @@ export function useChat(
       return;
     }
 
+    // Otherwise load from server
     queueMicrotask(() => setIsStreaming(false));
     console.debug("[useChat] Loading session messages sessionId=%s", sessionId);
 
@@ -99,7 +136,7 @@ export function useChat(
       .then((msgs) => {
         if (currentSessionIdRef.current !== sessionId) return;
         if (isSessionStreaming(sessionId)) {
-          console.debug("[useChat] Skipping session load - streaming in progress");
+          console.debug("[useChat] Skipping session load — streaming in progress");
           return;
         }
         console.debug("[useChat] Session changed, loaded %d messages", msgs.length);
@@ -117,7 +154,9 @@ export function useChat(
       });
   }, [sessionId, isSessionStreaming]);
 
+  // Listen for chat stream events dispatched by useWebSocket
   useEffect(() => {
+    // Check if a stream belongs to the currently viewed session
     const isCurrentStream = (streamKey: string) =>
       currentSessionIdRef.current === streamKey ||
       (!currentSessionIdRef.current && streamKey === conversationIdForNoSession.current);
@@ -126,6 +165,8 @@ export function useChat(
       const { conversationId, token } = (e as CustomEvent<ChatStreamTokenPayload>).detail;
       const streamKey = activeStreamsRef.current.get(conversationId);
       if (!streamKey) return;
+
+      clearConversationTimers(conversationId);
 
       const state = sessionStreamsRef.current.get(streamKey);
       if (!state) return;
@@ -154,6 +195,7 @@ export function useChat(
       if (!streamKey) return;
 
       console.debug("[useChat] Stream done for %s conversation %s", streamKey, conversationId);
+      clearConversationTimers(conversationId);
       activeStreamsRef.current.delete(conversationId);
       sessionStreamsRef.current.delete(streamKey);
 
@@ -173,6 +215,7 @@ export function useChat(
       handledErrorConversationsRef.current.add(conversationId);
 
       console.debug("[useChat] Stream error for %s", streamKey);
+      clearConversationTimers(conversationId);
       activeStreamsRef.current.delete(conversationId);
       sessionStreamsRef.current.delete(streamKey);
 
@@ -193,8 +236,9 @@ export function useChat(
       window.removeEventListener("chat:token", handleToken);
       window.removeEventListener("chat:done", handleDone);
       window.removeEventListener("chat:error", handleError);
+      clearAllConversationTimers();
     };
-  }, []);
+  }, [clearAllConversationTimers, clearConversationTimers]);
 
   const sendMessage = useCallback(
     async (text: string, attachments?: ChatAttachment[]) => {
@@ -207,6 +251,7 @@ export function useChat(
 
       const newConversationId = crypto.randomUUID();
       const effectiveSessionId = sessionId ?? currentSessionIdRef.current;
+      // Use sessionId or conversationId as stream key (for sessions not yet created)
       const streamKey = effectiveSessionId ?? newConversationId;
 
       const messageAttachments: ChatMessageAttachment[] | undefined = attachments?.map((a) => ({
@@ -221,6 +266,7 @@ export function useChat(
       };
       const newMessages = [...messages, userMessage];
 
+      // Register active stream
       if (!effectiveSessionId) {
         conversationIdForNoSession.current = newConversationId;
       }
@@ -276,6 +322,7 @@ export function useChat(
           );
         }
 
+        // Update user message attachments with server-resolved paths (for download links)
         if (result.attachments?.length) {
           setMessages((prev) =>
             prev.map((m) => (m === userMessage ? { ...m, attachments: result.attachments } : m)),
@@ -283,6 +330,7 @@ export function useChat(
           const activeStreamKey = activeStreamsRef.current.get(newConversationId) ?? streamKey;
           const state = sessionStreamsRef.current.get(activeStreamKey);
           if (state) {
+            // Also update in-flight stream state
             state.messages = state.messages.map((m) =>
               m.role === "user" &&
               m.content === userMessage.content &&
@@ -295,39 +343,64 @@ export function useChat(
         }
 
         if (result.assistantMessage?.trim()) {
-          setTimeout(() => {
+          const fallbackTimer = window.setTimeout(() => {
             const activeStreamKey = activeStreamsRef.current.get(newConversationId);
-            if (!activeStreamKey) return;
+            if (!activeStreamKey) {
+              clearConversationTimers(newConversationId);
+              return;
+            }
 
             const state = sessionStreamsRef.current.get(activeStreamKey);
-            if (!state || state.accumulator.trim().length > 0) return;
+            if (!state) {
+              clearConversationTimers(newConversationId);
+              return;
+            }
+
+            if (state.accumulator.length > 0) {
+              clearConversationTimers(newConversationId);
+              return;
+            }
 
             console.debug(
               "[useChat] Applying HTTP assistant fallback for conversation %s",
               newConversationId,
             );
+            clearConversationTimers(newConversationId);
             state.messages = [
               ...state.messages,
-              { role: "assistant", content: result.assistantMessage as string },
+              { role: "assistant", content: result.assistantMessage },
             ];
             setMessages(state.messages);
             activeStreamsRef.current.delete(newConversationId);
             sessionStreamsRef.current.delete(activeStreamKey);
             setIsStreaming(false);
           }, 100);
+          fallbackTimersRef.current.set(newConversationId, fallbackTimer);
         }
 
-        setTimeout(() => {
+        const forcedStopTimer = window.setTimeout(() => {
           const activeStreamKey = activeStreamsRef.current.get(newConversationId);
-          if (!activeStreamKey) return;
+          if (!activeStreamKey) {
+            clearConversationTimers(newConversationId);
+            return;
+          }
 
-          console.debug("[useChat] Stream still active after HTTP - forcing stop");
+          const state = sessionStreamsRef.current.get(activeStreamKey);
+          if (state?.accumulator.length) {
+            clearConversationTimers(newConversationId);
+            return;
+          }
+
+          console.debug("[useChat] Stream still active after HTTP — forcing stop");
+          clearConversationTimers(newConversationId);
           activeStreamsRef.current.delete(newConversationId);
           sessionStreamsRef.current.delete(activeStreamKey);
           setIsStreaming(false);
         }, 500);
+        forcedStopTimersRef.current.set(newConversationId, forcedStopTimer);
       } catch (err) {
         console.error("[useChat] Failed to send message:", err);
+        clearConversationTimers(newConversationId);
         const activeStreamKey = activeStreamsRef.current.get(newConversationId) ?? streamKey;
         activeStreamsRef.current.delete(newConversationId);
         const errorHandled = sessionStreamsRef.current.get(activeStreamKey)?.errorHandled ?? false;
@@ -343,7 +416,16 @@ export function useChat(
         handledErrorConversationsRef.current.delete(newConversationId);
       }
     },
-    [projectId, sessionId, messages, isStreaming, explore, taskId, onSessionResolved],
+    [
+      projectId,
+      sessionId,
+      messages,
+      isStreaming,
+      explore,
+      taskId,
+      onSessionResolved,
+      clearConversationTimers,
+    ],
   );
 
   const clearMessages = useCallback(() => {
