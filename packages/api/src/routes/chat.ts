@@ -236,6 +236,19 @@ function eventId(event: RuntimeEvent): string {
   return raw ?? crypto.randomUUID();
 }
 
+/**
+ * Normalize a message content string before matching it across runtime and DB
+ * sources. Runtime-side content is already `.trim()`ed by extractTextContent
+ * (and by Claude's session file parser which joins blocks with `\n\n` then
+ * trims), but DB content preserves the raw streamed string which may carry
+ * leading/trailing whitespace inherited from Claude's delta stream. Without
+ * normalization the exact-equality match in mergeRuntimeAndDbMessages fails
+ * and produces a duplicate after page reload.
+ */
+function normalizeContentForMatch(content: string): string {
+  return content.trim();
+}
+
 function mergeRuntimeAndDbMessages(
   runtimeMessages: ChatSessionMessage[],
   dbMessages: ChatSessionMessage[],
@@ -246,13 +259,17 @@ function mergeRuntimeAndDbMessages(
 
   const matchedRuntimeMessages = new Array(runtimeMessages.length).fill(false);
   const merged = runtimeMessages.map((message) => ({ ...message }));
+  const normalizedRuntimeContent = runtimeMessages.map((message) =>
+    normalizeContentForMatch(message.content),
+  );
 
   for (const dbMessage of dbMessages) {
+    const normalizedDbContent = normalizeContentForMatch(dbMessage.content);
     const matchIndex = runtimeMessages.findIndex(
       (runtimeMessage, index) =>
         !matchedRuntimeMessages[index] &&
         runtimeMessage.role === dbMessage.role &&
-        runtimeMessage.content === dbMessage.content,
+        normalizedRuntimeContent[index] === normalizedDbContent,
     );
 
     if (matchIndex === -1) {
@@ -913,11 +930,15 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
     }
 
     // Persist assistant response in local chat history for both fresh and resumed runtime sessions.
-    if (chatSessionId && fullAssistantResponse) {
+    // Trim leading/trailing whitespace so the stored content matches what
+    // Claude's session-file parser returns (which does `.trim()`), keeping
+    // mergeRuntimeAndDbMessages dedupe consistent on page reload.
+    const persistedAssistantResponse = fullAssistantResponse.trim();
+    if (chatSessionId && persistedAssistantResponse) {
       createChatMessage({
         sessionId: chatSessionId,
         role: "assistant",
-        content: fullAssistantResponse,
+        content: persistedAssistantResponse,
       });
     }
     if (chatSessionId) {
