@@ -30,7 +30,6 @@ COPY --from=build /app/packages/data ./packages/data
 COPY --from=build /app/packages/runtime ./packages/runtime
 COPY --from=build /app/packages/api ./packages/api
 COPY package.json .
-COPY .claude .claude
 COPY .docker/docker-entrypoint.sh /usr/local/bin/
 RUN mkdir -p /data /home/www && chown -R node:node /app /data /home/www
 EXPOSE 3009
@@ -56,7 +55,6 @@ COPY --from=build /app/packages/data ./packages/data
 COPY --from=build /app/packages/runtime ./packages/runtime
 COPY --from=build /app/packages/agent ./packages/agent
 COPY package.json .
-COPY .claude .claude
 COPY .docker/docker-entrypoint.sh /usr/local/bin/
 RUN mkdir -p /data /home/www && chown -R node:node /app /data /home/www
 ENTRYPOINT ["docker-entrypoint.sh"]
