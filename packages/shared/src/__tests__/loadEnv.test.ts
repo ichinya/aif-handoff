@@ -41,7 +41,7 @@ describe("loadEnv", () => {
   });
 
   it("skips dotenv loading when root env files are missing", async () => {
-    process.env.VITEST = "";
+    delete process.env.VITEST;
     process.env.NODE_ENV = "development";
     existsSyncMock.mockReturnValue(false);
     await import("../loadEnv.js");
@@ -50,7 +50,7 @@ describe("loadEnv", () => {
   });
 
   it("preserves explicit process env values over .env files", async () => {
-    process.env.VITEST = "";
+    delete process.env.VITEST;
     process.env.NODE_ENV = "development";
     process.env.DATABASE_URL = "C:/explicit/db.sqlite";
 
@@ -69,7 +69,7 @@ describe("loadEnv", () => {
   });
 
   it(".env.local overrides .env values, but not explicit process env", async () => {
-    process.env.VITEST = "";
+    delete process.env.VITEST;
     process.env.NODE_ENV = "development";
     process.env.API_BASE_URL = "http://explicit-host:3009";
 

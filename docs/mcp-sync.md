@@ -40,6 +40,8 @@ Configured in `.mcp.json` at the project root (already included in the repositor
 > **Important:** Use absolute paths for `cwd`, `DATABASE_URL`, and `PROJECTS_DIR`. Relative paths won't resolve correctly because the MCP process cwd is not guaranteed to be the project root.
 >
 > **Important for Codex stdio:** set `LOG_DESTINATION=stderr`. MCP over stdio reserves `stdout` for protocol messages; regular app logs on `stdout` will break the handshake.
+>
+> **Security note:** values placed in MCP `env` are stored in plain text in local client config files such as `~/.codex/config.toml`, so do not put long-lived secrets there unless you accept that on-disk exposure.
 
 Claude Code auto-discovers the Handoff MCP server from `.mcp.json` — no build step required.
 

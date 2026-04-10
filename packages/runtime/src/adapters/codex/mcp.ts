@@ -2,6 +2,7 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
+import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 import type { RuntimeMcpInput, RuntimeMcpInstallInput, RuntimeMcpStatus } from "../../types.js";
 
 const CODEX_CONFIG_PATH = join(homedir(), ".codex", "config.toml");
@@ -13,101 +14,102 @@ interface CodexMcpServerEntry extends Record<string, unknown> {
   env?: Record<string, string>;
 }
 
-/**
- * Minimal TOML parser/writer for Codex MCP config.
- * Only handles the [mcp_servers.<name>] section format.
- * Does not depend on a full TOML library.
- */
-
-function parseTomlString(rawValue: string): string {
-  try {
-    return JSON.parse(rawValue);
-  } catch {
-    return rawValue.replace(/^"(.*)"$/, "$1");
-  }
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function serializeTomlString(value: string): string {
-  return JSON.stringify(value);
+function normalizeStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((item): item is string => typeof item === "string");
+}
+
+function normalizeEnv(value: unknown): Record<string, string> | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const entries = Object.entries(value).filter(
+    (entry): entry is [string, string] => typeof entry[1] === "string",
+  );
+  if (entries.length === 0) {
+    return undefined;
+  }
+
+  return Object.fromEntries(entries.sort(([a], [b]) => a.localeCompare(b))) as Record<
+    string,
+    string
+  >;
+}
+
+function normalizeServerEntry(value: unknown): CodexMcpServerEntry | null {
+  if (!isRecord(value) || typeof value.command !== "string") {
+    return null;
+  }
+
+  const entry: CodexMcpServerEntry = {
+    command: value.command,
+    args: normalizeStringArray(value.args),
+  };
+
+  if (typeof value.cwd === "string") {
+    entry.cwd = value.cwd;
+  }
+
+  const env = normalizeEnv(value.env);
+  if (env) {
+    entry.env = env;
+  }
+
+  return entry;
 }
 
 function parseMcpServers(toml: string): Record<string, CodexMcpServerEntry> {
-  const servers: Record<string, CodexMcpServerEntry> = {};
-  const envSectionRegex = /^\[mcp_servers\.([^\]]+)\.env\]\s*$/;
-  const sectionRegex = /^\[mcp_servers\.([^. \]]+)\]\s*$/;
-  let currentName: string | null = null;
-  let currentSection: "main" | "env" | null = null;
-
-  for (const line of toml.split("\n")) {
-    const trimmed = line.trim();
-    const envSectionMatch = envSectionRegex.exec(trimmed);
-    if (envSectionMatch) {
-      currentName = envSectionMatch[1];
-      currentSection = "env";
-      servers[currentName] ??= { command: "", args: [], env: {} };
-      continue;
-    }
-
-    const sectionMatch = sectionRegex.exec(trimmed);
-    if (sectionMatch) {
-      currentName = sectionMatch[1];
-      currentSection = "main";
-      servers[currentName] ??= { command: "", args: [], env: {} };
-      continue;
-    }
-
-    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
-      currentName = null;
-      currentSection = null;
-      continue;
-    }
-
-    if (!currentName) continue;
-    const kvMatch = trimmed.match(/^(\w+)\s*=\s*(.+)$/);
-    if (!kvMatch) continue;
-    const [, key, rawValue] = kvMatch;
-
-    if (currentSection === "env") {
-      (servers[currentName].env ??= {})[key] = parseTomlString(rawValue);
-      continue;
-    }
-
-    if (key === "command") {
-      servers[currentName].command = parseTomlString(rawValue);
-    } else if (key === "cwd") {
-      servers[currentName].cwd = parseTomlString(rawValue);
-    } else if (key === "args") {
-      try {
-        servers[currentName].args = JSON.parse(rawValue.replace(/'/g, '"'));
-      } catch {
-        servers[currentName].args = [];
-      }
-    }
+  if (!toml.trim()) {
+    return {};
   }
 
-  return servers;
+  try {
+    const parsed = parseToml(toml) as { mcp_servers?: unknown };
+    if (!isRecord(parsed.mcp_servers)) {
+      return {};
+    }
+
+    const servers: Record<string, CodexMcpServerEntry> = {};
+    for (const [name, value] of Object.entries(parsed.mcp_servers)) {
+      const entry = normalizeServerEntry(value);
+      if (entry) {
+        servers[name] = entry;
+      }
+    }
+
+    return servers;
+  } catch {
+    return {};
+  }
 }
 
 function serializeMcpSection(name: string, entry: CodexMcpServerEntry): string {
-  const lines = [`[mcp_servers.${name}]`];
-  lines.push(`command = ${serializeTomlString(entry.command)}`);
-  if (entry.args && entry.args.length > 0) {
-    const argsStr = entry.args.map((a) => serializeTomlString(a)).join(", ");
-    lines.push(`args = [ ${argsStr} ]`);
+  const serverConfig: Record<string, unknown> = { command: entry.command };
+  if (entry.args.length > 0) {
+    serverConfig.args = entry.args;
   }
   if (entry.cwd) {
-    lines.push(`cwd = ${serializeTomlString(entry.cwd)}`);
+    serverConfig.cwd = entry.cwd;
   }
   if (entry.env && Object.keys(entry.env).length > 0) {
-    lines.push("");
-    lines.push(`[mcp_servers.${name}.env]`);
-    for (const [envKey, envValue] of Object.entries(entry.env).sort(([a], [b]) =>
-      a.localeCompare(b),
-    )) {
-      lines.push(`${envKey} = ${serializeTomlString(envValue)}`);
-    }
+    serverConfig.env = Object.fromEntries(
+      Object.entries(entry.env).sort(([a], [b]) => a.localeCompare(b)),
+    );
   }
-  return lines.join("\n");
+
+  return stringifyToml({
+    mcp_servers: {
+      [name]: serverConfig,
+    },
+  }).trim();
 }
 
 function removeServerSections(toml: string, serverName: string): string {
@@ -134,7 +136,10 @@ function removeServerSections(toml: string, serverName: string): string {
     }
   }
 
-  return keptLines.join("\n").trim();
+  return keptLines
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 async function readToml(): Promise<string> {

@@ -46,6 +46,7 @@ describe("Codex MCP config", () => {
       cwd: "E:\\Users\\Daniil\\PhpstormProjects\\aif-handoff",
       env: {
         DATABASE_URL: "E:\\Users\\Daniil\\PhpstormProjects\\aif-handoff\\data\\aif.sqlite",
+        GREETING: "Привет 👋",
         LOG_DESTINATION: "stderr",
       },
     });
@@ -60,6 +61,7 @@ describe("Codex MCP config", () => {
     expect(content).toContain(
       'DATABASE_URL = "E:\\\\Users\\\\Daniil\\\\PhpstormProjects\\\\aif-handoff\\\\data\\\\aif.sqlite"',
     );
+    expect(content).toContain('GREETING = "Привет 👋"');
     expect(content).toContain('LOG_DESTINATION = "stderr"');
   });
 
@@ -71,6 +73,7 @@ cwd = "E:\\\\Users\\\\Daniil\\\\PhpstormProjects\\\\aif-handoff"
 
 [mcp_servers.handoff.env]
 DATABASE_URL = "E:\\\\Users\\\\Daniil\\\\PhpstormProjects\\\\aif-handoff\\\\data\\\\aif.sqlite"
+GREETING = "Привет 👋"
 LOG_DESTINATION = "stderr"
 `);
 
@@ -86,9 +89,41 @@ LOG_DESTINATION = "stderr"
       cwd: "E:\\Users\\Daniil\\PhpstormProjects\\aif-handoff",
       env: {
         DATABASE_URL: "E:\\Users\\Daniil\\PhpstormProjects\\aif-handoff\\data\\aif.sqlite",
+        GREETING: "Привет 👋",
         LOG_DESTINATION: "stderr",
       },
     });
+  });
+
+  it("reads multiline args arrays back from TOML", async () => {
+    readFileMock.mockResolvedValue(`[mcp_servers.handoff]
+command = "npx"
+args = [
+  "tsx",
+  "C:\\\\projects\\\\aifhub\\\\aif-handoff\\\\packages\\\\mcp\\\\src\\\\index.ts",
+]
+cwd = "C:\\\\projects\\\\aifhub\\\\aif-handoff"
+`);
+
+    const status = await getCodexMcpStatus({ serverName: "handoff" });
+
+    expect(status.installed).toBe(true);
+    expect(status.config).toEqual({
+      command: "npx",
+      args: ["tsx", "C:\\projects\\aifhub\\aif-handoff\\packages\\mcp\\src\\index.ts"],
+      cwd: "C:\\projects\\aifhub\\aif-handoff",
+    });
+  });
+
+  it("ignores env subsections whose server names do not match the main section syntax", async () => {
+    readFileMock.mockResolvedValue(`[mcp_servers.foo.bar.env]
+TOKEN = "secret"
+`);
+
+    const status = await getCodexMcpStatus({ serverName: "foo.bar" });
+
+    expect(status.installed).toBe(false);
+    expect(status.config).toBeNull();
   });
 
   it("removes the full server block without leaving args array fragments", async () => {
@@ -119,5 +154,6 @@ enabled = true
     expect(content).not.toContain("[mcp_servers.handoff.env]");
     expect(content).not.toContain('args = [ "tsx"');
     expect(content).not.toContain('cwd = "C:\\\\projects\\\\aifhub\\\\aif-handoff"');
+    expect(content).not.toContain("\n\n\n");
   });
 });
