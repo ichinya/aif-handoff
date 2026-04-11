@@ -430,8 +430,22 @@ export interface ChatStreamTokenPayload {
   token: string;
 }
 
+/**
+ * Per-turn token usage reported to the frontend alongside the `chat:done`
+ * event. Matches `RuntimeUsage` from `@aif/runtime` structurally, duplicated
+ * here to avoid forcing `@aif/shared` to depend on the runtime layer.
+ */
+export interface ChatDoneUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  costUsd?: number;
+}
+
 export interface ChatDonePayload {
   conversationId: string;
+  /** Null when the adapter/transport does not report usage for this turn. */
+  usage?: ChatDoneUsage | null;
 }
 
 export interface ChatErrorPayload {
