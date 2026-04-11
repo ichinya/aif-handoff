@@ -17,7 +17,7 @@ cd aif-handoff
 docker compose up --build
 ```
 
-This builds and starts API (port 3009), Web UI (port 5180), and Agent in one command. Uses Angie as a reverse proxy — Web UI at `localhost:5180` proxies all API and WebSocket requests automatically.
+This builds and starts API (port 3009), Web UI (port 5180), Agent, and MCP (port 3100) in one command. Uses Angie as a reverse proxy — Web UI at `localhost:5180` proxies all API and WebSocket requests automatically.
 
 Data is persisted in Docker volumes (SQLite database, project files, and Claude auth).
 
@@ -91,12 +91,13 @@ Copy the example environment file:
 cp .env.example .env
 ```
 
-`api` and `agent` automatically read env from root `.env` (`.env.local` overrides when present), so no extra export step is required.
+`npm run dev`, `api`, and `agent` automatically read env from root `.env` (`.env.local` overrides when present), so no extra export step is required.
 
 | Variable                          | Default             | Description                                                                                   |
 | --------------------------------- | ------------------- | --------------------------------------------------------------------------------------------- |
 | `ANTHROPIC_API_KEY`               | _(optional)_        | API key. Agent SDK uses `~/.claude/` auth by default                                          |
 | `PORT`                            | `3009`              | API server port                                                                               |
+| `MCP_PORT`                        | _(optional)_        | When set, `npm run dev` also starts the MCP HTTP server on this port                          |
 | `WEB_PORT`                        | `5180`              | Web UI dev server port                                                                        |
 | `WEB_HOST`                        | `localhost`         | Web UI dev server host                                                                        |
 | `POLL_INTERVAL_MS`                | `30000`             | Agent coordinator polling interval (ms)                                                       |
@@ -124,13 +125,14 @@ Start all services with hot reload:
 npm run dev
 ```
 
-This runs three processes in parallel via Turborepo:
+This runs three processes in parallel via Turborepo by default. If `MCP_PORT` is set, it starts a fourth process for MCP over HTTP.
 
-| Service   | URL                     | Description                                               |
-| --------- | ----------------------- | --------------------------------------------------------- |
-| **API**   | `http://localhost:3009` | REST + WebSocket server                                   |
-| **Web**   | `http://localhost:5180` | Kanban board UI                                           |
-| **Agent** | _(background)_          | Polls every 30s + event-driven wake, dispatches subagents |
+| Service   | URL                         | Description                                               |
+| --------- | --------------------------- | --------------------------------------------------------- |
+| **API**   | `http://localhost:3009`     | REST + WebSocket server                                   |
+| **Web**   | `http://localhost:5180`     | Kanban board UI                                           |
+| **Agent** | _(background)_              | Polls every 30s + event-driven wake, dispatches subagents |
+| **MCP**   | `http://localhost:3100/mcp` | Optional MCP HTTP endpoint                                |
 
 ## Verify It Works
 

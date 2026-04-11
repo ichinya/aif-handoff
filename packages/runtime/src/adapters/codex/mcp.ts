@@ -8,10 +8,12 @@ import type { RuntimeMcpInput, RuntimeMcpInstallInput, RuntimeMcpStatus } from "
 const CODEX_CONFIG_PATH = join(homedir(), ".codex", "config.toml");
 
 interface CodexMcpServerEntry extends Record<string, unknown> {
-  command: string;
-  args: string[];
+  command?: string;
+  args?: string[];
   cwd?: string;
   env?: Record<string, string>;
+  url?: string;
+  bearer_token_env_var?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -45,14 +47,24 @@ function normalizeEnv(value: unknown): Record<string, string> | undefined {
 }
 
 function normalizeServerEntry(value: unknown): CodexMcpServerEntry | null {
-  if (!isRecord(value) || typeof value.command !== "string") {
+  if (!isRecord(value)) {
     return null;
   }
 
-  const entry: CodexMcpServerEntry = {
-    command: value.command,
-    args: normalizeStringArray(value.args),
-  };
+  const entry: CodexMcpServerEntry = {};
+
+  if (typeof value.url === "string") {
+    entry.url = value.url;
+  }
+
+  if (typeof value.command === "string") {
+    entry.command = value.command;
+    entry.args = normalizeStringArray(value.args);
+  }
+
+  if (!entry.url && !entry.command) {
+    return null;
+  }
 
   if (typeof value.cwd === "string") {
     entry.cwd = value.cwd;
@@ -61,6 +73,10 @@ function normalizeServerEntry(value: unknown): CodexMcpServerEntry | null {
   const env = normalizeEnv(value.env);
   if (env) {
     entry.env = env;
+  }
+
+  if (typeof value.bearer_token_env_var === "string") {
+    entry.bearer_token_env_var = value.bearer_token_env_var;
   }
 
   return entry;
@@ -92,8 +108,14 @@ function parseMcpServers(toml: string): Record<string, CodexMcpServerEntry> {
 }
 
 function serializeMcpSection(name: string, entry: CodexMcpServerEntry): string {
-  const serverConfig: Record<string, unknown> = { command: entry.command };
-  if (entry.args.length > 0) {
+  const serverConfig: Record<string, unknown> = {};
+  if (entry.url) {
+    serverConfig.url = entry.url;
+  }
+  if (entry.command) {
+    serverConfig.command = entry.command;
+  }
+  if (entry.args && entry.args.length > 0) {
     serverConfig.args = entry.args;
   }
   if (entry.cwd) {
@@ -103,6 +125,9 @@ function serializeMcpSection(name: string, entry: CodexMcpServerEntry): string {
     serverConfig.env = Object.fromEntries(
       Object.entries(entry.env).sort(([a], [b]) => a.localeCompare(b)),
     );
+  }
+  if (entry.bearer_token_env_var) {
+    serverConfig.bearer_token_env_var = entry.bearer_token_env_var;
   }
 
   return stringifyToml({
@@ -173,12 +198,24 @@ export async function installCodexMcpServer(input: RuntimeMcpInstallInput): Prom
   let toml = await readToml();
   toml = removeServerSections(toml, input.serverName);
 
-  const section = serializeMcpSection(input.serverName, {
-    command: input.command,
-    args: input.args ?? [],
-    cwd: input.cwd,
-    env: input.env,
-  });
+  const section = serializeMcpSection(
+    input.serverName,
+    input.url
+      ? {
+          url: input.url,
+          bearer_token_env_var: input.bearerTokenEnvVar,
+        }
+      : input.command
+        ? {
+            command: input.command,
+            args: input.args ?? [],
+            cwd: input.cwd,
+            env: input.env,
+          }
+        : (() => {
+            throw new Error("Codex MCP install requires either url or command");
+          })(),
+  );
 
   toml = toml ? `${toml}\n\n${section}\n` : `${section}\n`;
   await writeToml(toml);

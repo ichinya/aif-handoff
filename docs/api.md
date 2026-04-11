@@ -588,6 +588,8 @@ The WebSocket endpoint is a simple broadcast channel — no authentication, no s
 
 The Handoff MCP server (`packages/mcp`) provides bidirectional sync between AIF tooling and Handoff via the Model Context Protocol. When MCP tools modify tasks, they broadcast `sync:*` events over the WebSocket system so the Kanban UI reflects changes in real time.
 
+The web settings route `POST /settings/mcp/install` installs the MCP server into supported runtimes. When `MCP_PORT` is set in the server environment, it writes a streamable HTTP entry pointing to `http://localhost:<MCP_PORT>/mcp`; otherwise it writes the local `stdio` launcher entry.
+
 See [MCP Sync Server](mcp-sync.md) for full documentation.
 
 ## See Also

@@ -260,10 +260,13 @@ export interface RuntimeMcpInput {
 }
 
 export interface RuntimeMcpInstallInput extends RuntimeMcpInput {
-  command: string;
+  transport?: "stdio" | "streamable_http";
+  command?: string;
   args?: string[];
   cwd?: string;
   env?: Record<string, string>;
+  url?: string;
+  bearerTokenEnvVar?: string;
 }
 
 export interface RuntimeMcpStatus {

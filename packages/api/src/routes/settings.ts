@@ -5,6 +5,7 @@ import { join } from "node:path";
 import YAML from "yaml";
 import { findProjectById } from "@aif/data";
 import { logger, findMonorepoRoot, getEnv, clearProjectConfigCache } from "@aif/shared";
+import type { RuntimeMcpInstallInput } from "@aif/runtime";
 import { getApiRuntimeRegistry } from "../services/runtime.js";
 
 const log = logger("api:settings");
@@ -12,9 +13,21 @@ const log = logger("api:settings");
 const MCP_SERVER_NAME = "handoff";
 const MONOREPO_ROOT = findMonorepoRoot(import.meta.dirname);
 
-function buildMcpServerEntry() {
+function buildMcpServerEntry(): RuntimeMcpInstallInput {
   const env = getEnv();
+  const mcpPort = process.env.MCP_PORT?.trim();
+
+  if (mcpPort) {
+    return {
+      serverName: MCP_SERVER_NAME,
+      transport: "streamable_http",
+      url: `http://localhost:${mcpPort}/mcp`,
+    };
+  }
+
   return {
+    serverName: MCP_SERVER_NAME,
+    transport: "stdio",
     command: "npx",
     args: ["tsx", join(MONOREPO_ROOT, "packages/mcp/src/index.ts")],
     cwd: MONOREPO_ROOT,
@@ -78,14 +91,11 @@ settingsRoutes.post("/mcp/install", async (c) => {
     const adapter = registry.tryResolveRuntime(descriptor.id);
     if (!adapter?.installMcpServer) continue;
     try {
-      await adapter.installMcpServer({
-        serverName: MCP_SERVER_NAME,
-        command: entry.command,
-        args: entry.args,
-        cwd: entry.cwd,
-        env: entry.env,
-      });
-      log.info({ runtimeId: descriptor.id }, "MCP server installed");
+      await adapter.installMcpServer(entry);
+      log.info(
+        { runtimeId: descriptor.id, transport: entry.transport ?? "stdio" },
+        "MCP server installed",
+      );
       results.push({ runtimeId: descriptor.id, success: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

@@ -65,6 +65,20 @@ describe("Codex MCP config", () => {
     expect(content).toContain('LOG_DESTINATION = "stderr"');
   });
 
+  it("writes streamable HTTP MCP servers as URL entries", async () => {
+    await installCodexMcpServer({
+      serverName: "handoff",
+      transport: "streamable_http",
+      url: "http://localhost:3100/mcp",
+    });
+
+    expect(writeFileMock).toHaveBeenCalledTimes(1);
+    const [, content] = writeFileMock.mock.calls[0] as [string, string];
+    expect(content).toContain("[mcp_servers.handoff]");
+    expect(content).toContain('url = "http://localhost:3100/mcp"');
+    expect(content).not.toContain('command = "npx"');
+  });
+
   it("reads escaped Windows paths back from TOML", async () => {
     readFileMock.mockResolvedValue(`[mcp_servers.handoff]
 command = "npx"
@@ -112,6 +126,21 @@ cwd = "C:\\\\projects\\\\aifhub\\\\aif-handoff"
       command: "npx",
       args: ["tsx", "C:\\projects\\aifhub\\aif-handoff\\packages\\mcp\\src\\index.ts"],
       cwd: "C:\\projects\\aifhub\\aif-handoff",
+    });
+  });
+
+  it("reads streamable HTTP MCP servers back from TOML", async () => {
+    readFileMock.mockResolvedValue(`[mcp_servers.handoff]
+url = "http://localhost:3100/mcp"
+bearer_token_env_var = "AIF_MCP_TOKEN"
+`);
+
+    const status = await getCodexMcpStatus({ serverName: "handoff" });
+
+    expect(status.installed).toBe(true);
+    expect(status.config).toEqual({
+      url: "http://localhost:3100/mcp",
+      bearer_token_env_var: "AIF_MCP_TOKEN",
     });
   });
 

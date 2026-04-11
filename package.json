@@ -27,7 +27,7 @@
   ],
   "scripts": {
     "init": "npm run db:setup",
-    "dev": "turbo dev",
+    "dev": "node ./scripts/dev.mjs",
     "build": "turbo build",
     "lint": "turbo lint",
     "test": "turbo test",

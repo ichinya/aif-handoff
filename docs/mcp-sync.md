@@ -47,7 +47,7 @@ Claude Code auto-discovers the Handoff MCP server from `.mcp.json` — no build 
 
 #### HTTP — Docker / remote
 
-When running in Docker, the MCP server uses Streamable HTTP transport. Set `MCP_TRANSPORT=http` and the server listens on `MCP_PORT` (default `3100`):
+When running in Docker, or in local development with `MCP_PORT` set, the MCP server uses Streamable HTTP transport and listens on `MCP_PORT` (default `3100`):
 
 ```json
 {
@@ -60,6 +60,8 @@ When running in Docker, the MCP server uses Streamable HTTP transport. Set `MCP_
 ```
 
 The HTTP mode also exposes a `/health` endpoint for Docker healthchecks.
+
+When the web settings UI calls `POST /settings/mcp/install`, the API installs this HTTP URL form automatically whenever `MCP_PORT` is set. If `MCP_PORT` is not set, it falls back to the local `stdio`/`npx tsx packages/mcp/src/index.ts` entry.
 
 ### Environment Variables
 

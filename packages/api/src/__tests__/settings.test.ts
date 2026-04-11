@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
-import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -142,10 +142,17 @@ describe("settings API — config routes", () => {
 
   describe("MCP routes", () => {
     const claudeConfigPath = join(fakeHome, ".claude.json");
+    const codexConfigPath = join(fakeHome, ".codex", "config.toml");
 
     beforeEach(() => {
+      delete process.env.MCP_PORT;
       try {
         rmSync(claudeConfigPath);
+      } catch {
+        /* ok */
+      }
+      try {
+        rmSync(join(fakeHome, ".codex"), { recursive: true, force: true });
       } catch {
         /* ok */
       }
@@ -175,11 +182,52 @@ describe("settings API — config routes", () => {
       expect(checkBody.installed).toBe(true);
     });
 
+    it("POST /settings/mcp/install adds handoff HTTP server when MCP_PORT is set", async () => {
+      process.env.MCP_PORT = "3100";
+      writeFileSync(claudeConfigPath, "{}");
+
+      const res = await app.request("/settings/mcp/install", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.success).toBe(true);
+
+      const claudeConfig = JSON.parse(readFileSync(claudeConfigPath, "utf-8"));
+      expect(claudeConfig.mcpServers.handoff).toEqual({
+        url: "http://localhost:3100/mcp",
+      });
+
+      const codexToml = readFileSync(codexConfigPath, "utf-8");
+      expect(codexToml).toContain("[mcp_servers.handoff]");
+      expect(codexToml).toContain('url = "http://localhost:3100/mcp"');
+      expect(codexToml).not.toContain('command = "npx"');
+    });
+
     it("DELETE /settings/mcp removes handoff server", async () => {
       writeFileSync(
         claudeConfigPath,
         JSON.stringify({ mcpServers: { handoff: { command: "test" } } }),
       );
+      const res = await app.request("/settings/mcp", { method: "DELETE" });
+      expect(res.status).toBe(200);
+
+      const checkRes = await app.request("/settings/mcp");
+      const checkBody = await checkRes.json();
+      expect(checkBody.installed).toBe(false);
+    });
+
+    it("DELETE /settings/mcp removes handoff HTTP server", async () => {
+      process.env.MCP_PORT = "3100";
+      writeFileSync(
+        claudeConfigPath,
+        JSON.stringify({ mcpServers: { handoff: { url: "http://localhost:3100/mcp" } } }),
+      );
+      mkdirSync(join(fakeHome, ".codex"), { recursive: true });
+      writeFileSync(codexConfigPath, '[mcp_servers.handoff]\nurl = "http://localhost:3100/mcp"\n');
+
       const res = await app.request("/settings/mcp", { method: "DELETE" });
       expect(res.status).toBe(200);
 
