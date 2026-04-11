@@ -1,6 +1,6 @@
-import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { spawnDev } from "./lib/spawn-dev.mjs";
 
 // Minimal root .env loader for local dev scripts. Supports single-line KEY=VALUE pairs only.
 function parseEnvFile(path) {
@@ -48,6 +48,7 @@ function loadRootEnv() {
   }
 }
 
+// Keep in sync with resolveMcpPort in packages/api/src/routes/settings.ts.
 function resolveMcpPort(value) {
   const trimmed = value?.trim();
   if (!trimmed) {
@@ -77,32 +78,9 @@ const args = [
   ...process.argv.slice(2),
 ];
 
-const child =
-  process.platform === "win32"
-    ? spawn("cmd.exe", ["/d", "/s", "/c", "npx", ...args], {
-        stdio: "inherit",
-        env: process.env,
-      })
-    : spawn("npx", args, {
-        stdio: "inherit",
-        env: process.env,
-      });
-
-for (const signal of ["SIGINT", "SIGTERM"]) {
-  process.on(signal, () => {
-    if (!child.killed) child.kill(signal);
-  });
-}
-
-child.on("error", (error) => {
-  console.error("[dev] Failed to start turbo dev", error);
-  process.exit(1);
-});
-
-child.on("exit", (code, signal) => {
-  if (signal) {
-    process.kill(process.pid, signal);
-    return;
-  }
-  process.exit(code ?? 0);
+spawnDev({
+  command: "npx",
+  args,
+  env: process.env,
+  label: "dev",
 });

@@ -13,6 +13,7 @@ const log = logger("api:settings");
 const MCP_SERVER_NAME = "handoff";
 const MONOREPO_ROOT = findMonorepoRoot(import.meta.dirname);
 
+// Keep in sync with resolveMcpPort in scripts/dev.mjs.
 function resolveMcpPort(value: string | undefined): string | null {
   const trimmed = value?.trim();
   if (!trimmed) {
