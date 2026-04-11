@@ -451,10 +451,11 @@ export async function executeSubagentQuery(
     const registry = await getRuntimeRegistry();
     adapter = registry.resolveRuntime(context.runtimeId);
 
-    // First-activity watchdog requires a transport that surfaces tool_use
-    // events in real time. SDK (in-process query stream) and CLI (stream-json
-    // for Claude / JSONL for Codex) both fire execution.onToolUse during the
-    // run, so the watchdog can observe activity on both. API transport is
+    // First-activity watchdog requires a transport that surfaces incremental
+    // runtime activity in real time. SDK / CLI adapters emit RuntimeEvent
+    // callbacks for streamed text, reasoning, and tool summaries, so any such
+    // event proves the runtime is alive even if the workflow performs no tool
+    // calls. API transport is
     // pure HTTP — no intermediate events — and must stay disabled.
     //
     // CLI gets a 2x buffer over SDK because it carries extra cold-start cost
@@ -520,17 +521,21 @@ export async function executeSubagentQuery(
       });
 
       // Wrap callbacks to clear watchdog on first activity
+      const wd = watchdog!;
+      const originalOnEvent = executionIntent.onEvent;
       const originalOnToolUse = executionIntent.onToolUse;
       const originalOnSubagentStart = executionIntent.onSubagentStart;
+      executionIntent.onEvent = (event) => {
+        wd.markActivity();
+        originalOnEvent?.(event);
+      };
       if (originalOnToolUse) {
-        const wd = watchdog;
         executionIntent.onToolUse = (toolName, detail) => {
           wd.markActivity();
           originalOnToolUse(toolName, detail);
         };
       }
       if (originalOnSubagentStart) {
-        const wd = watchdog;
         executionIntent.onSubagentStart = (name, id) => {
           wd.markActivity();
           originalOnSubagentStart(name, id);
