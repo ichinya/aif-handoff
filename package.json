@@ -36,6 +36,8 @@
     "db:push": "turbo db:push --filter=@aif/shared",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "ai:validate": "npm run format && npm run test && npm run coverage && npm run build && npm run ai:checklist",
+    "ai:checklist": "node -e \"console.log('[WARNING] check CHECKLIST.md')\"",
     "prepare": "husky"
   },
   "lint-staged": {

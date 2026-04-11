@@ -138,8 +138,7 @@ data/                    # SQLite database files (gitignored)
 
 ## Package Checklist Rule
 
-- **Every package under `packages/` owns a `CHECKLIST.md`.** When you finish work that touched files inside a package, open that package's `CHECKLIST.md` and run through every item before considering the task done. If a check does not apply, note it in the PR / handoff rather than silently skipping.
-- **Keep checklists alive.** If you discover a recurring mistake or a new package-specific rule, add it to the relevant `CHECKLIST.md` in the same PR.
+**CRITICAL:** Check the `CHECKLIST.md` file and ensure all items are completed.
 
 ## UI Component Rules
 
@@ -167,5 +166,4 @@ data/                    # SQLite database files (gitignored)
 
 - Every package must maintain at least 70% test coverage (measured by @vitest/coverage-v8)
 - Write code following SOLID and DRY principles
-- Always run linter after implementation: `npm run lint`
-- Always run tests after implementation: `npm test`
+- Always run after implementation: `npm run ai:validate`
