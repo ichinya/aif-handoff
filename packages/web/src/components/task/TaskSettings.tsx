@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Radio } from "@/components/ui/radio";
+import { Select } from "@/components/ui/select";
 import { useProjects } from "@/hooks/useProjects";
 import { useRuntimeProfiles, useRuntimes } from "@/hooks/useRuntimeProfiles";
 import type { Task, UpdateTaskInput } from "@aif/shared/browser";
@@ -32,6 +33,7 @@ export function TaskSettings({ task, onSave }: Props) {
   const [runtimeProfileId, setRuntimeProfileId] = useState(task.runtimeProfileId ?? "");
   const [modelOverride, setModelOverride] = useState(task.modelOverride ?? "");
   const [scheduledAtLocal, setScheduledAtLocal] = useState(isoToLocalInput(task.scheduledAt));
+  const [priority, setPriority] = useState(task.priority ?? 0);
   const [runtimeOverrideOpen, setRuntimeOverrideOpen] = useState(
     Boolean(task.runtimeProfileId || task.modelOverride),
   );
@@ -52,6 +54,7 @@ export function TaskSettings({ task, onSave }: Props) {
     (runtimeProfileId || null) !== (task.runtimeProfileId ?? null) ||
     (modelOverride.trim() || null) !== (task.modelOverride ?? null) ||
     currentScheduledIso !== (task.scheduledAt ?? null) ||
+    priority !== (task.priority ?? 0) ||
     (showPlanner &&
       (plannerMode !== task.plannerMode ||
         planPath !== task.planPath ||
@@ -73,6 +76,9 @@ export function TaskSettings({ task, onSave }: Props) {
     }
     if (currentScheduledIso !== (task.scheduledAt ?? null)) {
       input.scheduledAt = currentScheduledIso;
+    }
+    if (priority !== (task.priority ?? 0)) {
+      input.priority = priority;
     }
     if (showPlanner) {
       if (plannerMode !== task.plannerMode) input.plannerMode = plannerMode;
@@ -120,6 +126,7 @@ export function TaskSettings({ task, onSave }: Props) {
               setRuntimeProfileId(task.runtimeProfileId ?? "");
               setModelOverride(task.modelOverride ?? "");
               setScheduledAtLocal(isoToLocalInput(task.scheduledAt));
+              setPriority(task.priority ?? 0);
               setOpen(false);
             }}
           >
@@ -216,6 +223,30 @@ export function TaskSettings({ task, onSave }: Props) {
           </div>
         </div>
       )}
+
+      <div className="space-y-1 border-t border-border/60 pt-2">
+        <p className="text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Priority
+        </p>
+        <Select
+          selectSize="sm"
+          value={String(priority)}
+          onChange={(e) => setPriority(Number(e.target.value))}
+          options={[
+            { value: "0", label: "None" },
+            { value: "1", label: "Low" },
+            { value: "2", label: "Medium" },
+            { value: "3", label: "High" },
+            { value: "4", label: "Urgent" },
+            { value: "5", label: "Critical" },
+          ]}
+          className="w-40"
+        />
+        <p className="text-3xs text-muted-foreground">
+          Affects ordering in the list view (Priority sort) and the colored badge on the card. Does
+          not change agent processing order.
+        </p>
+      </div>
 
       {task.status === "backlog" && (
         <div className="space-y-1 border-t border-border/60 pt-2">
