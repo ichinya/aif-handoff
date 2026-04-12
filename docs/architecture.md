@@ -168,6 +168,38 @@ Tasks have a `paused` flag (default `false`). When `true`, the coordinator skips
 
 The Pause/Resume button is shown in the TaskDetail Actions bar for active processing stages (`planning`, `plan_ready`, `implementing`, `review`, `blocked_external`). It is hidden for `backlog`, `done`, and `verified` where the agent pipeline is not running.
 
+### Scheduled Execution
+
+Tasks expose an optional `scheduledAt` column (ISO-8601 UTC, nullable). On every
+poll cycle the coordinator calls `processDueScheduledTasks()` which:
+
+1. Lists backlog tasks with `scheduledAt <= now` (paused tasks skipped).
+2. Transitions each from `backlog` to `planning` using the same state patch as
+   the human `start_ai` event, clearing `scheduledAt` in the same write.
+3. Appends a `[scheduler]` entry to the task activity log.
+4. Broadcasts `task:scheduled_fired` via WebSocket.
+
+Past timestamps are rejected at the API layer with `400`; `null` clears a
+previous schedule. Scheduled firing is one-shot — the task never re-fires
+automatically after `scheduledAt` is cleared.
+
+### Auto-Queue Mode
+
+Projects expose an `autoQueueMode` flag (default `false`). When `true`,
+`processAutoQueueAdvance()` runs every poll cycle and for each such project:
+
+1. Skips the project if any task is locked/active (reuses the sequential
+   guarantee from `hasActiveLockedTaskForProject`).
+2. Picks the next backlog task by ascending `position` (skipping paused tasks
+   and tasks whose `scheduledAt` is still in the future — those belong to the
+   scheduler).
+3. Fires the task into `planning` via the same patch as the scheduler trigger.
+4. Appends an `[auto-queue]` activity-log entry and broadcasts
+   `project:auto_queue_advanced` with the fired task id.
+
+Auto-queue and scheduled execution compose cleanly: a due scheduled task fires
+first; if none is due, auto-queue advances the next backlog item.
+
 ## Roadmap Import
 
 The system supports bulk task creation from a project's `.ai-factory/ROADMAP.md` file via `POST /projects/:id/roadmap/import`.
