@@ -190,6 +190,14 @@ data/                    # SQLite database files (gitignored)
   - `packages/runtime/src/bootstrap.ts` — register the new built-in adapter (or document `AIF_RUNTIME_MODULES` loading).
   - `.docker/Dockerfile` — add any new system-level dependencies the adapter needs.
   - **Usage reporting contract** — every adapter must declare `capabilities.usageReporting` (`FULL` / `PARTIAL` / `NONE`) and return `RuntimeRunResult.usage` as a concrete value (including explicit `null`). The discovery test in `packages/runtime/src/__tests__/bootstrap.test.ts` fails the build if a new adapter ships without a valid `usageReporting` value. See `docs/providers.md` → "Usage reporting contract".
+- **Cross-adapter consistency on shared changes.** When modifying shared runtime infrastructure (`errors.ts`, `types.ts`, `timeouts.ts`, `capabilities.ts`) or refactoring a pattern that exists across multiple adapters — enumerate ALL adapter directories under `packages/runtime/src/adapters/` and verify each is updated. Do not rely on the issue description or plan to list affected adapters — scan the directory.
+
+## Structured Error Classification Rule
+
+- **Never use string/pattern matching on error messages to branch logic.** All error classification must go through structured fields: `category` (enum from `RuntimeErrorCategory`), `adapterCode`, or `httpStatus`. Message text is for logging and diagnostics only — never use `.includes()`, regex, or substring checks on `error.message` to make control-flow decisions.
+  - Classifiers (`classifyBy*` in `packages/runtime/src/errors.ts`) are the single entry point for mapping raw errors to structured categories.
+  - Each adapter's `errors.ts` must preserve structured context (HTTP status, adapter code) on the error object so consumers can branch on it without re-parsing the message.
+  - When adding a new error condition, extend the `RuntimeErrorCategory` enum or add a new `adapterCode` — do not add a new message pattern check.
 
 ## Project Rules
 
