@@ -85,6 +85,7 @@ export type TaskFieldsUpdate = {
   modelOverride?: string | null;
   runtimeOptions?: Record<string, unknown> | null;
   position?: number;
+  scheduledAt?: string | null;
 };
 
 
@@ -416,6 +417,7 @@ export function createTask(input: {
   runtimeOptions?: Record<string, unknown> | null;
   roadmapAlias?: string;
   tags?: string[];
+  scheduledAt?: string | null;
 }): TaskRow | undefined {
   const db = getDb();
   const id = crypto.randomUUID();
@@ -462,6 +464,7 @@ export function createTask(input: {
         input.runtimeOptions === undefined ? null : JSON.stringify(input.runtimeOptions),
       roadmapAlias: input.roadmapAlias ?? null,
       tags: JSON.stringify(input.tags ?? []),
+      scheduledAt: input.scheduledAt ?? null,
       reworkRequested: false,
       manualReviewRequired: false,
       status: "backlog",

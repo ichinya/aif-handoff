@@ -120,6 +120,7 @@ tasksRouter.post("/", jsonValidator(createTaskSchema), async (c) => {
     runtimeOptions: body.runtimeOptions,
     roadmapAlias: body.roadmapAlias,
     tags: body.tags,
+    scheduledAt: body.scheduledAt ?? null,
   });
   if (!created) return c.json({ error: "Failed to create task" }, 500);
 

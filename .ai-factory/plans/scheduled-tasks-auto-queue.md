@@ -45,8 +45,8 @@ Out of scope (per issue): recurring cron schedules, parallel auto-mode execution
 4. [x] Auto-queue mode in coordinator (Task #4)
 
 ### Phase 3 — API surface
-5. `scheduledAt` on task endpoints (Task #5)
-6. `GET`/`PATCH /projects/:id/auto-queue-mode` endpoints + WS broadcast (Task #6)
+5. [x] `scheduledAt` on task endpoints (Task #5)
+6. [x] `GET`/`PATCH /projects/:id/auto-queue-mode` endpoints + WS broadcast (Task #6)
 
 ### Phase 4 — Frontend
 7. Task scheduling UI — picker + card badge (Task #7)

@@ -9,7 +9,9 @@ import {
   roadmapImportSchema,
   roadmapGenerateSchema,
   broadcastProjectSchema,
+  autoQueueModeSchema,
 } from "../schemas.js";
+import { getAutoQueueMode, setAutoQueueMode } from "@aif/data";
 import { broadcast } from "../ws.js";
 import {
   listProjects,
@@ -188,6 +190,33 @@ projectsRouter.post("/:id/roadmap/import", jsonValidator(roadmapImportSchema), a
     log.error({ projectId: id, roadmapAlias, err }, "Roadmap import unexpected error");
     return c.json({ error: "Internal server error" }, 500);
   }
+});
+
+// GET /projects/:id/auto-queue-mode
+projectsRouter.get("/:id/auto-queue-mode", (c) => {
+  const { id } = c.req.param();
+  const project = findProjectById(id);
+  if (!project) return c.json({ error: "Project not found" }, 404);
+  const enabled = getAutoQueueMode(id);
+  log.debug({ projectId: id, enabled }, "Read auto-queue-mode");
+  return c.json({ enabled });
+});
+
+// PATCH /projects/:id/auto-queue-mode
+projectsRouter.patch("/:id/auto-queue-mode", jsonValidator(autoQueueModeSchema), async (c) => {
+  const { id } = c.req.param();
+  const { enabled } = c.req.valid("json");
+  const project = findProjectById(id);
+  if (!project) return c.json({ error: "Project not found" }, 404);
+
+  setAutoQueueMode(id, enabled);
+  const updated = findProjectById(id);
+  log.info({ projectId: id, enabled }, "Toggled auto-queue-mode");
+
+  if (updated) {
+    broadcast({ type: "project:auto_queue_mode_changed", payload: updated });
+  }
+  return c.json({ enabled });
 });
 
 // POST /projects/:id/broadcast — emit project-scoped WS event (used by agent coordinator)

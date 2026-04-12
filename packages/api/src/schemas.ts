@@ -1,6 +1,25 @@
 import { z } from "zod";
 import { TASK_EVENTS, TASK_STATUSES, getEnv } from "@aif/shared";
 
+/**
+ * ISO-8601 datetime, must represent a future instant at parse time.
+ * `null` is allowed to clear a previously-set schedule.
+ * We use a `datetime()` check + a refinement that parses and compares to now;
+ * the parse catches invalid strings, the refinement catches past timestamps.
+ */
+export const scheduledAtSchema = z
+  .string()
+  .datetime({ offset: true, message: "scheduledAt must be ISO-8601 UTC" })
+  .refine(
+    (s) => {
+      const t = Date.parse(s);
+      return Number.isFinite(t) && t > Date.now();
+    },
+    { message: "scheduledAt must be a future timestamp" },
+  )
+  .nullable()
+  .optional();
+
 const taskAttachmentSchema = z.object({
   name: z.string().min(1).max(500),
   mimeType: z.string().max(200),
@@ -50,6 +69,7 @@ export const createTaskSchema = z.object({
   runtimeOptions: z.record(z.string(), z.unknown()).nullable().optional(),
   roadmapAlias: z.string().max(200).optional(),
   tags: z.array(z.string().max(100)).max(50).default([]),
+  scheduledAt: scheduledAtSchema,
 });
 
 export const updateTaskSchema = z.object({
@@ -82,6 +102,7 @@ export const updateTaskSchema = z.object({
   runtimeProfileId: z.string().min(1).nullable().optional(),
   modelOverride: z.string().max(200).nullable().optional(),
   runtimeOptions: z.record(z.string(), z.unknown()).nullable().optional(),
+  scheduledAt: scheduledAtSchema,
 });
 
 export const taskEventSchema = z.object({
@@ -103,6 +124,10 @@ export const broadcastTaskSchema = z.object({
   type: z
     .enum(["task:updated", "task:moved", "task:activity", "task:scheduled_fired"])
     .default("task:updated"),
+});
+
+export const autoQueueModeSchema = z.object({
+  enabled: z.boolean(),
 });
 
 export const broadcastProjectSchema = z.object({
