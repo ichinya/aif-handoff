@@ -43,6 +43,9 @@ export async function getApiRuntimeRegistry(): Promise<RuntimeRegistry> {
         warn(context, message) {
           log.warn({ ...context }, `WARN [runtime-module] ${message}`);
         },
+        error(context, message) {
+          log.error({ ...context }, `ERROR [runtime-registry] ${message}`);
+        },
       },
       runtimeModules: getEnv().AIF_RUNTIME_MODULES ?? [],
       // DB-backed sink persists every successful run through the registry

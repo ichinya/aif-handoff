@@ -155,6 +155,9 @@ function createRuntimeRegistryLogger(): RuntimeRegistryLogger {
     warn(context, message) {
       log.warn({ ...context }, `WARN [runtime-module] ${message}`);
     },
+    error(context, message) {
+      log.error({ ...context }, `ERROR [runtime-registry] ${message}`);
+    },
   };
 }
 

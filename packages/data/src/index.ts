@@ -914,34 +914,63 @@ export function recordUsageEvent(event: DbUsageEvent): void {
     total_cost_usd: usage.costUsd ?? 0,
   };
 
-  db.insert(usageEvents)
-    .values({
-      source: context.source,
-      projectId: context.projectId ?? null,
-      taskId: context.taskId ?? null,
-      chatSessionId: context.chatSessionId ?? null,
-      runtimeId: event.runtimeId,
-      providerId: event.providerId,
-      profileId: event.profileId ?? null,
-      transport: event.transport ?? null,
-      workflowKind: event.workflowKind ?? null,
-      usageReporting: event.usageReporting,
-      inputTokens: usage.inputTokens,
-      outputTokens: usage.outputTokens,
-      totalTokens: usage.totalTokens,
-      costUsd: usage.costUsd ?? null,
-    })
-    .run();
+  // Wrap insert + aggregate updates in a single transaction so the
+  // append-only log and rolled-up counters stay consistent. If any
+  // update fails the entire batch rolls back — no partial divergence.
+  db.transaction((tx) => {
+    tx.insert(usageEvents)
+      .values({
+        source: context.source,
+        projectId: context.projectId ?? null,
+        taskId: context.taskId ?? null,
+        chatSessionId: context.chatSessionId ?? null,
+        runtimeId: event.runtimeId,
+        providerId: event.providerId,
+        profileId: event.profileId ?? null,
+        transport: event.transport ?? null,
+        workflowKind: event.workflowKind ?? null,
+        usageReporting: event.usageReporting,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        totalTokens: usage.totalTokens,
+        costUsd: usage.costUsd ?? null,
+      })
+      .run();
 
-  if (context.taskId) {
-    incrementTaskTokenUsage(context.taskId, usagePayload);
-  }
-  if (context.projectId) {
-    incrementProjectTokenUsage(context.projectId, usagePayload);
-  }
-  if (context.chatSessionId) {
-    incrementChatSessionTokenUsage(context.chatSessionId, usagePayload);
-  }
+    if (context.taskId) {
+      tx.update(tasks)
+        .set({
+          tokenInput: sql<number>`coalesce(${tasks.tokenInput}, 0) + ${usagePayload.input_tokens}`,
+          tokenOutput: sql<number>`coalesce(${tasks.tokenOutput}, 0) + ${usagePayload.output_tokens}`,
+          tokenTotal: sql<number>`coalesce(${tasks.tokenTotal}, 0) + ${(usage.inputTokens ?? 0) + (usage.outputTokens ?? 0)}`,
+          costUsd: sql<number>`coalesce(${tasks.costUsd}, 0) + ${usagePayload.total_cost_usd}`,
+        })
+        .where(eq(tasks.id, context.taskId))
+        .run();
+    }
+    if (context.projectId) {
+      tx.update(projects)
+        .set({
+          tokenInput: sql<number>`coalesce(${projects.tokenInput}, 0) + ${usagePayload.input_tokens}`,
+          tokenOutput: sql<number>`coalesce(${projects.tokenOutput}, 0) + ${usagePayload.output_tokens}`,
+          tokenTotal: sql<number>`coalesce(${projects.tokenTotal}, 0) + ${(usage.inputTokens ?? 0) + (usage.outputTokens ?? 0)}`,
+          costUsd: sql<number>`coalesce(${projects.costUsd}, 0) + ${usagePayload.total_cost_usd}`,
+        })
+        .where(eq(projects.id, context.projectId))
+        .run();
+    }
+    if (context.chatSessionId) {
+      tx.update(chatSessions)
+        .set({
+          tokenInput: sql<number>`coalesce(${chatSessions.tokenInput}, 0) + ${usagePayload.input_tokens}`,
+          tokenOutput: sql<number>`coalesce(${chatSessions.tokenOutput}, 0) + ${usagePayload.output_tokens}`,
+          tokenTotal: sql<number>`coalesce(${chatSessions.tokenTotal}, 0) + ${(usage.inputTokens ?? 0) + (usage.outputTokens ?? 0)}`,
+          costUsd: sql<number>`coalesce(${chatSessions.costUsd}, 0) + ${usagePayload.total_cost_usd}`,
+        })
+        .where(eq(chatSessions.id, context.chatSessionId))
+        .run();
+    }
+  });
 }
 
 /**

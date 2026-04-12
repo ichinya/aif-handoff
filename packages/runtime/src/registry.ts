@@ -91,20 +91,23 @@ function wrapAdapter(
     const effectiveCaps = resolveAdapterCapabilities(adapter, input.transport);
     const reporting = effectiveCaps.usageReporting;
 
-    if (result.usage === null) {
+    // TypeScript enforces `usage: RuntimeUsage | null`, but external/JS
+    // adapters may return `undefined` if they forget the field entirely.
+    // Treat null and undefined identically for the contract check.
+    if (result.usage == null) {
       if (reporting === UsageReporting.FULL) {
-        // Level C runtime assert: the adapter promised FULL but returned null.
-        // Throwing here would break the caller mid-run even though the provider
-        // actually responded, so we log loudly and move on. A metric/alert on
-        // this log is the production-side safety net; dev still catches it via
-        // the contract test harness.
+        // Level C runtime assert: the adapter promised FULL but returned
+        // null/undefined. Throwing here would break the caller mid-run even
+        // though the provider actually responded, so we log loudly and move
+        // on. A metric/alert on this log is the production-side safety net;
+        // dev still catches it via the contract test harness.
         log.error?.(
           {
             runtimeId: adapter.descriptor.id,
             providerId: adapter.descriptor.providerId,
             usageReporting: reporting,
           },
-          "adapter declared usageReporting=FULL but returned null usage — likely bug in adapter",
+          "adapter declared usageReporting=FULL but returned null/undefined usage — likely bug in adapter",
         );
       }
       return;
