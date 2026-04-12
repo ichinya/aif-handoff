@@ -19,6 +19,20 @@ export interface McpEnv {
   rateLimitWriteBurst: number;
 }
 
+function resolveMcpPort(value: string | undefined): number {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return 3100;
+  }
+
+  const port = Number(trimmed);
+  if (Number.isInteger(port) && port > 0 && port <= 65_535) {
+    return port;
+  }
+
+  throw new Error(`Invalid MCP_PORT: ${trimmed}. Must be an integer between 1 and 65535.`);
+}
+
 /**
  * Load MCP-specific environment config.
  * DB connection uses the shared getDb() from @aif/shared/server (same as api/agent).
@@ -35,7 +49,7 @@ export function loadMcpEnv(): McpEnv {
   const env: McpEnv = {
     apiUrl: sharedEnv.API_BASE_URL,
     transport,
-    httpPort: parseInt(process.env.MCP_PORT || "3100", 10),
+    httpPort: resolveMcpPort(process.env.MCP_PORT),
     rateLimitReadRpm: parseInt(process.env.MCP_RATE_LIMIT_READ_RPM || "120", 10),
     rateLimitWriteRpm: parseInt(process.env.MCP_RATE_LIMIT_WRITE_RPM || "30", 10),
     rateLimitReadBurst: parseInt(process.env.MCP_RATE_LIMIT_READ_BURST || "10", 10),
@@ -44,9 +58,8 @@ export function loadMcpEnv(): McpEnv {
 
   log.info(
     {
-      apiUrl: env.apiUrl,
-      rateLimitReadRpm: env.rateLimitReadRpm,
-      rateLimitWriteRpm: env.rateLimitWriteRpm,
+      transport: env.transport,
+      httpPort: env.httpPort,
     },
     "MCP environment loaded",
   );

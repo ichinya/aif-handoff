@@ -13,7 +13,7 @@ const log = logger("api:settings");
 const MCP_SERVER_NAME = "handoff";
 const MONOREPO_ROOT = findMonorepoRoot(import.meta.dirname);
 
-// Keep in sync with resolveMcpPort in scripts/dev.mjs.
+// Keep in sync with resolveMcpPort in scripts/dev.mjs and packages/mcp/src/env.ts.
 function resolveMcpPort(value: string | undefined): string | null {
   const trimmed = value?.trim();
   if (!trimmed) {
@@ -21,7 +21,7 @@ function resolveMcpPort(value: string | undefined): string | null {
   }
 
   const port = Number(trimmed);
-  return Number.isInteger(port) && port > 0 ? String(port) : null;
+  return Number.isInteger(port) && port > 0 && port <= 65_535 ? String(port) : null;
 }
 
 function buildMcpServerEntry(): RuntimeMcpInstallInput {

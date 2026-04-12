@@ -48,7 +48,7 @@ function loadRootEnv() {
   }
 }
 
-// Keep in sync with resolveMcpPort in packages/api/src/routes/settings.ts.
+// Keep in sync with resolveMcpPort in packages/api/src/routes/settings.ts and packages/mcp/src/env.ts.
 function resolveMcpPort(value) {
   const trimmed = value?.trim();
   if (!trimmed) {
@@ -56,7 +56,7 @@ function resolveMcpPort(value) {
   }
 
   const port = Number(trimmed);
-  return Number.isInteger(port) && port > 0 ? String(port) : null;
+  return Number.isInteger(port) && port > 0 && port <= 65535 ? String(port) : null;
 }
 
 loadRootEnv();
