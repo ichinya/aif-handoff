@@ -36,6 +36,10 @@ vi.mock("@/hooks/useProjects", () => ({
   useDeleteProject: () => ({
     mutate: mutateDeleteProject,
   }),
+  useSetAutoQueueMode: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
 }));
 
 vi.mock("@/components/ui/toast", () => ({

@@ -1,5 +1,8 @@
+import { useMemo } from "react";
+import { ChevronUp, ChevronDown } from "lucide-react";
 import { STATUS_CONFIG, type Task } from "@aif/shared/browser";
 import { TableHeaderCell } from "@/components/ui/table-header-cell";
+import { useReorderTask } from "@/hooks/useTasks";
 
 interface TaskListTableProps {
   tasks: Task[];
@@ -8,6 +11,40 @@ interface TaskListTableProps {
 }
 
 export function TaskListTable({ tasks, isCompact, onTaskClick }: TaskListTableProps) {
+  const reorder = useReorderTask();
+  const backlogSorted = useMemo(
+    () => tasks.filter((t) => t.status === "backlog").sort((a, b) => a.position - b.position),
+    [tasks],
+  );
+  const backlogIndex = useMemo(() => {
+    const map = new Map<string, number>();
+    backlogSorted.forEach((t, i) => map.set(t.id, i));
+    return map;
+  }, [backlogSorted]);
+
+  const moveBacklog = (taskId: string, dir: "up" | "down") => {
+    const idx = backlogIndex.get(taskId);
+    if (idx === undefined) return;
+    const current = backlogSorted[idx];
+    if (dir === "up") {
+      if (idx === 0) return;
+      const above = backlogSorted[idx - 1];
+      const aboveAbove = backlogSorted[idx - 2];
+      const newPos =
+        aboveAbove !== undefined
+          ? (aboveAbove.position + above.position) / 2
+          : above.position - 100;
+      reorder.mutate({ id: current.id, position: newPos });
+      return;
+    }
+    if (idx === backlogSorted.length - 1) return;
+    const below = backlogSorted[idx + 1];
+    const belowBelow = backlogSorted[idx + 2];
+    const newPos =
+      belowBelow !== undefined ? (below.position + belowBelow.position) / 2 : below.position + 100;
+    reorder.mutate({ id: current.id, position: newPos });
+  };
+
   return (
     <div className="overflow-x-auto border border-border bg-card/65">
       <table className="w-full table-fixed border-collapse text-left">
@@ -27,6 +64,9 @@ export function TaskListTable({ tasks, isCompact, onTaskClick }: TaskListTablePr
             </TableHeaderCell>
             <TableHeaderCell isCompact={isCompact} className="w-44">
               Updated
+            </TableHeaderCell>
+            <TableHeaderCell isCompact={isCompact} className="w-16 text-center">
+              Order
             </TableHeaderCell>
           </tr>
         </thead>
@@ -78,11 +118,40 @@ export function TaskListTable({ tasks, isCompact, onTaskClick }: TaskListTablePr
               >
                 {new Date(task.updatedAt).toLocaleString()}
               </td>
+              <td
+                className={`px-2 ${isCompact ? "py-1" : "py-2.5"}`}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {task.status === "backlog" ? (
+                  <div className="flex items-center justify-center gap-1">
+                    <button
+                      type="button"
+                      aria-label="Move task up"
+                      disabled={backlogIndex.get(task.id) === 0}
+                      onClick={() => moveBacklog(task.id, "up")}
+                      className="flex h-5 w-5 items-center justify-center border border-border bg-secondary/50 text-muted-foreground transition hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30"
+                    >
+                      <ChevronUp className="h-3 w-3" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Move task down"
+                      disabled={backlogIndex.get(task.id) === backlogSorted.length - 1}
+                      onClick={() => moveBacklog(task.id, "down")}
+                      className="flex h-5 w-5 items-center justify-center border border-border bg-secondary/50 text-muted-foreground transition hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30"
+                    >
+                      <ChevronDown className="h-3 w-3" />
+                    </button>
+                  </div>
+                ) : (
+                  <span className="block text-center text-muted-foreground/40">—</span>
+                )}
+              </td>
             </tr>
           ))}
           {tasks.length === 0 && (
             <tr>
-              <td colSpan={5} className="px-3 py-4 text-center text-xs text-muted-foreground">
+              <td colSpan={6} className="px-3 py-4 text-center text-xs text-muted-foreground">
                 No tasks match current list search
               </td>
             </tr>

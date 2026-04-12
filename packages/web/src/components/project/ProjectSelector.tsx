@@ -19,6 +19,7 @@ import {
   useCreateProject,
   useUpdateProject,
   useDeleteProject,
+  useSetAutoQueueMode,
 } from "@/hooks/useProjects";
 import { useToast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
@@ -37,6 +38,7 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect }: Props) {
   const createProject = useCreateProject();
   const updateProject = useUpdateProject();
   const deleteProject = useDeleteProject();
+  const setAutoQueue = useSetAutoQueueMode();
   const { toast } = useToast();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogMode, setDialogMode] = useState<DialogMode>("create");
@@ -49,6 +51,7 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect }: Props) {
   const [implementerMaxBudgetUsd, setImplementerMaxBudgetUsd] = useState("");
   const [reviewSidecarMaxBudgetUsd, setReviewSidecarMaxBudgetUsd] = useState("");
   const [parallelEnabled, setParallelEnabled] = useState(false);
+  const [autoQueueMode, setAutoQueueModeState] = useState(false);
   const selectorRef = useRef<HTMLDivElement>(null);
 
   const selected = projects?.find((p) => p.id === selectedId);
@@ -71,6 +74,7 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect }: Props) {
     setImplementerMaxBudgetUsd("");
     setReviewSidecarMaxBudgetUsd("");
     setParallelEnabled(false);
+    setAutoQueueModeState(false);
     setDropdownOpen(false);
     setDialogOpen(true);
   };
@@ -92,6 +96,7 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect }: Props) {
       p.reviewSidecarMaxBudgetUsd == null ? "" : String(p.reviewSidecarMaxBudgetUsd),
     );
     setParallelEnabled(p.parallelEnabled ?? false);
+    setAutoQueueModeState(p.autoQueueMode ?? false);
     setDropdownOpen(false);
     setDialogOpen(true);
   };
@@ -145,6 +150,9 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect }: Props) {
         },
         {
           onSuccess: (project) => {
+            if (autoQueueMode) {
+              setAutoQueue.mutate({ id: project.id, enabled: true });
+            }
             onSelect(project);
             setDialogOpen(false);
           },
@@ -158,6 +166,7 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect }: Props) {
         },
       );
     } else if (editingId) {
+      const previousAutoQueue = selected?.autoQueueMode ?? false;
       updateProject.mutate(
         {
           id: editingId,
@@ -173,6 +182,9 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect }: Props) {
         },
         {
           onSuccess: (project) => {
+            if (autoQueueMode !== previousAutoQueue) {
+              setAutoQueue.mutate({ id: editingId, enabled: autoQueueMode });
+            }
             if (selectedId === editingId) onSelect(project);
             setDialogOpen(false);
           },
@@ -338,6 +350,16 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect }: Props) {
                 </p>
               </div>
               <Switch checked={parallelEnabled} onCheckedChange={setParallelEnabled} />
+            </div>
+            <div className="flex items-center justify-between border border-border bg-card/50 p-3">
+              <div>
+                <label className="text-sm font-medium">Auto-Queue Mode</label>
+                <p className="text-xs text-muted-foreground">
+                  When enabled, the coordinator advances the next backlog task (by position) into
+                  planning whenever the project has no active/locked task.
+                </p>
+              </div>
+              <Switch checked={autoQueueMode} onCheckedChange={setAutoQueueModeState} />
             </div>
             {dialogMode === "edit" && (
               <div>

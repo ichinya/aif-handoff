@@ -1,11 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { ORDERED_STATUSES, STATUS_CONFIG, type Task, type TaskStatus } from "@aif/shared/browser";
 import { useTasks } from "@/hooks/useTasks";
-import { useAutoQueueMode, useSetAutoQueueMode } from "@/hooks/useProjects";
 import { Column } from "./Column";
 import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
-import { Badge } from "@/components/ui/badge";
 import { AddTaskForm } from "./AddTaskForm";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -33,8 +30,6 @@ const STATUS_ORDER = Object.fromEntries(
 
 export function Board({ projectId, onTaskClick, density, viewMode = "kanban" }: BoardProps) {
   const { data: tasks, isLoading } = useTasks(projectId);
-  const { data: autoQueue } = useAutoQueueMode(projectId);
-  const setAutoQueue = useSetAutoQueueMode();
   const isCompact = density === "compact";
   const [activeFilters, setActiveFilters] = useState<QuickFilter[]>([]);
   const [activeRoadmapAliases, setActiveRoadmapAliases] = useState<string[]>([]);
@@ -198,41 +193,8 @@ export function Board({ projectId, onTaskClick, density, viewMode = "kanban" }: 
     );
   }
 
-  const autoQueueEnabled = autoQueue?.enabled ?? false;
-
   return (
     <>
-      <div
-        className={`mb-3 flex items-center justify-between gap-3 border border-border bg-card/35 ${
-          isCompact ? "px-2 py-1.5" : "px-3 py-2"
-        }`}
-      >
-        <div className="flex items-center gap-2">
-          <span className="text-2xs uppercase tracking-label text-muted-foreground">
-            Auto-queue
-          </span>
-          <Switch
-            size="sm"
-            checked={autoQueueEnabled}
-            disabled={setAutoQueue.isPending}
-            onCheckedChange={(checked) => setAutoQueue.mutate({ id: projectId, enabled: checked })}
-            aria-label="Toggle project auto-queue mode"
-          />
-          {autoQueueEnabled && (
-            <Badge
-              size="sm"
-              className="border-emerald-500/35 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
-            >
-              advancing backlog sequentially
-            </Badge>
-          )}
-        </div>
-        <span className="text-3xs text-muted-foreground">
-          When on, the coordinator advances the next backlog task by position whenever the project
-          has no active work.
-        </span>
-      </div>
-
       <FilterBar
         activeFilters={activeFilters}
         onToggleFilter={toggleFilter}
