@@ -49,8 +49,8 @@ Out of scope (per issue): recurring cron schedules, parallel auto-mode execution
 6. [x] `GET`/`PATCH /projects/:id/auto-queue-mode` endpoints + WS broadcast (Task #6)
 
 ### Phase 4 — Frontend
-7. Task scheduling UI — picker + card badge (Task #7)
-8. Auto-mode toggle + board indicator (Task #8)
+7. [x] Task scheduling UI — picker + card badge (Task #7)
+8. [x] Auto-mode toggle + board indicator (Task #8)
 
 ### Phase 5 — Quality & release
 9. Tests: scheduler + auto-queue coverage (Task #9)

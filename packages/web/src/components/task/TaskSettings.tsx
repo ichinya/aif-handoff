@@ -31,6 +31,7 @@ export function TaskSettings({ task, onSave }: Props) {
   const [maxReviewIterations, setMaxReviewIterations] = useState(task.maxReviewIterations);
   const [runtimeProfileId, setRuntimeProfileId] = useState(task.runtimeProfileId ?? "");
   const [modelOverride, setModelOverride] = useState(task.modelOverride ?? "");
+  const [scheduledAtLocal, setScheduledAtLocal] = useState(isoToLocalInput(task.scheduledAt));
   const [runtimeOverrideOpen, setRuntimeOverrideOpen] = useState(
     Boolean(task.runtimeProfileId || task.modelOverride),
   );
@@ -42,6 +43,7 @@ export function TaskSettings({ task, onSave }: Props) {
     : null;
 
   const showPlanner = !task.isFix && task.status !== "done";
+  const currentScheduledIso = localInputToIso(scheduledAtLocal);
   const hasChanges =
     autoMode !== task.autoMode ||
     skipReview !== task.skipReview ||
@@ -49,6 +51,7 @@ export function TaskSettings({ task, onSave }: Props) {
     maxReviewIterations !== task.maxReviewIterations ||
     (runtimeProfileId || null) !== (task.runtimeProfileId ?? null) ||
     (modelOverride.trim() || null) !== (task.modelOverride ?? null) ||
+    currentScheduledIso !== (task.scheduledAt ?? null) ||
     (showPlanner &&
       (plannerMode !== task.plannerMode ||
         planPath !== task.planPath ||
@@ -67,6 +70,9 @@ export function TaskSettings({ task, onSave }: Props) {
     }
     if ((modelOverride.trim() || null) !== (task.modelOverride ?? null)) {
       input.modelOverride = modelOverride.trim() || null;
+    }
+    if (currentScheduledIso !== (task.scheduledAt ?? null)) {
+      input.scheduledAt = currentScheduledIso;
     }
     if (showPlanner) {
       if (plannerMode !== task.plannerMode) input.plannerMode = plannerMode;
@@ -113,6 +119,7 @@ export function TaskSettings({ task, onSave }: Props) {
               setPlanTests(task.planTests);
               setRuntimeProfileId(task.runtimeProfileId ?? "");
               setModelOverride(task.modelOverride ?? "");
+              setScheduledAtLocal(isoToLocalInput(task.scheduledAt));
               setOpen(false);
             }}
           >
@@ -210,6 +217,31 @@ export function TaskSettings({ task, onSave }: Props) {
         </div>
       )}
 
+      {task.status === "backlog" && (
+        <div className="space-y-1 border-t border-border/60 pt-2">
+          <p className="text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Scheduled start
+          </p>
+          <div className="flex items-center gap-2">
+            <Input
+              type="datetime-local"
+              value={scheduledAtLocal}
+              onChange={(e) => setScheduledAtLocal(e.target.value)}
+              inputSize="sm"
+              className="w-56"
+            />
+            {scheduledAtLocal && (
+              <Button variant="ghost" size="xs" onClick={() => setScheduledAtLocal("")}>
+                Clear
+              </Button>
+            )}
+          </div>
+          <p className="text-3xs text-muted-foreground">
+            Task fires into planning automatically at the chosen time. Must be in the future.
+          </p>
+        </div>
+      )}
+
       <div className="space-y-2 border-t border-border/60 pt-2">
         <Button
           variant="outline"
@@ -261,6 +293,24 @@ export function TaskSettings({ task, onSave }: Props) {
       </div>
     </div>
   );
+}
+
+function isoToLocalInput(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+    `T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  );
+}
+
+function localInputToIso(local: string): string | null {
+  if (!local) return null;
+  const d = new Date(local);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
 }
 
 function CheckboxField({

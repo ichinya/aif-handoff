@@ -63,6 +63,21 @@ export function TaskCard({ task, onClick, overlay, density = "comfortable" }: Ta
           {task.title}
         </div>
         <div className="flex shrink-0 flex-wrap items-start justify-end gap-1">
+          {task.scheduledAt && task.status === "backlog" && (
+            <Badge
+              size={isCompact ? "xs" : "sm"}
+              className="border-sky-500/35 bg-sky-500/15 text-sky-700 dark:text-sky-300"
+              title={`Scheduled for ${new Date(task.scheduledAt).toLocaleString()}`}
+            >
+              ⏰{" "}
+              {new Date(task.scheduledAt).toLocaleString(undefined, {
+                month: "short",
+                day: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </Badge>
+          )}
           {task.manualReviewRequired && (
             <Badge
               size={isCompact ? "xs" : "sm"}
