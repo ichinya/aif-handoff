@@ -34,6 +34,7 @@ const mockTask: Task = {
   lastHeartbeatAt: null,
   lastSyncedAt: null,
   sessionId: null,
+  scheduledAt: null,
   roadmapAlias: null,
   tags: [],
   status: "backlog",

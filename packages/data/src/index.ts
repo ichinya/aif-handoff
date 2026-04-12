@@ -845,6 +845,94 @@ export function listDueBlockedExternalTasks(nowIso: string): TaskRow[] {
     .all();
 }
 
+/** Backlog tasks whose `scheduledAt` is due (<= nowIso). Skips paused tasks. */
+export function listDueScheduledTasks(nowIso: string): TaskRow[] {
+  log.debug({ nowIso }, "Scanning for due scheduled tasks");
+  const rows = getDb()
+    .select()
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.status, "backlog"),
+        eq(tasks.paused, false),
+        isNotNull(tasks.scheduledAt),
+        lte(tasks.scheduledAt, nowIso),
+      ),
+    )
+    .all();
+  log.debug({ dueCount: rows.length }, "Due scheduled tasks resolved");
+  return rows;
+}
+
+/** Clear scheduledAt after firing; bumps updatedAt. */
+export function clearScheduledAt(taskId: string): void {
+  log.debug({ taskId }, "Clearing scheduledAt");
+  const nowIso = new Date().toISOString();
+  getDb()
+    .update(tasks)
+    .set({ scheduledAt: null, updatedAt: nowIso })
+    .where(eq(tasks.id, taskId))
+    .run();
+}
+
+/** Set or clear scheduledAt. Caller validates the ISO string upstream. */
+export function updateScheduledAt(taskId: string, scheduledAt: string | null): void {
+  log.debug({ taskId, scheduledAt }, "Updating scheduledAt");
+  const nowIso = new Date().toISOString();
+  getDb()
+    .update(tasks)
+    .set({ scheduledAt, updatedAt: nowIso })
+    .where(eq(tasks.id, taskId))
+    .run();
+}
+
+/** Read the auto-queue flag for a project. Returns false for unknown projects. */
+export function getAutoQueueMode(projectId: string): boolean {
+  const row = getDb()
+    .select({ autoQueueMode: projects.autoQueueMode })
+    .from(projects)
+    .where(eq(projects.id, projectId))
+    .get();
+  return Boolean(row?.autoQueueMode);
+}
+
+/** Toggle the project-level auto-queue flag. */
+export function setAutoQueueMode(projectId: string, enabled: boolean): void {
+  log.info({ projectId, enabled }, "Setting auto-queue mode");
+  const nowIso = new Date().toISOString();
+  getDb()
+    .update(projects)
+    .set({ autoQueueMode: enabled, updatedAt: nowIso })
+    .where(eq(projects.id, projectId))
+    .run();
+}
+
+/**
+ * Next backlog task in a project ordered by `position` ascending.
+ * Skips paused tasks and tasks that still have a future `scheduledAt`
+ * (those belong to the scheduled-task trigger, not the auto-queue advancer).
+ */
+export function nextBacklogTaskByPosition(projectId: string): TaskRow | undefined {
+  const nowIso = new Date().toISOString();
+  return getDb()
+    .select()
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.projectId, projectId),
+        eq(tasks.status, "backlog"),
+        eq(tasks.paused, false),
+        or(
+          isNull(tasks.scheduledAt),
+          lte(tasks.scheduledAt, nowIso),
+        ),
+      ),
+    )
+    .orderBy(asc(tasks.position))
+    .limit(1)
+    .get();
+}
+
 export function listStaleInProgressTasks(): TaskRow[] {
   const nowIso = new Date().toISOString();
   return getDb()
