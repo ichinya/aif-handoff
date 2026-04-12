@@ -1,0 +1,33 @@
+name: MCP Unit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  mcpunit:
+    name: MCP Unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - uses: lee-to/mcpunit@v1
+        with:
+          cmd: node packages/mcp/dist/index.js
+          min-score: "80"
+          upload-sarif: "true"
