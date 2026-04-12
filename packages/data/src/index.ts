@@ -515,6 +515,14 @@ export function updateTask(id: string, fields: TaskFieldsUpdate): TaskRow | unde
   return findTaskById(id);
 }
 
+/**
+ * Write only the `position` column. Does NOT bump `updatedAt` — manual reorder
+ * is metadata, not content, and must not disturb "updated at" sort views.
+ */
+export function updateTaskPositionOnly(id: string, position: number): void {
+  getDb().update(tasks).set({ position }).where(eq(tasks.id, id)).run();
+}
+
 export function setTaskFields(id: string, fields: TaskFieldsPatch): void {
   const { autoReviewState, ...rest } = fields;
   const patch: Partial<TaskRow> & { autoReviewStateJson?: string | null } = { ...rest };

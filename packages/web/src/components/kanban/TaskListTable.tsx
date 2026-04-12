@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { ChevronUp, ChevronDown } from "lucide-react";
+import { ChevronUp, ChevronDown, Clock } from "lucide-react";
 import { STATUS_CONFIG, type Task } from "@aif/shared/browser";
 import { TableHeaderCell } from "@/components/ui/table-header-cell";
 import { useReorderTask } from "@/hooks/useTasks";
@@ -8,9 +8,15 @@ interface TaskListTableProps {
   tasks: Task[];
   isCompact: boolean;
   onTaskClick: (taskId: string) => void;
+  onReorderBacklog?: () => void;
 }
 
-export function TaskListTable({ tasks, isCompact, onTaskClick }: TaskListTableProps) {
+export function TaskListTable({
+  tasks,
+  isCompact,
+  onTaskClick,
+  onReorderBacklog,
+}: TaskListTableProps) {
   const reorder = useReorderTask();
   const backlogSorted = useMemo(
     () => tasks.filter((t) => t.status === "backlog").sort((a, b) => a.position - b.position),
@@ -35,6 +41,7 @@ export function TaskListTable({ tasks, isCompact, onTaskClick }: TaskListTablePr
           ? (aboveAbove.position + above.position) / 2
           : above.position - 100;
       reorder.mutate({ id: current.id, position: newPos });
+      onReorderBacklog?.();
       return;
     }
     if (idx === backlogSorted.length - 1) return;
@@ -43,6 +50,7 @@ export function TaskListTable({ tasks, isCompact, onTaskClick }: TaskListTablePr
     const newPos =
       belowBelow !== undefined ? (below.position + belowBelow.position) / 2 : below.position + 100;
     reorder.mutate({ id: current.id, position: newPos });
+    onReorderBacklog?.();
   };
 
   return (
@@ -88,6 +96,24 @@ export function TaskListTable({ tasks, isCompact, onTaskClick }: TaskListTablePr
                     className={`truncate text-muted-foreground ${isCompact ? "text-2xs" : "text-xs"}`}
                   >
                     {task.description}
+                  </div>
+                )}
+                {task.scheduledAt && task.status === "backlog" && (
+                  <div
+                    className={`mt-0.5 inline-flex items-center gap-1 border border-sky-500/30 bg-sky-500/10 px-1.5 py-0.5 text-sky-700 dark:text-sky-300 ${
+                      isCompact ? "text-3xs" : "text-2xs"
+                    }`}
+                  >
+                    <Clock className="h-3 w-3 shrink-0" />
+                    <span>
+                      Starts{" "}
+                      {new Date(task.scheduledAt).toLocaleString(undefined, {
+                        month: "short",
+                        day: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </span>
                   </div>
                 )}
               </td>

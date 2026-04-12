@@ -1569,6 +1569,33 @@ describe("tasks API", () => {
 
       expect(res.status).toBe(404);
     });
+
+    it("does not bump updatedAt — reorder is metadata, not content", async () => {
+      const db = testDb.current;
+      const frozen = "2026-01-01T00:00:00.000Z";
+      db.insert(tasks)
+        .values({
+          id: "pos-keep-ts",
+          projectId: "test-project",
+          title: "Keep updatedAt",
+          position: 2000,
+          createdAt: frozen,
+          updatedAt: frozen,
+        })
+        .run();
+
+      const res = await app.request("/tasks/pos-keep-ts/position", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ position: 1500 }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.position).toBe(1500);
+      // updatedAt must remain unchanged — list views sorted by "updated" stay stable
+      expect(body.updatedAt).toBe(frozen);
+    });
   });
 
   describe("comments", () => {

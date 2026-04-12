@@ -32,7 +32,12 @@ import {
   updateTaskPlan,
   syncTaskPlanFromFile,
 } from "../repositories/tasks.js";
-import { findProjectById, resolveEffectiveRuntimeProfile, type TaskRow } from "@aif/data";
+import {
+  findProjectById,
+  resolveEffectiveRuntimeProfile,
+  updateTaskPositionOnly,
+  type TaskRow,
+} from "@aif/data";
 
 const log = logger("tasks-route");
 
@@ -411,7 +416,8 @@ tasksRouter.patch("/:id/position", jsonValidator(reorderTaskSchema), async (c) =
     return c.json({ error: "Task not found" }, 404);
   }
 
-  const updated = updateTask(id, { position });
+  updateTaskPositionOnly(id, position);
+  const updated = findTaskById(id);
   if (!updated) return c.json({ error: "Task not found after reorder" }, 500);
   log.debug({ taskId: id, position }, "Task reordered");
 
