@@ -2,7 +2,7 @@ import type { Task, TaskStatus } from "@aif/shared/browser";
 import { STATUS_CONFIG } from "@aif/shared/browser";
 import { TaskCard } from "./TaskCard";
 import { AddTaskForm } from "./AddTaskForm";
-import { useReorderTask } from "@/hooks/useTasks";
+import { useReorderTask, useUpdateTask } from "@/hooks/useTasks";
 
 interface ColumnProps {
   status: TaskStatus;
@@ -82,6 +82,7 @@ export function Column({
   const share = totalVisibleTasks > 0 ? Math.round((tasks.length / totalVisibleTasks) * 100) : 0;
   const isCompact = density === "compact";
   const reorder = useReorderTask();
+  const updateTask = useUpdateTask();
 
   return (
     <div
@@ -145,6 +146,8 @@ export function Column({
                   canMoveDown: idx < tasks.length - 1,
                   onMoveUp: () => reorderBacklog(tasks, idx, "up", reorder),
                   onMoveDown: () => reorderBacklog(tasks, idx, "down", reorder),
+                  onTogglePause: () =>
+                    updateTask.mutate({ id: task.id, input: { paused: !task.paused } }),
                 }
               : {};
           return (

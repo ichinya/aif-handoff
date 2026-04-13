@@ -1,8 +1,8 @@
 import { useMemo } from "react";
-import { ChevronUp, ChevronDown, Clock } from "lucide-react";
+import { ChevronUp, ChevronDown, Clock, Pause, Play } from "lucide-react";
 import { STATUS_CONFIG, type Task } from "@aif/shared/browser";
 import { TableHeaderCell } from "@/components/ui/table-header-cell";
-import { useReorderTask } from "@/hooks/useTasks";
+import { useReorderTask, useUpdateTask } from "@/hooks/useTasks";
 
 interface TaskListTableProps {
   tasks: Task[];
@@ -18,6 +18,7 @@ export function TaskListTable({
   onReorderBacklog,
 }: TaskListTableProps) {
   const reorder = useReorderTask();
+  const updateTask = useUpdateTask();
   const backlogSorted = useMemo(
     () => tasks.filter((t) => t.status === "backlog").sort((a, b) => a.position - b.position),
     [tasks],
@@ -167,6 +168,28 @@ export function TaskListTable({
                       className="flex h-5 w-5 items-center justify-center border border-border bg-secondary/50 text-muted-foreground transition hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30"
                     >
                       <ChevronDown className="h-3 w-3" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={task.paused ? "Resume task" : "Pause task"}
+                      title={
+                        task.paused
+                          ? "Paused — auto-queue and scheduler will skip this task. Click to resume."
+                          : "Pause — exclude from auto-queue and scheduled execution"
+                      }
+                      onClick={() =>
+                        updateTask.mutate({
+                          id: task.id,
+                          input: { paused: !task.paused },
+                        })
+                      }
+                      className={`flex h-5 w-5 items-center justify-center border transition ${
+                        task.paused
+                          ? "border-yellow-500/50 bg-yellow-500/15 text-yellow-700 dark:text-yellow-300"
+                          : "border-border bg-secondary/50 text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {task.paused ? <Play className="h-3 w-3" /> : <Pause className="h-3 w-3" />}
                     </button>
                   </div>
                 ) : (

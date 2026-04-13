@@ -78,7 +78,10 @@ export function TaskDetailHeader({
   const visibleActions = (ACTION_BUTTONS_BY_STATUS[task.status] ?? []).filter(
     (action) => action.visible?.(task) ?? true,
   );
-  const showPauseButton = !["backlog", "done", "verified"].includes(task.status);
+  // Pause is also shown in `backlog` so users can park a task that auto-queue
+  // would otherwise advance — paused backlog tasks are skipped by both the
+  // scheduler and the auto-queue advancer.
+  const showPauseButton = !["done", "verified"].includes(task.status);
 
   return (
     <div className="border-b border-border p-6 pb-4 pr-14">

@@ -1,5 +1,5 @@
 import type { CSSProperties, MouseEvent } from "react";
-import { ChevronUp, ChevronDown, Clock } from "lucide-react";
+import { ChevronUp, ChevronDown, Clock, Pause, Play } from "lucide-react";
 import { STATUS_CONFIG, type Task } from "@aif/shared/browser";
 import { Badge } from "@/components/ui/badge";
 import { TaskTagsList } from "@/components/ui/task-tags-list";
@@ -23,6 +23,7 @@ interface TaskCardProps {
   canMoveDown?: boolean;
   onMoveUp?: () => void;
   onMoveDown?: () => void;
+  onTogglePause?: () => void;
 }
 
 function shortTaskId(id: string) {
@@ -38,11 +39,13 @@ export function TaskCard({
   canMoveDown,
   onMoveUp,
   onMoveDown,
+  onTogglePause,
 }: TaskCardProps) {
   const priority = PRIORITY_LABELS[task.priority] ?? PRIORITY_LABELS[0];
   const isCompact = density === "compact";
   const showReorder =
     task.status === "backlog" && (onMoveUp !== undefined || onMoveDown !== undefined);
+  const showPauseToggle = task.status === "backlog" && onTogglePause !== undefined;
 
   const stop = (e: MouseEvent) => {
     e.stopPropagation();
@@ -131,32 +134,58 @@ export function TaskCard({
         </div>
       )}
 
-      {showReorder && (
+      {(showReorder || showPauseToggle) && (
         <div className="mt-2 ml-2 flex items-center gap-1">
-          <button
-            type="button"
-            aria-label="Move task up"
-            disabled={!canMoveUp}
-            onClick={(e) => {
-              stop(e);
-              onMoveUp?.();
-            }}
-            className="flex h-5 w-5 items-center justify-center border border-border bg-secondary/50 text-muted-foreground transition hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
-          >
-            <ChevronUp className="h-3 w-3" />
-          </button>
-          <button
-            type="button"
-            aria-label="Move task down"
-            disabled={!canMoveDown}
-            onClick={(e) => {
-              stop(e);
-              onMoveDown?.();
-            }}
-            className="flex h-5 w-5 items-center justify-center border border-border bg-secondary/50 text-muted-foreground transition hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
-          >
-            <ChevronDown className="h-3 w-3" />
-          </button>
+          {showReorder && (
+            <>
+              <button
+                type="button"
+                aria-label="Move task up"
+                disabled={!canMoveUp}
+                onClick={(e) => {
+                  stop(e);
+                  onMoveUp?.();
+                }}
+                className="flex h-5 w-5 items-center justify-center border border-border bg-secondary/50 text-muted-foreground transition hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <ChevronUp className="h-3 w-3" />
+              </button>
+              <button
+                type="button"
+                aria-label="Move task down"
+                disabled={!canMoveDown}
+                onClick={(e) => {
+                  stop(e);
+                  onMoveDown?.();
+                }}
+                className="flex h-5 w-5 items-center justify-center border border-border bg-secondary/50 text-muted-foreground transition hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <ChevronDown className="h-3 w-3" />
+              </button>
+            </>
+          )}
+          {showPauseToggle && (
+            <button
+              type="button"
+              aria-label={task.paused ? "Resume task" : "Pause task"}
+              title={
+                task.paused
+                  ? "Paused — auto-queue and scheduler will skip this task. Click to resume."
+                  : "Pause — exclude from auto-queue and scheduled execution"
+              }
+              onClick={(e) => {
+                stop(e);
+                onTogglePause?.();
+              }}
+              className={`flex h-5 w-5 items-center justify-center border transition ${
+                task.paused
+                  ? "border-yellow-500/50 bg-yellow-500/15 text-yellow-700 dark:text-yellow-300"
+                  : "border-border bg-secondary/50 text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {task.paused ? <Play className="h-3 w-3" /> : <Pause className="h-3 w-3" />}
+            </button>
+          )}
         </div>
       )}
 
