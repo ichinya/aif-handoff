@@ -137,12 +137,16 @@ const mutateCreateCommentAsync = vi.fn();
 const mutateSyncTaskPlan = vi.fn();
 const mockGetTaskPlanFileStatus = vi.fn();
 
-vi.mock("@/lib/api", () => ({
-  api: {
-    getTaskPlanFileStatus: (...args: unknown[]) => mockGetTaskPlanFileStatus(...args),
-  },
-  PLAN_FAST_FIX_TIMEOUT_MS: 200_000,
-}));
+vi.mock("@/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api")>();
+  return {
+    ...actual,
+    api: {
+      getTaskPlanFileStatus: (...args: unknown[]) => mockGetTaskPlanFileStatus(...args),
+    },
+    PLAN_FAST_FIX_TIMEOUT_MS: 200_000,
+  };
+});
 
 vi.mock("@/hooks/useTasks", () => ({
   useTask: (id: string | null) => ({
