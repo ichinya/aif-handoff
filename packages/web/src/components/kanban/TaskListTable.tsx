@@ -74,7 +74,7 @@ export function TaskListTable({
             <TableHeaderCell isCompact={isCompact} className="w-44">
               Updated
             </TableHeaderCell>
-            <TableHeaderCell isCompact={isCompact} className="w-16 text-center">
+            <TableHeaderCell isCompact={isCompact} className="w-24 text-center">
               Order
             </TableHeaderCell>
           </tr>
