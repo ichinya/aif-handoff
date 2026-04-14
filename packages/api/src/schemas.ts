@@ -55,9 +55,9 @@ export const createTaskSchema = z.object({
   isFix: z.boolean().default(false),
   plannerMode: z.enum(["fast", "full"]).default("fast"),
   planPath: z.string().max(500).optional(),
-  planDocs: z.boolean().default(false),
-  planTests: z.boolean().default(false),
-  skipReview: z.boolean().default(false),
+  planDocs: z.boolean().optional(),
+  planTests: z.boolean().optional(),
+  skipReview: z.boolean().optional(),
   useSubagents: z.boolean().default(getEnv().AGENT_USE_SUBAGENTS),
   maxReviewIterations: z
     .number()

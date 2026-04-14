@@ -29,7 +29,7 @@ import {
 } from "@aif/runtime";
 import { getEnv, logger } from "@aif/shared";
 import { logActivity } from "./hooks.js";
-import { PROJECT_SCOPE_SYSTEM_APPEND } from "./constants.js";
+import { PROJECT_SCOPE_SYSTEM_APPEND, REVIEW_DIFF_SCOPE_SYSTEM_APPEND } from "./constants.js";
 import { createStderrCollector } from "./stderrCollector.js";
 import { writeQueryAudit } from "./queryAudit.js";
 import { getActiveStageAbortController } from "./stageAbort.js";
@@ -314,6 +314,14 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
     },
   });
 
+  // Review-stage subagents (review-sidecar, security-sidecar) must only audit
+  // the current task's diff, not the full codebase. Inject the scope rule here
+  // so every review-mode query gets it regardless of the agent definition file.
+  const effectiveSystemPromptAppend =
+    (options.profileMode ?? "task") === "review"
+      ? `${promptPolicy.systemPromptAppend}\n\n${REVIEW_DIFF_SCOPE_SYSTEM_APPEND}`.trim()
+      : promptPolicy.systemPromptAppend;
+
   const canResume =
     workflow.sessionReusePolicy === "resume_if_available" && capabilities.supportsResume;
 
@@ -357,7 +365,7 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
       projectRoot: options.projectRoot,
     },
     prompt: promptPolicy.prompt,
-    systemPromptAppend: promptPolicy.systemPromptAppend,
+    systemPromptAppend: effectiveSystemPromptAppend,
     agentDefinitionName: promptPolicy.agentDefinitionName,
     canResume,
   };

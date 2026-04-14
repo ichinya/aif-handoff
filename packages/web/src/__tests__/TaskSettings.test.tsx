@@ -112,11 +112,14 @@ describe("TaskSettings", () => {
     });
   });
 
-  it("saves planner settings changes", () => {
+  it("saves planner settings changes (fast mode flips flags to fast defaults, then docs/tests re-enabled)", () => {
     render(<TaskSettings task={mockTask} onSave={onSave} />);
     fireEvent.click(screen.getByText("Settings"));
 
+    // Switching to Fast auto-flips flags to fast-mode defaults
+    // (skipReview=true, planDocs=false, planTests=false).
     fireEvent.click(screen.getByLabelText("Fast"));
+    // Re-enable docs and tests manually.
     fireEvent.click(screen.getByLabelText("Docs"));
     fireEvent.click(screen.getByLabelText("Tests"));
     fireEvent.change(screen.getByPlaceholderText(".ai-factory/PLAN.md"), {
@@ -128,6 +131,42 @@ describe("TaskSettings", () => {
     expect(onSave).toHaveBeenCalledWith({
       plannerMode: "fast",
       planPath: ".ai-factory/custom.md",
+      planDocs: true,
+      planTests: true,
+      skipReview: true,
+    });
+  });
+
+  it("preserves saved task values on mount (no auto-flip)", () => {
+    const savedTask: Task = {
+      ...mockTask,
+      plannerMode: "full",
+      skipReview: true,
+      planDocs: false,
+      planTests: false,
+    };
+    render(<TaskSettings task={savedTask} onSave={onSave} />);
+    fireEvent.click(screen.getByText("Settings"));
+    // No Save button — nothing changed on mount.
+    expect(screen.queryByText("Save")).toBeNull();
+  });
+
+  it("flips flags to full-mode defaults when user manually selects Full", () => {
+    const fastTask: Task = {
+      ...mockTask,
+      plannerMode: "fast",
+      skipReview: true,
+      planDocs: false,
+      planTests: false,
+    };
+    render(<TaskSettings task={fastTask} onSave={onSave} />);
+    fireEvent.click(screen.getByText("Settings"));
+    fireEvent.click(screen.getByLabelText("Full"));
+    fireEvent.click(screen.getByText("Save"));
+
+    expect(onSave).toHaveBeenCalledWith({
+      plannerMode: "full",
+      skipReview: false,
       planDocs: true,
       planTests: true,
     });

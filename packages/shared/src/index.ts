@@ -142,6 +142,10 @@ export {
   type TelegramNotificationOptions,
 } from "./telegram.js";
 
+// Planner mode defaults
+export { defaultsForMode } from "./plannerDefaults.js";
+export type { PlannerMode, PlannerFlagDefaults } from "./plannerDefaults.js";
+
 // Utilities
 export { withTimeout } from "./withTimeout.js";
 export { parseMcpPortSetting, type ParsedMcpPortSetting } from "./mcpPort.js";

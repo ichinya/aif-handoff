@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { jsonValidator } from "../middleware/zodValidator.js";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import { logger, parseAttachments, getProjectConfig } from "@aif/shared";
+import { logger, parseAttachments, getProjectConfig, defaultsForMode } from "@aif/shared";
 import {
   createTaskSchema,
   updateTaskSchema,
@@ -103,6 +103,29 @@ tasksRouter.post("/", jsonValidator(createTaskSchema), async (c) => {
     body.plannerMode = "full";
   }
 
+  // Fill omitted flag values from mode-driven defaults (mirror of web UI behavior).
+  const modeDefaults = defaultsForMode(body.plannerMode);
+  const resolvedSkipReview = body.skipReview ?? modeDefaults.skipReview;
+  const resolvedPlanDocs = body.planDocs ?? modeDefaults.planDocs;
+  const resolvedPlanTests = body.planTests ?? modeDefaults.planTests;
+  if (
+    body.skipReview === undefined ||
+    body.planDocs === undefined ||
+    body.planTests === undefined
+  ) {
+    log.debug(
+      {
+        plannerMode: body.plannerMode,
+        filled: {
+          skipReview: body.skipReview === undefined,
+          planDocs: body.planDocs === undefined,
+          planTests: body.planTests === undefined,
+        },
+      },
+      "Applied mode-driven task flag defaults",
+    );
+  }
+
   // Pre-create the task to get an ID, then persist attachments to storage
   const created = createTask({
     projectId: body.projectId,
@@ -114,9 +137,9 @@ tasksRouter.post("/", jsonValidator(createTaskSchema), async (c) => {
     isFix: body.isFix,
     plannerMode: body.plannerMode,
     planPath: body.planPath ?? defaultPlanPath,
-    planDocs: body.planDocs,
-    planTests: body.planTests,
-    skipReview: body.skipReview,
+    planDocs: resolvedPlanDocs,
+    planTests: resolvedPlanTests,
+    skipReview: resolvedSkipReview,
     useSubagents: body.useSubagents,
     maxReviewIterations: body.maxReviewIterations,
     paused: body.paused,
@@ -298,6 +321,25 @@ tasksRouter.put("/:id", jsonValidator(updateTaskSchema), async (c) => {
   }
 
   const { plan, attachments: incomingAttachments, ...updatePayload } = body;
+
+  // Mirror POST /tasks: when plannerMode changes, fill omitted flags from mode defaults.
+  if (updatePayload.plannerMode !== undefined) {
+    const modeDefaults = defaultsForMode(updatePayload.plannerMode);
+    const filled = {
+      skipReview: updatePayload.skipReview === undefined,
+      planDocs: updatePayload.planDocs === undefined,
+      planTests: updatePayload.planTests === undefined,
+    };
+    updatePayload.skipReview = updatePayload.skipReview ?? modeDefaults.skipReview;
+    updatePayload.planDocs = updatePayload.planDocs ?? modeDefaults.planDocs;
+    updatePayload.planTests = updatePayload.planTests ?? modeDefaults.planTests;
+    if (filled.skipReview || filled.planDocs || filled.planTests) {
+      log.debug(
+        { taskId: id, plannerMode: updatePayload.plannerMode, filled },
+        "Applied mode-driven task flag defaults on update",
+      );
+    }
+  }
 
   const hasPlanUpdate = Object.prototype.hasOwnProperty.call(body, "plan");
   if (hasPlanUpdate) {

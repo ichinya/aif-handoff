@@ -360,12 +360,13 @@ describe("AddTaskForm", () => {
     // Toggle through both planner modes to cover both onChange branches
     fireEvent.click(screen.getByLabelText("Full"));
     fireEvent.click(screen.getByLabelText("Fast"));
+    // Re-enable docs/tests after fast-mode reset flipped them off
     fireEvent.click(screen.getByLabelText("Docs"));
     fireEvent.click(screen.getByLabelText("Tests"));
     fireEvent.change(screen.getByPlaceholderText(".ai-factory/PLAN.md"), {
       target: { value: ".ai-factory/custom-plan.md" },
     });
-    // Toggle skip review and use subagents
+    // Fast mode seeded skipReview=true; toggling once disables it (explicit user intent).
     const checkboxes = screen.getAllByRole("checkbox");
     const skipReviewCheckbox = checkboxes.find((cb) =>
       cb.closest("label")?.textContent?.includes("Skip review"),
@@ -388,8 +389,67 @@ describe("AddTaskForm", () => {
         planPath: ".ai-factory/custom-plan.md",
         planDocs: true,
         planTests: true,
-        skipReview: true,
+        skipReview: false,
         useSubagents: false,
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it("uses fast-mode flag defaults by default (skipReview=true, planDocs=false, planTests=false)", () => {
+    render(<AddTaskForm projectId="p-1" />);
+    fireEvent.click(screen.getByText("Add task"));
+    fireEvent.change(screen.getByPlaceholderText("Task title"), {
+      target: { value: "Default flags" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect(mutateCreateTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        plannerMode: "fast",
+        skipReview: true,
+        planDocs: false,
+        planTests: false,
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it("flips flags to full-mode defaults when switching to Full, and back to fast defaults on Fast", () => {
+    render(<AddTaskForm projectId="p-1" />);
+    fireEvent.click(screen.getByText("Add task"));
+    fireEvent.click(screen.getByRole("button", { name: "Planner settings" }));
+    fireEvent.click(screen.getByLabelText("Full"));
+    fireEvent.change(screen.getByPlaceholderText("Task title"), {
+      target: { value: "Full mode defaults" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect(mutateCreateTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        plannerMode: "full",
+        skipReview: false,
+        planDocs: true,
+        planTests: true,
+      }),
+      expect.any(Object),
+    );
+
+    // Simulate onSuccess: form resets to fast-mode defaults.
+    const options = mutateCreateTask.mock.calls[0][1] as { onSuccess?: () => void };
+    act(() => {
+      options.onSuccess?.();
+    });
+    // Reopen the form and submit — should now send fast-mode defaults.
+    fireEvent.click(screen.getByText("Add task"));
+    fireEvent.change(screen.getByPlaceholderText("Task title"), {
+      target: { value: "After reset" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect(mutateCreateTask).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        plannerMode: "fast",
+        skipReview: true,
+        planDocs: false,
+        planTests: false,
       }),
       expect.any(Object),
     );

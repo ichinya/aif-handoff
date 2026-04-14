@@ -7,7 +7,7 @@ import { Radio } from "@/components/ui/radio";
 import { Select } from "@/components/ui/select";
 import { useProjects } from "@/hooks/useProjects";
 import { useRuntimeProfiles, useRuntimes } from "@/hooks/useRuntimeProfiles";
-import type { Task, UpdateTaskInput } from "@aif/shared/browser";
+import { defaultsForMode, type Task, type UpdateTaskInput } from "@aif/shared/browser";
 
 interface Props {
   task: Task;
@@ -183,7 +183,13 @@ export function TaskSettings({ task, onSave }: Props) {
                 <Radio
                   name="plannerModeDetail"
                   checked={plannerMode === "full"}
-                  onChange={() => setPlannerMode("full")}
+                  onChange={() => {
+                    setPlannerMode("full");
+                    const flags = defaultsForMode("full");
+                    setSkipReview(flags.skipReview);
+                    setPlanDocs(flags.planDocs);
+                    setPlanTests(flags.planTests);
+                  }}
                   className="h-3.5 w-3.5"
                 />
                 <span className="font-medium text-foreground">Full</span>
@@ -192,7 +198,13 @@ export function TaskSettings({ task, onSave }: Props) {
                 <Radio
                   name="plannerModeDetail"
                   checked={plannerMode === "fast"}
-                  onChange={() => setPlannerMode("fast")}
+                  onChange={() => {
+                    setPlannerMode("fast");
+                    const flags = defaultsForMode("fast");
+                    setSkipReview(flags.skipReview);
+                    setPlanDocs(flags.planDocs);
+                    setPlanTests(flags.planTests);
+                  }}
                   className="h-3.5 w-3.5"
                 />
                 <span className="font-medium text-foreground">Fast</span>

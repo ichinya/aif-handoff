@@ -11,7 +11,7 @@ import { useKeyboardShortcut } from "@/hooks/useKeyboardShortcut";
 import { useProjects } from "@/hooks/useProjects";
 import { useSettings, useProjectDefaults } from "@/hooks/useSettings";
 import { useRuntimeProfiles, useRuntimes } from "@/hooks/useRuntimeProfiles";
-import { generatePlanPath } from "@aif/shared/browser";
+import { generatePlanPath, defaultsForMode } from "@aif/shared/browser";
 import { PlannerSettings } from "./PlannerSettings";
 
 interface Props {
@@ -29,9 +29,10 @@ export function AddTaskForm({ projectId }: Props) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [plannerMode, setPlannerMode] = useState<"full" | "fast">("fast");
   const [planPath, setPlanPath] = useState(DEFAULT_PLAN_PATH);
-  const [planDocs, setPlanDocs] = useState(false);
-  const [planTests, setPlanTests] = useState(false);
-  const [skipReview, setSkipReview] = useState(false);
+  const initialFlagDefaults = defaultsForMode("fast");
+  const [planDocs, setPlanDocs] = useState(initialFlagDefaults.planDocs);
+  const [planTests, setPlanTests] = useState(initialFlagDefaults.planTests);
+  const [skipReview, setSkipReview] = useState(initialFlagDefaults.skipReview);
   const [useSubagents, setUseSubagents] = useState(true);
   const [maxReviewIterations, setMaxReviewIterations] = useState(3);
   const [runtimeProfileId, setRuntimeProfileId] = useState("");
@@ -87,6 +88,12 @@ export function AddTaskForm({ projectId }: Props) {
     setRuntimeProfileId("");
     setModelOverride("");
     setPriority(0);
+    // Apply mode-driven flag defaults; isParallel forces full mode defaults.
+    const seededMode = isParallel ? "full" : plannerMode;
+    const flags = defaultsForMode(seededMode);
+    setSkipReview(flags.skipReview);
+    setPlanDocs(flags.planDocs);
+    setPlanTests(flags.planTests);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [syncGen]);
 
@@ -116,6 +123,10 @@ export function AddTaskForm({ projectId }: Props) {
   const handleModeChange = (mode: "full" | "fast") => {
     setPlannerMode(mode);
     syncPlanPath(title, mode);
+    const flags = defaultsForMode(mode);
+    setSkipReview(flags.skipReview);
+    setPlanDocs(flags.planDocs);
+    setPlanTests(flags.planTests);
   };
 
   // Effective values: parallel projects force full mode
@@ -154,11 +165,14 @@ export function AddTaskForm({ projectId }: Props) {
           setAutoMode(true);
           setIsFix(false);
           setShowAdvanced(false);
-          setPlannerMode("full");
+          setPlannerMode("fast");
           setPlanPath(defaultPlanPath);
-          setPlanDocs(false);
-          setPlanTests(false);
-          setSkipReview(false);
+          {
+            const resetFlags = defaultsForMode("fast");
+            setPlanDocs(resetFlags.planDocs);
+            setPlanTests(resetFlags.planTests);
+            setSkipReview(resetFlags.skipReview);
+          }
           setUseSubagents(useSubagentsDefault);
           setMaxReviewIterations(maxReviewIterationsDefault);
           setRuntimeProfileId("");
@@ -400,11 +414,14 @@ export function AddTaskForm({ projectId }: Props) {
             setAutoMode(true);
             setIsFix(false);
             setShowAdvanced(false);
-            setPlannerMode("full");
+            setPlannerMode("fast");
             setPlanPath(defaultPlanPath);
-            setPlanDocs(false);
-            setPlanTests(false);
-            setSkipReview(false);
+            {
+              const resetFlags = defaultsForMode("fast");
+              setPlanDocs(resetFlags.planDocs);
+              setPlanTests(resetFlags.planTests);
+              setSkipReview(resetFlags.skipReview);
+            }
             setUseSubagents(useSubagentsDefault);
             setMaxReviewIterations(maxReviewIterationsDefault);
             setRuntimeProfileId("");
