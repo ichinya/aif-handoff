@@ -114,6 +114,41 @@ Only non-secret fields are persisted (`baseUrl`, `apiKeyEnvVar`, headers/options
 
 For concrete profile payloads and adapter capability differences, see [Providers](providers.md).
 
+## Project Language
+
+`.ai-factory/config.yaml` carries a `language` block that controls the language AI produces for
+generated artifacts (task descriptions, plans, review notes, commit messages, roadmap items,
+chat replies). The setting is wired through a single injection point in the runtime registry
+(`packages/runtime/src/registry.ts` — `wrapAdapter`), so every call path — subagents, roadmap
+generation, fast-fix, commit generation, reviewGate, chat — picks it up automatically across
+all transports (SDK/CLI/API).
+
+```yaml
+# .ai-factory/config.yaml
+language:
+  ui: en # reserved for future UI localisation (currently informational)
+  artifacts: ru # language for AI-produced artifacts; "en" (default) disables injection
+  technical_terms: keep # "keep" or "translate"
+```
+
+Keys:
+
+- `artifacts` — BCP-47-ish language code. `en` (or unset) leaves prompts untouched so the model
+  uses its native default. Any other value appends a short system directive asking the model to
+  write artifacts in that language.
+- `technical_terms` — `keep` (default) instructs the model to leave identifiers, API/function
+  names, file paths, CLI flags, environment variables, code snippets, and log/error strings in
+  English even when the rest of the text is translated. `translate` allows natural translation
+  of those tokens where a good equivalent exists.
+- `ui` — reserved for future UI-side localisation; currently informational only.
+
+The directive is appended to `execution.systemPromptAppend` — never to `prompt` — so resume
+sessions, slash commands, and agent definitions continue to work unchanged. Existing appends
+(project-scope, review-diff-scope) are preserved verbatim and placed BEFORE the language
+directive so scope rules keep their emphasis.
+
+To disable: leave `artifacts: en` (the default).
+
 ## Database
 
 The database is a single SQLite file. The default path `./data/aif.sqlite` is relative to the project root.
