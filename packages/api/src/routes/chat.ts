@@ -72,13 +72,21 @@ const NOISY_TOOL_NAMES = new Set(["Read", "Glob", "Grep", "LS", "NotebookRead"])
 type NormalizedQuestion = {
   question: string;
   header?: string;
+  multiSelect?: boolean;
   options: Array<{ label: string; description?: string }>;
 };
 
-function renderQuestionBlock(entry: NormalizedQuestion): string[] {
+function renderQuestionBlock(entry: NormalizedQuestion, showSelectionHint: boolean): string[] {
   const lines: string[] = [];
   if (entry.header) lines.push(`**${entry.header}**`);
   if (entry.question) lines.push(`**❓ ${entry.question}**`);
+  if (showSelectionHint && entry.options.length > 0) {
+    lines.push(
+      entry.multiSelect
+        ? `_Select one or more (${entry.options.length} options)._`
+        : `_Select one._`,
+    );
+  }
   if (entry.options.length > 0) {
     lines.push("");
     entry.options.forEach((option, index) => {
@@ -93,13 +101,19 @@ function renderQuestionBlock(entry: NormalizedQuestion): string[] {
 }
 
 function formatToolQuestion(payload: RuntimeToolQuestionPayload): string | null {
+  const multipleQuestions = payload.questions.length > 1;
+  const anyMultiSelect = payload.questions.some((q) => q.multiSelect === true);
   const blocks = payload.questions
     .map((entry) =>
-      renderQuestionBlock({
-        question: entry.question,
-        header: entry.header,
-        options: entry.options ?? [],
-      }),
+      renderQuestionBlock(
+        {
+          question: entry.question,
+          header: entry.header,
+          multiSelect: entry.multiSelect,
+          options: entry.options ?? [],
+        },
+        multipleQuestions || anyMultiSelect,
+      ),
     )
     .filter((block) => block.length > 0);
   if (blocks.length === 0) return null;
@@ -109,7 +123,17 @@ function formatToolQuestion(payload: RuntimeToolQuestionPayload): string | null 
     lines.push(...block);
   });
   lines.push("");
-  lines.push("_Answer by number or free text in the next message._");
+  if (multipleQuestions) {
+    lines.push(
+      "_Answer each question in order — you can use numbers, comma-separated lists for multi-select, or free text._",
+    );
+  } else if (anyMultiSelect) {
+    lines.push(
+      "_You can select multiple options — list the numbers separated by commas, or answer in free text._",
+    );
+  } else {
+    lines.push("_Answer by number or free text in the next message._");
+  }
   lines.push("", "");
   return lines.join("\n");
 }
@@ -141,8 +165,13 @@ interface VirtualRuntimeSessionRef {
   sessionId: string;
 }
 
-function buildContextAppend(projectName: string, task: Task | null): string {
-  const parts = [PROJECT_SCOPE_SYSTEM_APPEND, CHAT_ASKUSERQUESTION_HINT];
+function buildContextAppend(
+  projectName: string,
+  task: Task | null,
+  options: { interactiveQuestions?: boolean } = {},
+): string {
+  const parts = [PROJECT_SCOPE_SYSTEM_APPEND];
+  if (options.interactiveQuestions) parts.push(CHAT_ASKUSERQUESTION_HINT);
 
   parts.push(`\nCurrent project: "${projectName}"`);
 
@@ -759,13 +788,20 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
     if (row) currentTask = toTaskResponse(row);
   }
 
-  const systemAppend = buildContextAppend(project.name, currentTask);
-  const runtimeResolution = await resolveChatRuntimeAdapter(projectId, message, systemAppend);
+  const baseSystemAppend = buildContextAppend(project.name, currentTask);
+  const runtimeResolution = await resolveChatRuntimeAdapter(projectId, message, baseSystemAppend);
   const runtimeContext = runtimeResolution.context;
   const adapter = runtimeContext.adapter;
   const runtimeId = runtimeContext.resolvedProfile.runtimeId;
   const runtimeProfileId = runtimeContext.resolvedProfile.profileId;
   const runtimeProviderId = runtimeContext.resolvedProfile.providerId;
+  const chatRuntimeCaps = resolveAdapterCapabilities(
+    adapter,
+    runtimeContext.resolvedProfile.transport,
+  );
+  const systemAppend = buildContextAppend(project.name, currentTask, {
+    interactiveQuestions: chatRuntimeCaps.supportsInteractiveQuestions === true,
+  });
 
   // Resolve or auto-create a chat session
   let chatSessionId = inputSessionId ?? null;
@@ -912,6 +948,12 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
             "DEBUG [chat] tool:question rendered",
           );
           sendToken(rendered);
+          hasStreamedTokens = true;
+          // Persist the question into the assistant text so it survives
+          // reload / reopen — runtime session history replays don't include
+          // `tool:question` events with a role, so without this the block
+          // is lost after a round-trip through GET /chat/sessions/:id/messages.
+          fullAssistantResponse += rendered;
           if (payload.toolUseId) lastToolPromptId = payload.toolUseId;
         }
         return;

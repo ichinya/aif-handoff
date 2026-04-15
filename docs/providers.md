@@ -70,6 +70,10 @@ Every adapter must declare a `usageReporting` value in its `RuntimeCapabilities`
 
 All successful runs that produce non-null usage flow through the registry's `usageSink`, which persists them to the `usage_events` table and rolls them up into per-task / per-project / per-chat-session aggregates. Sink wiring lives in `packages/api/src/services/runtime.ts` (API) and `packages/agent/src/index.ts` / `subagentQuery.ts` (agent) — both use `createDbUsageSink()` from `@aif/data`.
 
+### Interactive questions capability
+
+Optional `supportsInteractiveQuestions` flag in `RuntimeCapabilities` declares that the adapter emits runtime-neutral `tool:question` events (e.g. Claude's `AskUserQuestion`). Consumers — notably the chat route — use this flag to gate provider-specific prompt scaffolding (`CHAT_ASKUSERQUESTION_HINT` is only injected into `systemPromptAppend` when the resolved adapter declares the capability). Claude (SDK + CLI) sets the flag; Claude API, Codex, OpenCode, and OpenRouter leave it unset (defaults to `false`). Adapters that add interactive tool parsing must also call `buildToolUseEvents()` with a `questionPayload` so the rendered shape stays identical across runtimes.
+
 ### Transport Types
 
 | Transport | Description                           | Example                                  |

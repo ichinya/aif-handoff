@@ -695,4 +695,258 @@ describe("chat API", () => {
     );
     expect(questionOccurrences.length).toBe(1);
   });
+
+  it("persists rendered AskUserQuestion block as an assistant message so it survives reload", async () => {
+    mockAdapterRun.mockImplementation(async (input: RuntimeRunInput) => {
+      const onEvent = input.execution?.onEvent as
+        | ((event: Record<string, unknown>) => void)
+        | undefined;
+      onEvent?.({
+        type: "tool:question",
+        data: {
+          toolUseId: "tool-persist",
+          toolName: "AskUserQuestion",
+          questions: [
+            {
+              question: "Which branch to use?",
+              options: [{ label: "main" }, { label: "develop" }],
+            },
+          ],
+        },
+      });
+      // Question-only turn — no assistant text from the runtime.
+      return { outputText: "", sessionId: "runtime-session-1" };
+    });
+
+    const res = await app.request("/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: "project-1",
+        message: "pick a branch",
+        clientId: "client-1",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.assistantMessage).toContain("Which branch to use?");
+    expect(body.assistantMessage).toContain("1. main");
+    const persistCalls = mockCreateChatMessage.mock.calls.filter(
+      (call) => (call[0] as { role: string }).role === "assistant",
+    );
+    expect(persistCalls.length).toBe(1);
+    expect((persistCalls[0][0] as { content: string }).content).toContain("Which branch to use?");
+    expect((persistCalls[0][0] as { content: string }).content).toContain("1. main");
+  });
+
+  it("renders a multi-select hint when the question has multiSelect=true", async () => {
+    mockAdapterRun.mockImplementation(async (input: RuntimeRunInput) => {
+      const onEvent = input.execution?.onEvent as
+        | ((event: Record<string, unknown>) => void)
+        | undefined;
+      onEvent?.({
+        type: "tool:question",
+        data: {
+          toolUseId: "tool-multi",
+          toolName: "AskUserQuestion",
+          questions: [
+            {
+              question: "Pick environments",
+              multiSelect: true,
+              options: [{ label: "dev" }, { label: "staging" }, { label: "prod" }],
+            },
+          ],
+        },
+      });
+      return { outputText: "", sessionId: "runtime-session-1" };
+    });
+
+    const res = await app.request("/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: "project-1",
+        message: "go",
+        clientId: "client-1",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const tokenCalls = mockSendToClient.mock.calls.filter((call) => call[1]?.type === "chat:token");
+    const combined = tokenCalls.map((call) => String(call[1].payload.token)).join("");
+    expect(combined).toContain("select multiple");
+    expect(combined).not.toContain("Answer by number or free text in the next message.");
+    expect(combined).toContain("Select one or more");
+  });
+
+  it("renders per-question selection hints and an ordered-answer hint when payload has multiple questions", async () => {
+    mockAdapterRun.mockImplementation(async (input: RuntimeRunInput) => {
+      const onEvent = input.execution?.onEvent as
+        | ((event: Record<string, unknown>) => void)
+        | undefined;
+      onEvent?.({
+        type: "tool:question",
+        data: {
+          toolUseId: "tool-many",
+          toolName: "AskUserQuestion",
+          questions: [
+            {
+              question: "Planner mode?",
+              options: [{ label: "Fast" }, { label: "Full" }],
+            },
+            {
+              question: "Target environments?",
+              multiSelect: true,
+              options: [{ label: "dev" }, { label: "prod" }],
+            },
+          ],
+        },
+      });
+      return { outputText: "", sessionId: "runtime-session-1" };
+    });
+
+    const res = await app.request("/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: "project-1",
+        message: "go",
+        clientId: "client-1",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const tokenCalls = mockSendToClient.mock.calls.filter((call) => call[1]?.type === "chat:token");
+    const combined = tokenCalls.map((call) => String(call[1].payload.token)).join("");
+    expect(combined).toContain("Planner mode?");
+    expect(combined).toContain("Target environments?");
+    expect(combined).toContain("Select one.");
+    expect(combined).toContain("Select one or more");
+    expect(combined).toContain("Answer each question in order");
+    expect(combined).toContain("---");
+  });
+
+  it("renders tool:question without toolUseId (chat-layer dedupe by id cannot fire)", async () => {
+    mockAdapterRun.mockImplementation(async (input: RuntimeRunInput) => {
+      const onEvent = input.execution?.onEvent as
+        | ((event: Record<string, unknown>) => void)
+        | undefined;
+      const payload = {
+        toolUseId: null,
+        toolName: "AskUserQuestion",
+        questions: [{ question: "No id question?", options: [{ label: "Ok" }] }],
+      };
+      onEvent?.({ type: "tool:question", data: payload });
+      onEvent?.({ type: "tool:question", data: payload });
+      return { outputText: "", sessionId: "runtime-session-1" };
+    });
+
+    const res = await app.request("/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: "project-1",
+        message: "go",
+        clientId: "client-1",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const tokenCalls = mockSendToClient.mock.calls.filter((call) => call[1]?.type === "chat:token");
+    const combined = tokenCalls.map((call) => String(call[1].payload.token)).join("");
+    // No toolUseId → both emissions render. Ensure at least one rendering happened.
+    expect(combined).toContain("No id question?");
+    const occurrences = tokenCalls.filter((call) =>
+      String(call[1].payload.token).includes("No id question?"),
+    );
+    expect(occurrences.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("includes AskUserQuestion hint in systemPromptAppend only for runtimes that support interactive questions", async () => {
+    // Default fixture: Claude-like adapter with supportsInteractiveQuestions not set → absent.
+    const adapterWithoutFlag: RuntimeAdapter = {
+      ...runtimeAdapter,
+      descriptor: {
+        ...runtimeAdapter.descriptor,
+        capabilities: {
+          ...runtimeAdapter.descriptor.capabilities,
+          supportsInteractiveQuestions: false,
+        },
+      },
+    };
+    mockResolveApiRuntimeContext.mockResolvedValueOnce({
+      project: { id: "project-1", rootPath: "/tmp/project-1" },
+      adapter: adapterWithoutFlag,
+      resolvedProfile: {
+        source: "project_default",
+        profileId: "profile-1",
+        runtimeId: "codex",
+        providerId: "openai",
+        transport: "sdk",
+        model: null,
+        baseUrl: null,
+        apiKey: null,
+        apiKeyEnvVar: null,
+        headers: {},
+        options: {},
+      },
+      selectionSource: "project_default",
+    });
+
+    const res = await app.request("/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: "project-1",
+        message: "plain",
+      }),
+    });
+    expect(res.status).toBe(200);
+    const runInput = mockAdapterRun.mock.calls[0]?.[0] as RuntimeRunInput;
+    expect(runInput.execution?.systemPromptAppend).not.toContain("AskUserQuestion");
+
+    // Claude-like adapter (flag=true) → hint must appear.
+    mockAdapterRun.mockClear();
+    const adapterWithFlag: RuntimeAdapter = {
+      ...runtimeAdapter,
+      descriptor: {
+        ...runtimeAdapter.descriptor,
+        capabilities: {
+          ...runtimeAdapter.descriptor.capabilities,
+          supportsInteractiveQuestions: true,
+        },
+      },
+    };
+    mockResolveApiRuntimeContext.mockResolvedValueOnce({
+      project: { id: "project-1", rootPath: "/tmp/project-1" },
+      adapter: adapterWithFlag,
+      resolvedProfile: {
+        source: "project_default",
+        profileId: "profile-1",
+        runtimeId: "claude",
+        providerId: "anthropic",
+        transport: "sdk",
+        model: null,
+        baseUrl: null,
+        apiKey: null,
+        apiKeyEnvVar: null,
+        headers: {},
+        options: {},
+      },
+      selectionSource: "project_default",
+    });
+
+    const res2 = await app.request("/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: "project-1",
+        message: "plain",
+      }),
+    });
+    expect(res2.status).toBe(200);
+    const runInput2 = mockAdapterRun.mock.calls[0]?.[0] as RuntimeRunInput;
+    expect(runInput2.execution?.systemPromptAppend).toContain("AskUserQuestion");
+  });
 });

@@ -279,6 +279,13 @@ export function createExampleRuntimeAdapter(
         // Contract tests in bootstrap.test.ts will fail the build if this field is
         // missing. See docs/providers.md → "Usage reporting contract" for details.
         // usageReporting: UsageReporting.FULL,
+        //
+        // Optional: set `supportsInteractiveQuestions: true` if your adapter
+        // parses a provider-native interactive question tool into
+        // runtime-neutral `tool:question` events via `buildToolUseEvents()`.
+        // Consumers (e.g. chat route) gate provider-specific prompt hints on
+        // this flag so other runtimes don't inherit Claude-specific scaffolding.
+        // supportsInteractiveQuestions: true,
       },
     },
 

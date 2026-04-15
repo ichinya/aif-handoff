@@ -89,6 +89,13 @@ export interface RuntimeCapabilities {
    * on `RuntimeRunResult.usage`.
    */
   usageReporting: UsageReporting;
+  /**
+   * Adapter emits interactive `tool:question` events (e.g. Claude's
+   * `AskUserQuestion`). Consumers use this flag to gate provider-specific
+   * prompt hints and UI affordances so other runtimes don't inherit noise.
+   * Optional — defaults to false for adapters that don't declare it.
+   */
+  supportsInteractiveQuestions?: boolean;
 }
 
 export const DEFAULT_RUNTIME_CAPABILITIES: RuntimeCapabilities = {
@@ -100,6 +107,7 @@ export const DEFAULT_RUNTIME_CAPABILITIES: RuntimeCapabilities = {
   supportsApprovals: false,
   supportsCustomEndpoint: false,
   usageReporting: UsageReporting.NONE,
+  supportsInteractiveQuestions: false,
 };
 
 export interface RuntimeDescriptor {
