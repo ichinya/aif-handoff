@@ -478,6 +478,26 @@ describe("useChat", () => {
     expect(handleSessionResolved).toHaveBeenCalledWith("sess-new-1");
   });
 
+  it("rolls back the optimistic first message when abort returns without sessionId", async () => {
+    mockSendChatMessage.mockRejectedValueOnce(
+      new ApiError("Chat run aborted by user", 409, {
+        code: "aborted",
+        sessionId: null,
+        conversationId: "conv-new-orphan-1",
+      }),
+    );
+
+    const { result } = renderHook(() => useChat("p-1"));
+
+    await act(async () => {
+      await result.current.sendMessage("Hello");
+    });
+
+    expect(result.current.messages).toEqual([]);
+    expect(result.current.chatErrorCode).toBe("aborted");
+    expect(result.current.isStreaming).toBe(false);
+  });
+
   it("does not clear Stop or show Stopped on session B when session A's run aborts in the background", async () => {
     // Stream A: resolvable by us, simulates A's HTTP settling after user switches away
     let rejectA: ((reason?: unknown) => void) | null = null;
@@ -663,6 +683,53 @@ describe("useChat", () => {
       }),
     );
     expect(result.current.chatErrorCode).toBe("aborted");
+  });
+
+  it("appends assistantMessage when chat:error races ahead of the 409 abort body", async () => {
+    let rejectSend: ((reason?: unknown) => void) | null = null;
+    mockSendChatMessage.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectSend = reject;
+        }),
+    );
+
+    const { result } = renderHook(() => useChat("p-1"));
+
+    let sendPromise: Promise<void>;
+    act(() => {
+      sendPromise = result.current.sendMessage("question");
+    });
+    await waitFor(() => expect(mockSendChatMessage).toHaveBeenCalledTimes(1));
+
+    const conversationId = mockSendChatMessage.mock.calls[0][0].conversationId as string;
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("chat:error", {
+          detail: { conversationId, message: "Chat run aborted by user", code: "aborted" },
+        }),
+      );
+    });
+
+    await act(async () => {
+      rejectSend!(
+        new ApiError("Chat run aborted by user", 409, {
+          code: "aborted",
+          sessionId: "sess-race-assistant-1",
+          conversationId,
+          assistantMessage: "half-written answer",
+        }),
+      );
+      await sendPromise;
+    });
+
+    expect(result.current.messages).toEqual([
+      { role: "user", content: "question" },
+      { role: "assistant", content: "half-written answer" },
+    ]);
+    expect(result.current.chatErrorCode).toBe("aborted");
+    expect(result.current.isStreaming).toBe(false);
   });
 
   it("toggles explore mode", () => {

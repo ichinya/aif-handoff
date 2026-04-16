@@ -596,6 +596,11 @@ describe("chat API", () => {
     let capturedController: AbortController | undefined;
     mockAdapterRun.mockImplementation(async (input: RuntimeRunInput) => {
       capturedController = input.execution?.abortController;
+      if (capturedController?.signal.aborted) {
+        const err = new Error("The operation was aborted");
+        (err as Error & { name: string }).name = "AbortError";
+        throw err;
+      }
       // Simulate adapter honoring the AbortController by throwing AbortError
       await new Promise<void>((_resolve, reject) => {
         capturedController?.signal.addEventListener("abort", () => {
@@ -605,6 +610,31 @@ describe("chat API", () => {
         });
       });
       return { outputText: "", sessionId: "runtime-session-1" };
+    });
+    let releaseRuntimeResolutionGate = () => {};
+    const runtimeResolutionGate = new Promise<void>((resolve) => {
+      releaseRuntimeResolutionGate = () => resolve();
+    });
+    mockResolveApiRuntimeContext.mockImplementationOnce(async () => {
+      await runtimeResolutionGate;
+      return {
+        project: { id: "project-1", rootPath: "/tmp/project-1" },
+        adapter: runtimeAdapter,
+        resolvedProfile: {
+          source: "project_default",
+          profileId: "profile-1",
+          runtimeId: "claude",
+          providerId: "anthropic",
+          transport: "sdk",
+          model: null,
+          baseUrl: null,
+          apiKey: null,
+          apiKeyEnvVar: null,
+          headers: {},
+          options: {},
+        },
+        selectionSource: "project_default",
+      };
     });
 
     const conversationId = crypto.randomUUID();
@@ -619,10 +649,26 @@ describe("chat API", () => {
       }),
     });
 
-    // Give the route a tick to register the AbortController before we abort.
-    await new Promise((r) => setTimeout(r, 20));
-    const abortRes = await app.request(`/chat/${conversationId}/abort`, { method: "POST" });
+    // Let the route start and block on runtime resolution; at this point the
+    // AbortController should already be registered but chatSession auto-create
+    // has not run yet.
+    await Promise.resolve();
+    let abortRes: Response | null = null;
+    for (let i = 0; i < 50; i += 1) {
+      const attempt = await app.request(`/chat/${conversationId}/abort`, { method: "POST" });
+      if (attempt.status === 204) {
+        abortRes = attempt;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 1));
+    }
+    if (!abortRes) {
+      abortRes = await app.request(`/chat/${conversationId}/abort`, { method: "POST" });
+    }
     expect(abortRes.status).toBe(204);
+    expect(mockCreateChatSession).not.toHaveBeenCalled();
+
+    releaseRuntimeResolutionGate();
 
     const chatRes = await chatPromise;
     expect(chatRes.status).toBe(409);

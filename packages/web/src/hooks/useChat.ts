@@ -485,6 +485,8 @@ export function useChat(
         const state = sessionStreamsRef.current.get(activeStreamKey);
         const errorHandled = state?.errorHandled ?? false;
         const hasAccumulatedTokens = (state?.accumulator.length ?? 0) > 0;
+        const shouldRollbackOptimisticFirstTurn =
+          isAbortedError && !abortData?.sessionId && !effectiveSessionId;
 
         // On abort, apply server-resolved data to the stream-scoped state before
         // deleting it. Guards below then decide whether to mirror the changes
@@ -512,16 +514,16 @@ export function useChat(
             patchedUserAttachments = resolvedAttachments;
           }
           if (
-            state &&
-            !hasAccumulatedTokens &&
             typeof abortData?.assistantMessage === "string" &&
             abortData.assistantMessage.trim().length > 0
           ) {
             appendedPartialAssistant = abortData.assistantMessage;
-            state.messages = [
-              ...state.messages,
-              { role: "assistant", content: appendedPartialAssistant },
-            ];
+            if (state && !hasAccumulatedTokens) {
+              state.messages = [
+                ...state.messages,
+                { role: "assistant", content: appendedPartialAssistant },
+              ];
+            }
           }
         }
 
@@ -534,15 +536,26 @@ export function useChat(
         // can't hide Stop / flip the banner / inject messages into session B
         // while the user is watching it.
         if (isCurrentStream(activeStreamKey)) {
-          if (patchedUserAttachments) {
-            const resolved = patchedUserAttachments;
-            setMessages((prev) =>
-              prev.map((m) => (m === userMessage ? { ...m, attachments: resolved } : m)),
-            );
-          }
-          if (appendedPartialAssistant) {
-            const partial = appendedPartialAssistant;
-            setMessages((prev) => [...prev, { role: "assistant", content: partial }]);
+          if (shouldRollbackOptimisticFirstTurn) {
+            // First message in a brand-new chat was never persisted server-side.
+            // Roll back the optimistic bubble to avoid an orphan transcript.
+            setMessages([]);
+            conversationIdForNoSession.current = null;
+          } else {
+            if (patchedUserAttachments) {
+              const resolved = patchedUserAttachments;
+              setMessages((prev) =>
+                prev.map((m) => (m === userMessage ? { ...m, attachments: resolved } : m)),
+              );
+            }
+            if (appendedPartialAssistant) {
+              const partial = appendedPartialAssistant;
+              setMessages((prev) =>
+                prev.some((m) => m.role === "assistant" && m.content === partial)
+                  ? prev
+                  : [...prev, { role: "assistant", content: partial }],
+              );
+            }
           }
           setIsStreaming(false);
           if (isAbortedError) {
