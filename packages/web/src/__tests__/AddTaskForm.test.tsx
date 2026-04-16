@@ -4,7 +4,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 const mutateCreateTask = vi.fn();
 
 const mockSettingsData = {
-  data: { useSubagents: true, maxReviewIterations: 3 } as
+  data: { useSubagents: false, maxReviewIterations: 3 } as
     | { useSubagents: boolean; maxReviewIterations: number }
     | undefined,
 };
@@ -50,7 +50,7 @@ const { AddTaskForm } = await import("@/components/kanban/AddTaskForm");
 describe("AddTaskForm", () => {
   beforeEach(() => {
     mutateCreateTask.mockClear();
-    mockSettingsData.data = { useSubagents: true, maxReviewIterations: 3 };
+    mockSettingsData.data = { useSubagents: false, maxReviewIterations: 3 };
     mockDefaultsData.data = undefined;
     mockProjectsData.data = [{ id: "p-1", parallelEnabled: false }];
     mockRuntimeProfilesData.data = [];
@@ -390,7 +390,7 @@ describe("AddTaskForm", () => {
         planDocs: true,
         planTests: true,
         skipReview: false,
-        useSubagents: false,
+        useSubagents: true,
       }),
       expect.any(Object),
     );
