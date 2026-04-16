@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { Header } from "./components/layout/Header";
 import { Board } from "./components/kanban/Board";
 import { TaskDetail } from "./components/task/TaskDetail";
@@ -15,7 +15,8 @@ import { ChatPanel } from "./components/chat/ChatPanel";
 import { calculateTaskMetrics } from "./lib/taskMetrics";
 import { readStorage, writeStorage, removeStorage } from "./lib/storage";
 import { STORAGE_KEYS } from "./lib/storageKeys";
-import type { Project } from "@aif/shared/browser";
+import { api } from "./lib/api";
+import type { Project, Task } from "@aif/shared/browser";
 import { ProjectRuntimeSettings } from "./components/project/ProjectRuntimeSettings";
 import { ProjectsOverview } from "./components/project/ProjectsOverview";
 import { ToastProvider } from "./components/ui/toast";
@@ -48,7 +49,27 @@ function AppContent() {
     return saved === "list" ? "list" : "kanban";
   });
   const { data: projectTasks } = useTasks(project?.id ?? null);
-  const taskMetrics = useMemo(() => calculateTaskMetrics(projectTasks ?? []), [projectTasks]);
+  const { data: allTasks } = useQuery<Task[]>({
+    queryKey: ["tasks", "all"],
+    queryFn: () => api.listTasks(),
+    enabled: !project,
+  });
+  const taskMetrics = useMemo(
+    () => calculateTaskMetrics((project ? projectTasks : allTasks) ?? []),
+    [project, projectTasks, allTasks],
+  );
+  const aggregateProjectTotals = useMemo(() => {
+    if (project || !projects?.length) return null;
+    return projects.reduce(
+      (acc, p) => ({
+        tokenInput: acc.tokenInput + (p.tokenInput ?? 0),
+        tokenOutput: acc.tokenOutput + (p.tokenOutput ?? 0),
+        tokenTotal: acc.tokenTotal + (p.tokenTotal ?? 0),
+        costUsd: acc.costUsd + (p.costUsd ?? 0),
+      }),
+      { tokenInput: 0, tokenOutput: 0, tokenTotal: 0, costUsd: 0 },
+    );
+  }, [project, projects]);
 
   useEffect(() => {
     writeStorage(STORAGE_KEYS.DENSITY, density);
@@ -156,6 +177,7 @@ function AppContent() {
         viewMode={viewMode}
         onViewModeChange={setViewMode}
         taskMetrics={taskMetrics}
+        aggregateTotals={aggregateProjectTotals}
         runtimeProfilesOpen={runtimeSettingsOpen}
         onToggleRuntimeProfiles={() => setRuntimeSettingsOpen((value) => !value)}
       />
