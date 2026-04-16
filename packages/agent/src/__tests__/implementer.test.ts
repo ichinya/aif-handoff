@@ -90,6 +90,7 @@ describe("runImplementer rework behavior", () => {
         status: "implementing",
         plan: "## Plan\n- [x] Done",
         reworkRequested: true,
+        useSubagents: true,
         reviewComments: "## Blocking Findings\n- [finding-1] code_review | Fix the retry path",
         autoReviewStateJson: JSON.stringify({
           strategy: "closure_first",
@@ -244,6 +245,7 @@ describe("runImplementer rework behavior", () => {
         status: "implementing",
         plan: "## Fix Steps\n- [ ] Task 1: Pending step\n- [x] Task 2: Done step",
         reworkRequested: false,
+        useSubagents: true,
       })
       .run();
 
@@ -273,6 +275,7 @@ describe("runImplementer rework behavior", () => {
         status: "implementing",
         plan: "Plan:\n- remove old code\n- update docs",
         reworkRequested: false,
+        useSubagents: true,
       })
       .run();
 

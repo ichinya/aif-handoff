@@ -22,10 +22,12 @@ import type {
 
 export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  data?: unknown;
+  constructor(message: string, status: number, data?: unknown) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.data = data;
   }
 }
 
@@ -147,7 +149,7 @@ async function request<T>(
         message = firstFieldError[0] ?? null;
       }
     }
-    throw new ApiError(message ?? `HTTP ${res.status}`, res.status);
+    throw new ApiError(message ?? `HTTP ${res.status}`, res.status, body);
   }
 
   return res.json();
@@ -401,6 +403,14 @@ export const api = {
       },
       CHAT_TIMEOUT_MS,
     );
+  },
+
+  async abortChat(conversationId: string): Promise<void> {
+    console.debug("[api] POST /chat/%s/abort", conversationId);
+    const res = await fetch(`${API_PREFIX}/chat/${conversationId}/abort`, { method: "POST" });
+    if (!res.ok && res.status !== 404) {
+      throw new Error(`Failed to abort chat: ${res.status}`);
+    }
   },
 
   // Chat Sessions

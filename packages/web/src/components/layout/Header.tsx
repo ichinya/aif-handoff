@@ -8,7 +8,7 @@ import { ProjectSelector } from "@/components/project/ProjectSelector";
 import type { Project } from "@aif/shared/browser";
 import type { TaskMetricsSummary } from "@/lib/taskMetrics";
 import { NotificationsDialog } from "./NotificationsDialog";
-import { MetricsDialog } from "./MetricsDialog";
+import { MetricsDialog, type AggregateProjectTotals } from "./MetricsDialog";
 import { RoadmapDialog } from "./RoadmapDialog";
 import { GlobalSettingsDialog } from "./GlobalSettingsDialog";
 
@@ -29,6 +29,7 @@ interface Props {
   viewMode: "kanban" | "list";
   onViewModeChange: (mode: "kanban" | "list") => void;
   taskMetrics: TaskMetricsSummary;
+  aggregateTotals?: AggregateProjectTotals | null;
   runtimeProfilesOpen: boolean;
   onToggleRuntimeProfiles: () => void;
   onRoadmapImportComplete?: (result: RoadmapImportResult) => void;
@@ -44,6 +45,7 @@ export function Header({
   viewMode,
   onViewModeChange,
   taskMetrics,
+  aggregateTotals,
   runtimeProfilesOpen,
   onToggleRuntimeProfiles,
   onRoadmapImportComplete,
@@ -237,6 +239,7 @@ export function Header({
         onOpenChange={setMetricsOpen}
         taskMetrics={taskMetrics}
         project={selectedProject}
+        aggregateTotals={aggregateTotals}
       />
       <RoadmapDialog
         open={roadmapOpen}

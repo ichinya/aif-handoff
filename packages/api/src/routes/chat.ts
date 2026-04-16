@@ -239,6 +239,15 @@ function runtimeSourceFromTransport(transport: string): "cli" | "agent" {
   return transport === RuntimeTransport.CLI ? "cli" : "agent";
 }
 
+function isAbortError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const asError = err as { name?: string; code?: string; cause?: unknown };
+  if (asError.name === "AbortError") return true;
+  if (asError.code === "ABORT_ERR") return true;
+  if (asError.cause) return isAbortError(asError.cause);
+  return false;
+}
+
 function classifyChatError(err: unknown): {
   status: 429 | 500;
   code: string;
@@ -481,6 +490,16 @@ async function getAdapterForRuntimeId(runtimeId: string): Promise<RuntimeAdapter
 }
 
 export const chatRouter = new Hono();
+
+/**
+ * Per-conversation AbortController registry. Populated before dispatching the
+ * runtime `run`/`resume` call and cleared in the route's finally block.
+ * The `/:conversationId/abort` endpoint looks up the controller and calls
+ * `.abort()`, which propagates through the Claude adapter (AbortController on
+ * SDK query options, `kill()` on the CLI spawn) and surfaces to the client as
+ * `chat:error` with code `"aborted"`.
+ */
+const activeChatRuns = new Map<string, AbortController>();
 
 // ── Session CRUD ───────────────────────────────────────────
 
@@ -873,115 +892,156 @@ chatRouter.get("/sessions/:sessionId/attachments/:filename", async (c) => {
 });
 
 // POST /chat
+// POST /chat/:conversationId/abort — interrupt an in-flight chat run.
+chatRouter.post("/:conversationId/abort", async (c) => {
+  const conversationId = c.req.param("conversationId");
+  const controller = activeChatRuns.get(conversationId);
+  if (!controller) {
+    log.debug(
+      { conversationId },
+      "DEBUG [chat-route] abort requested for unknown or completed conversation",
+    );
+    return c.json({ error: "Conversation not found or already completed" }, 404);
+  }
+  controller.abort();
+  activeChatRuns.delete(conversationId);
+  log.info({ conversationId }, "INFO [chat-route] Chat run aborted by user");
+  return c.body(null, 204);
+});
+
 chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
   const body = c.req.valid("json") as ChatRequestPayload;
   const { projectId, message, clientId, conversationId, explore, taskId, attachments } = body;
   let { sessionId: inputSessionId } = body;
   const env = getEnv();
 
-  const project = findProjectById(projectId);
-  if (!project) {
-    return c.json({ error: "Project not found" }, 404);
-  }
+  // Register the AbortController BEFORE any slow work (project lookup, runtime
+  // resolution, session auto-create). This closes the window where an early
+  // Stop click from the client would hit `/abort` with a 404 because the
+  // controller wasn't registered yet, letting the `/chat` request continue
+  // running. If `.abort()` fires before `adapter.run()` is reached, the
+  // already-aborted signal propagates into the run and trips the catch below.
+  const chatConversationId = conversationId ?? crypto.randomUUID();
+  const abortController = new AbortController();
+  activeChatRuns.set(chatConversationId, abortController);
 
-  // Resolve currently open task for context injection
-  let currentTask: Task | null = null;
-  if (taskId) {
-    const row = findTaskById(taskId);
-    if (row) currentTask = toTaskResponse(row);
-  }
+  let chatSessionId: string | null = null;
+  let runtimeId: string | undefined;
+  let runtimeProfileId: string | null | undefined;
+  let runtimeProviderId: string | undefined;
+  // Hoisted so the abort branch can persist any partial streamed output.
+  let fullAssistantResponse = "";
+  // Captured from the runtime `system:init` event so the abort branch can
+  // link the DB chat session to the runtime session even when the run never
+  // completed. Without this, aborting the first turn of a fresh chat would
+  // break runtime continuity — the next turn would have no resume context.
+  let runtimeSessionIdFromEvents: string | null = null;
+  // Hoisted so the abort branch can surface server-resolved attachment paths
+  // to the client — without this, an aborted run with uploads would leave the
+  // user bubble with a path-less chip until the session is reopened.
+  let savedAttachments: ChatMessageAttachment[] | undefined;
 
-  const baseSystemAppend = buildContextAppend(project.name, currentTask);
-  const runtimeResolution = await resolveChatRuntimeAdapter(projectId, message, baseSystemAppend);
-  const runtimeContext = runtimeResolution.context;
-  const adapter = runtimeContext.adapter;
-  const runtimeId = runtimeContext.resolvedProfile.runtimeId;
-  const runtimeProfileId = runtimeContext.resolvedProfile.profileId;
-  const runtimeProviderId = runtimeContext.resolvedProfile.providerId;
-  const chatRuntimeCaps = resolveAdapterCapabilities(
-    adapter,
-    runtimeContext.resolvedProfile.transport,
-  );
-  const systemAppend = buildContextAppend(project.name, currentTask, {
-    interactiveQuestions: chatRuntimeCaps.supportsInteractiveQuestions === true,
-  });
+  try {
+    const project = findProjectById(projectId);
+    if (!project) {
+      return c.json({ error: "Project not found" }, 404);
+    }
 
-  // Resolve or auto-create a chat session
-  let chatSessionId = inputSessionId ?? null;
-  const incomingVirtual = chatSessionId ? parseVirtualRuntimeSessionId(chatSessionId) : null;
+    // Resolve currently open task for context injection
+    let currentTask: Task | null = null;
+    if (taskId) {
+      const row = findTaskById(taskId);
+      if (row) currentTask = toTaskResponse(row);
+    }
 
-  // External runtime sessions are virtual — create a DB session linked to the runtime session
-  if (incomingVirtual) {
-    const autoTitle = message.slice(0, 80);
-    const session = createChatSession({
-      projectId,
-      title: autoTitle,
-      runtimeProfileId,
-      runtimeSessionId: incomingVirtual.sessionId,
+    const baseSystemAppend = buildContextAppend(project.name, currentTask);
+    const runtimeResolution = await resolveChatRuntimeAdapter(projectId, message, baseSystemAppend);
+    const runtimeContext = runtimeResolution.context;
+    const adapter = runtimeContext.adapter;
+    runtimeId = runtimeContext.resolvedProfile.runtimeId;
+    runtimeProfileId = runtimeContext.resolvedProfile.profileId;
+    runtimeProviderId = runtimeContext.resolvedProfile.providerId;
+    const chatRuntimeCaps = resolveAdapterCapabilities(
+      adapter,
+      runtimeContext.resolvedProfile.transport,
+    );
+    const systemAppend = buildContextAppend(project.name, currentTask, {
+      interactiveQuestions: chatRuntimeCaps.supportsInteractiveQuestions === true,
     });
-    if (session) {
-      chatSessionId = session.id;
-      updateChatSession(session.id, {
+
+    // Resolve or auto-create a chat session
+    chatSessionId = inputSessionId ?? null;
+    const incomingVirtual = chatSessionId ? parseVirtualRuntimeSessionId(chatSessionId) : null;
+
+    // External runtime sessions are virtual — create a DB session linked to the runtime session
+    if (incomingVirtual) {
+      const autoTitle = message.slice(0, 80);
+      const session = createChatSession({
+        projectId,
+        title: autoTitle,
         runtimeProfileId,
         runtimeSessionId: incomingVirtual.sessionId,
       });
-      broadcast({ type: "chat:session_created", payload: toChatSessionResponse(session) });
-    } else {
-      chatSessionId = null;
+      if (session) {
+        chatSessionId = session.id;
+        updateChatSession(session.id, {
+          runtimeProfileId,
+          runtimeSessionId: incomingVirtual.sessionId,
+        });
+        broadcast({ type: "chat:session_created", payload: toChatSessionResponse(session) });
+      } else {
+        chatSessionId = null;
+      }
+    } else if (chatSessionId) {
+      const existing = findChatSessionById(chatSessionId);
+      if (!existing) {
+        log.debug("Provided sessionId=%s not found, will auto-create", chatSessionId);
+        chatSessionId = null;
+      }
     }
-  } else if (chatSessionId) {
-    const existing = findChatSessionById(chatSessionId);
-    if (!existing) {
-      log.debug("Provided sessionId=%s not found, will auto-create", chatSessionId);
-      chatSessionId = null;
+
+    if (!chatSessionId) {
+      const autoTitle = message.slice(0, 80);
+      const session = createChatSession({
+        projectId,
+        title: autoTitle,
+        runtimeProfileId,
+      });
+      chatSessionId = session?.id ?? null;
+      if (session) {
+        broadcast({ type: "chat:session_created", payload: toChatSessionResponse(session) });
+      }
     }
-  }
 
-  if (!chatSessionId) {
-    const autoTitle = message.slice(0, 80);
-    const session = createChatSession({
-      projectId,
-      title: autoTitle,
-      runtimeProfileId,
-    });
-    chatSessionId = session?.id ?? null;
-    if (session) {
-      broadcast({ type: "chat:session_created", payload: toChatSessionResponse(session) });
+    log.info(
+      {
+        projectId,
+        clientId: clientId ?? null,
+        conversationId: chatConversationId,
+        sessionId: chatSessionId,
+        runtimeId,
+        runtimeProfileId,
+        runtimeProviderId,
+        logNamespace: API_RUNTIME_LOG,
+        explore,
+        taskId,
+      },
+      "INFO [api-runtime] Chat request started",
+    );
+
+    const dbSession = chatSessionId ? findChatSessionById(chatSessionId) : null;
+    const resumeRuntimeSessionId =
+      dbSession?.runtimeSessionId ?? dbSession?.agentSessionId ?? undefined;
+
+    if (chatSessionId && !attachments?.length) {
+      createChatMessage({ sessionId: chatSessionId, role: "user", content: message });
     }
-  }
+    if (chatSessionId) {
+      updateChatSessionTimestamp(chatSessionId);
+    }
 
-  const chatConversationId = conversationId ?? crypto.randomUUID();
-  log.info(
-    {
-      projectId,
-      clientId: clientId ?? null,
-      conversationId: chatConversationId,
-      sessionId: chatSessionId,
-      runtimeId,
-      runtimeProfileId,
-      runtimeProviderId,
-      logNamespace: API_RUNTIME_LOG,
-      explore,
-      taskId,
-    },
-    "INFO [api-runtime] Chat request started",
-  );
-
-  const dbSession = chatSessionId ? findChatSessionById(chatSessionId) : null;
-  const resumeRuntimeSessionId =
-    dbSession?.runtimeSessionId ?? dbSession?.agentSessionId ?? undefined;
-
-  if (chatSessionId && !attachments?.length) {
-    createChatMessage({ sessionId: chatSessionId, role: "user", content: message });
-  }
-  if (chatSessionId) {
-    updateChatSessionTimestamp(chatSessionId);
-  }
-
-  try {
     // Persist file attachments to disk and build prompt with paths
     let prompt = explore ? `/aif-explore ${message}` : message;
-    let savedAttachments: ChatMessageAttachment[] | undefined;
     if (attachments?.length && chatSessionId) {
       const persisted = await persistAttachments(attachments, {
         projectRoot: project.rootPath,
@@ -1038,6 +1098,7 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
       for (const block of pendingQuestionBlocks) {
         sendToken(block);
         assistantSegments.push({ type: "question", content: block });
+        fullAssistantResponse = assistantSegments.map((segment) => segment.content).join("");
       }
       pendingQuestionBlocks.length = 0;
     };
@@ -1048,6 +1109,7 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
         streamedTextLength += event.message.length;
         streamedText += event.message;
         mergeAdjacentTextSegment(assistantSegments, event.message);
+        fullAssistantResponse = assistantSegments.map((segment) => segment.content).join("");
         sendToken(event.message);
         return;
       }
@@ -1101,6 +1163,18 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
         );
         sendToken(`\n\n> 🔧 ${toolName}\n\n`);
       }
+
+      // Capture the runtime session id as soon as the adapter emits it, so
+      // the abort branch can persist a DB→runtime session link even when
+      // adapter.run() never resolves. Without this, aborting the first turn
+      // of a fresh chat would leave the DB session without runtimeSessionId
+      // and the next turn would dispatch with no resume context.
+      if (event.type === "system:init" && event.data) {
+        const sid = event.data.sessionId;
+        if (typeof sid === "string" && sid) {
+          runtimeSessionIdFromEvents = sid;
+        }
+      }
     };
 
     const runInput: RuntimeRunInput = {
@@ -1142,6 +1216,7 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
         onEvent: onRuntimeEvent,
         systemPromptAppend: systemAppend,
         bypassPermissions,
+        abortController,
         environment: {
           HANDOFF_MODE: "1",
           ...(taskId ? { HANDOFF_TASK_ID: taskId } : {}),
@@ -1211,7 +1286,7 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
     }
     flushPendingQuestionBlocks();
 
-    const fullAssistantResponse = assistantSegments.map((segment) => segment.content).join("");
+    fullAssistantResponse = assistantSegments.map((segment) => segment.content).join("");
 
     // Persist each ordered assistant segment separately. Keeping the same
     // split shape as runtime replay makes mergeRuntimeAndDbMessages stable.
@@ -1258,6 +1333,69 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
       ...(savedAttachments?.length ? { attachments: savedAttachments } : {}),
     });
   } catch (err) {
+    const aborted = abortController.signal.aborted || isAbortError(err);
+    if (aborted) {
+      // Persist any tokens streamed before the abort so the partial assistant
+      // reply survives reload. Without this, a fresh session stopped mid-stream
+      // would lose visible output.
+      const partial = fullAssistantResponse.trim();
+      if (chatSessionId && partial) {
+        createChatMessage({ sessionId: chatSessionId, role: "assistant", content: partial });
+        updateChatSessionTimestamp(chatSessionId);
+      }
+      // Link the DB chat session to the runtime session the adapter started
+      // before we aborted, so the next turn can resume instead of starting
+      // a brand-new runtime thread and losing continuity.
+      if (chatSessionId && runtimeSessionIdFromEvents) {
+        updateChatSession(chatSessionId, {
+          runtimeProfileId: runtimeProfileId ?? null,
+          runtimeSessionId: runtimeSessionIdFromEvents,
+        });
+      }
+      log.info(
+        {
+          runtimeId,
+          runtimeProfileId,
+          conversationId: chatConversationId,
+          partial: partial.length,
+          runtimeSessionId: runtimeSessionIdFromEvents,
+        },
+        "INFO [chat-route] Chat run aborted",
+      );
+      const abortedEvent: WsEvent = {
+        type: "chat:error",
+        payload: {
+          conversationId: chatConversationId,
+          message: "Chat run aborted by user",
+          code: "aborted",
+        },
+      };
+      const doneEvent: WsEvent = {
+        type: "chat:done",
+        payload: { conversationId: chatConversationId },
+      };
+      if (clientId) {
+        sendToClient(clientId, abortedEvent);
+        sendToClient(clientId, doneEvent);
+      }
+      return c.json(
+        {
+          error: "Chat run aborted by user",
+          code: "aborted",
+          conversationId: chatConversationId,
+          sessionId: chatSessionId,
+          // Expose the partial assistant reply so clients without an active
+          // WebSocket can render what was saved server-side. Mirrors the
+          // success path's `assistantMessage`.
+          assistantMessage: partial.length > 0 ? partial : null,
+          // Echo server-resolved attachments so the optimistic user bubble
+          // can upgrade its chips with download paths even on abort.
+          ...(savedAttachments?.length ? { attachments: savedAttachments } : {}),
+        },
+        409,
+      );
+    }
+
     log.error(
       { err, runtimeId, runtimeProfileId, runtimeProviderId, conversationId: chatConversationId },
       "Chat request failed",
@@ -1285,5 +1423,7 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
     }
 
     return c.json({ error: classified.message, code: classified.code }, classified.status);
+  } finally {
+    activeChatRuns.delete(chatConversationId);
   }
 });

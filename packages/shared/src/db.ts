@@ -72,7 +72,7 @@ function ensureTables(sqlite: Database.Database): void {
       plan_docs INTEGER NOT NULL DEFAULT 0,
       plan_tests INTEGER NOT NULL DEFAULT 0,
       skip_review INTEGER NOT NULL DEFAULT 0,
-      use_subagents INTEGER NOT NULL DEFAULT 1,
+      use_subagents INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'backlog',
       priority INTEGER NOT NULL DEFAULT 0,
       position REAL NOT NULL DEFAULT 1000.0,
