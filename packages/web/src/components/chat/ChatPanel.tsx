@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { AttachmentChip } from "@/components/ui/attachment-chip";
 import { useChat } from "@/hooks/useChat";
@@ -57,6 +58,7 @@ export function ChatPanel({
 
   const {
     sessions,
+    isLoading: isLoadingSessions,
     activeSessionId,
     setActiveSessionId,
     pinActiveSession,
@@ -68,6 +70,7 @@ export function ChatPanel({
   const {
     messages,
     isStreaming,
+    isLoadingMessages,
     chatErrorCode,
     explore,
     setExplore,
@@ -347,7 +350,13 @@ export function ChatPanel({
               </div>
             </div>
           )}
-          {messages.length === 0 && (
+          {(isLoadingMessages || isLoadingSessions) && (
+            <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">
+              <Spinner size="lg" />
+              <p className="text-xs">Loading messages...</p>
+            </div>
+          )}
+          {!isLoadingMessages && !isLoadingSessions && messages.length === 0 && (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">
               <Bot className="h-8 w-8 opacity-30" />
               <p className="text-xs">
@@ -355,16 +364,18 @@ export function ChatPanel({
               </p>
             </div>
           )}
-          {messages.map((msg, i) => (
-            <MessageBubble
-              key={i}
-              message={msg}
-              projectId={projectId ?? ""}
-              sessionId={activeSessionId}
-              onTaskCreated={handleTaskCreated}
-              onOpenTask={onOpenTask}
-            />
-          ))}
+          {!isLoadingMessages &&
+            !isLoadingSessions &&
+            messages.map((msg, i) => (
+              <MessageBubble
+                key={i}
+                message={msg}
+                projectId={projectId ?? ""}
+                sessionId={activeSessionId}
+                onTaskCreated={handleTaskCreated}
+                onOpenTask={onOpenTask}
+              />
+            ))}
           {isStreaming && (
             <TypingIndicator
               hasAssistantMessage={messages[messages.length - 1]?.role === "assistant"}

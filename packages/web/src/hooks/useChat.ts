@@ -45,6 +45,7 @@ export function useChat(
 ) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [explore, setExplore] = useState(false);
   const [chatErrorCode, setChatErrorCode] = useState<string | null>(null);
   const currentSessionIdRef = useRef<string | null>(null);
@@ -120,6 +121,7 @@ export function useChat(
           setMessages([]);
           setChatErrorCode(null);
           setIsStreaming(false);
+          setIsLoadingMessages(false);
         });
       }
       return;
@@ -136,11 +138,17 @@ export function useChat(
       setMessages(streamState.messages);
       setIsStreaming(true);
       setChatErrorCode(null);
+      setIsLoadingMessages(false);
       return;
     }
 
-    // Otherwise load from server
-    queueMicrotask(() => setIsStreaming(false));
+    // Otherwise load from server — clear stale content and show spinner
+    queueMicrotask(() => {
+      setIsStreaming(false);
+      setMessages([]);
+      setChatErrorCode(null);
+      setIsLoadingMessages(true);
+    });
     console.debug("[useChat] Loading session messages sessionId=%s", sessionId);
 
     api
@@ -149,6 +157,7 @@ export function useChat(
         if (currentSessionIdRef.current !== sessionId) return;
         if (isSessionStreaming(sessionId)) {
           console.debug("[useChat] Skipping session load — streaming in progress");
+          setIsLoadingMessages(false);
           return;
         }
         console.debug("[useChat] Session changed, loaded %d messages", msgs.length);
@@ -160,9 +169,13 @@ export function useChat(
           })),
         );
         setChatErrorCode(null);
+        setIsLoadingMessages(false);
       })
       .catch((err) => {
         console.error("[useChat] Failed to load session messages:", err);
+        if (currentSessionIdRef.current === sessionId) {
+          setIsLoadingMessages(false);
+        }
       });
   }, [sessionId, isSessionStreaming]);
 
@@ -620,6 +633,7 @@ export function useChat(
   return {
     messages,
     isStreaming,
+    isLoadingMessages,
     chatErrorCode,
     explore,
     setExplore,
