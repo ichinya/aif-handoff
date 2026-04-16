@@ -708,6 +708,58 @@ describe("chat API", () => {
     expect(questionOccurrences.length).toBe(1);
   });
 
+  it("deduplicates non-consecutive tool:question re-emits with the same toolUseId", async () => {
+    mockAdapterRun.mockImplementation(async (input: RuntimeRunInput) => {
+      const onEvent = input.execution?.onEvent as
+        | ((event: Record<string, unknown>) => void)
+        | undefined;
+      onEvent?.({
+        type: "tool:question",
+        data: {
+          toolUseId: "t-repeat",
+          toolName: "AskUserQuestion",
+          questions: [{ question: "First question?", options: [{ label: "One" }] }],
+        },
+      });
+      onEvent?.({ type: "stream:text", message: "Interleaving text." });
+      onEvent?.({
+        type: "tool:question",
+        data: {
+          toolUseId: "t-other",
+          toolName: "AskUserQuestion",
+          questions: [{ question: "Second question?", options: [{ label: "Two" }] }],
+        },
+      });
+      onEvent?.({
+        type: "tool:question",
+        data: {
+          toolUseId: "t-repeat",
+          toolName: "AskUserQuestion",
+          questions: [{ question: "First question?", options: [{ label: "One" }] }],
+        },
+      });
+      return { outputText: "", sessionId: "runtime-session-1" };
+    });
+
+    const res = await app.request("/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: "project-1",
+        message: "go",
+        clientId: "client-1",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const tokenCalls = mockSendToClient.mock.calls.filter((call) => call[1]?.type === "chat:token");
+    const questions = tokenCalls.map((call) => String(call[1].payload.token)).join("");
+    const firstCount = questions.split("First question?").length - 1;
+    const secondCount = questions.split("Second question?").length - 1;
+    expect(firstCount).toBe(1);
+    expect(secondCount).toBe(1);
+  });
+
   it("persists rendered AskUserQuestion block as an assistant message so it survives reload", async () => {
     mockAdapterRun.mockImplementation(async (input: RuntimeRunInput) => {
       const onEvent = input.execution?.onEvent as
@@ -1087,6 +1139,105 @@ describe("chat API", () => {
     const body = await res.json();
     const occurrences = body.assistantMessage.split("Let me check the options.").length - 1;
     expect(occurrences).toBe(1);
+  });
+
+  it("recovers missing outputText suffix when only a partial stream:text prefix was emitted", async () => {
+    mockAdapterRun.mockImplementation(async (input: RuntimeRunInput) => {
+      const onEvent = input.execution?.onEvent as
+        | ((event: Record<string, unknown>) => void)
+        | undefined;
+      onEvent?.({ type: "stream:text", message: "Let me check" });
+      onEvent?.({
+        type: "tool:question",
+        data: {
+          toolUseId: "tool-hidden-suffix",
+          toolName: "AskUserQuestion",
+          questions: [{ question: "Pick?", options: [{ label: "A" }] }],
+        },
+      });
+      return { outputText: "Let me check the options.", sessionId: "runtime-session-1" };
+    });
+
+    const res = await app.request("/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: "project-1",
+        message: "recover",
+        clientId: "client-1",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.assistantMessage).toContain("Let me check the options.");
+    expect(body.assistantMessage.indexOf("Let me check the options.")).toBeLessThan(
+      body.assistantMessage.indexOf("Pick?"),
+    );
+
+    const tokenCalls = mockSendToClient.mock.calls.filter((call) => call[1]?.type === "chat:token");
+    const tokens = tokenCalls.map((call) => String(call[1].payload.token));
+    const introIdx = tokens.findIndex((token) => token.includes("Let me check"));
+    const recoveredSuffixIdx = tokens.findIndex((token) => token.includes(" the options."));
+    const questionIdx = tokens.findIndex((token) => token.includes("Pick?"));
+    expect(introIdx).toBeGreaterThanOrEqual(0);
+    expect(recoveredSuffixIdx).toBeGreaterThanOrEqual(0);
+    expect(questionIdx).toBeGreaterThanOrEqual(0);
+    expect(introIdx).toBeLessThan(recoveredSuffixIdx);
+    expect(recoveredSuffixIdx).toBeLessThan(questionIdx);
+  });
+
+  it("preserves text->question->text event order in websocket tokens and persisted assistant rows", async () => {
+    mockAdapterRun.mockImplementation(async (input: RuntimeRunInput) => {
+      const onEvent = input.execution?.onEvent as
+        | ((event: Record<string, unknown>) => void)
+        | undefined;
+      onEvent?.({ type: "stream:text", message: "Before question. " });
+      onEvent?.({
+        type: "tool:question",
+        data: {
+          toolUseId: "tool-order-mid",
+          toolName: "AskUserQuestion",
+          questions: [{ question: "Confirm?", options: [{ label: "Yes" }] }],
+        },
+      });
+      onEvent?.({ type: "stream:text", message: "After question." });
+      return { outputText: "Before question. After question.", sessionId: "runtime-session-1" };
+    });
+
+    const res = await app.request("/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: "project-1",
+        message: "order",
+        clientId: "client-1",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const tokenCalls = mockSendToClient.mock.calls.filter((call) => call[1]?.type === "chat:token");
+    const tokens = tokenCalls.map((call) => String(call[1].payload.token)).join("");
+    const beforeIdx = tokens.indexOf("Before question.");
+    const questionIdx = tokens.indexOf("Confirm?");
+    const afterIdx = tokens.indexOf("After question.");
+    expect(beforeIdx).toBeGreaterThanOrEqual(0);
+    expect(questionIdx).toBeGreaterThanOrEqual(0);
+    expect(afterIdx).toBeGreaterThanOrEqual(0);
+    expect(beforeIdx).toBeLessThan(questionIdx);
+    expect(questionIdx).toBeLessThan(afterIdx);
+
+    const persistedAssistantCalls = mockCreateChatMessage.mock.calls.filter(
+      (call) => (call[0] as { role: string }).role === "assistant",
+    );
+    expect(persistedAssistantCalls.length).toBe(3);
+    expect((persistedAssistantCalls[0][0] as { content: string }).content).toContain(
+      "Before question.",
+    );
+    expect((persistedAssistantCalls[1][0] as { content: string }).content).toContain("Confirm?");
+    expect((persistedAssistantCalls[2][0] as { content: string }).content).toContain(
+      "After question.",
+    );
   });
 
   it("projects tool:question events as assistant messages when reading virtual runtime session history", async () => {

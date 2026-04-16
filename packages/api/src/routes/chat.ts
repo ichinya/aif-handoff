@@ -328,6 +328,75 @@ function eventId(event: RuntimeEvent): string {
   return crypto.randomUUID();
 }
 
+type AssistantSegment = {
+  type: "text" | "question";
+  content: string;
+};
+
+function mergeAdjacentTextSegment(segments: AssistantSegment[], text: string): void {
+  if (!text) return;
+  const last = segments.at(-1);
+  if (last?.type === "text") {
+    last.content += text;
+    return;
+  }
+  segments.push({ type: "text", content: text });
+}
+
+function longestOverlapSuffixPrefix(left: string, right: string): number {
+  const max = Math.min(left.length, right.length);
+  for (let len = max; len > 0; len -= 1) {
+    if (left.endsWith(right.slice(0, len))) {
+      return len;
+    }
+  }
+  return 0;
+}
+
+function recoverMissingTextParts(
+  streamed: string,
+  outputText: string,
+): { prefix: string; suffix: string } {
+  if (!outputText) {
+    return { prefix: "", suffix: "" };
+  }
+
+  if (!streamed) {
+    return { prefix: outputText, suffix: "" };
+  }
+
+  if (outputText === streamed) {
+    return { prefix: "", suffix: "" };
+  }
+
+  const exactIndex = outputText.indexOf(streamed);
+  if (exactIndex !== -1) {
+    return {
+      prefix: outputText.slice(0, exactIndex),
+      suffix: outputText.slice(exactIndex + streamed.length),
+    };
+  }
+
+  if (outputText.startsWith(streamed)) {
+    return { prefix: "", suffix: outputText.slice(streamed.length) };
+  }
+
+  if (outputText.endsWith(streamed)) {
+    return { prefix: outputText.slice(0, outputText.length - streamed.length), suffix: "" };
+  }
+
+  const suffixOverlap = longestOverlapSuffixPrefix(streamed, outputText);
+  const appendCandidate = outputText.slice(suffixOverlap);
+  const prefixOverlap = longestOverlapSuffixPrefix(outputText, streamed);
+  const prependCandidate = outputText.slice(0, outputText.length - prefixOverlap);
+
+  if (appendCandidate.length <= prependCandidate.length) {
+    return { prefix: "", suffix: appendCandidate };
+  }
+
+  return { prefix: prependCandidate, suffix: "" };
+}
+
 /**
  * Normalize a message content string before matching it across runtime and DB
  * sources. Runtime-side content is already `.trim()`ed by extractTextContent
@@ -940,20 +1009,18 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
     }
 
     const bypassPermissions = env.AGENT_BYPASS_PERMISSIONS;
-    // Streamed assistant text and question blocks are tracked separately:
-    //   * live chat:token order must place intro text before the question
-    //     block even when the provider (e.g. Claude CLI in partial-messages
-    //     mode) emits only the tool_use during the run and the intro arrives
-    //     via `result.outputText` at the end — so we buffer rendered question
-    //     blocks and flush them after the intro is sent.
-    //   * DB persistence mirrors runtime session replay, which splits the
-    //     turn into `session-message` (text) + `tool:question` — storing two
-    //     separate assistant rows lets `mergeRuntimeAndDbMessages` dedupe by
-    //     exact trimmed-content equality instead of appending a combined row
-    //     as a third message on reload of a linked session.
+    // Preserve assistant-turn event order as text/question segments:
+    //   * question blocks are buffered and flushed before the next text delta
+    //     (or at turn end), so a stream like text→question→text stays ordered.
+    //   * recovery-path merges missing text from `result.outputText` with
+    //     streamed deltas via suffix/prefix overlap and flushes buffered
+    //     questions after recovered text, keeping intro-before-question.
+    //   * DB persistence writes each ordered segment as a separate assistant
+    //     row so replay shape matches runtime history (`session-message` +
+    //     per-question `tool:question`) and dedupe remains stable on reload.
     let streamedText = "";
     let streamedTextLength = 0;
-    let questionBlocksText = "";
+    const assistantSegments: AssistantSegment[] = [];
     const pendingQuestionBlocks: string[] = [];
 
     const sendToken = (text: string) => {
@@ -965,12 +1032,22 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
       sendToClient(clientId, tokenEvent);
     };
 
-    let lastToolPromptId: string | null = null;
+    const seenToolPromptIds = new Set<string>();
+
+    const flushPendingQuestionBlocks = () => {
+      for (const block of pendingQuestionBlocks) {
+        sendToken(block);
+        assistantSegments.push({ type: "question", content: block });
+      }
+      pendingQuestionBlocks.length = 0;
+    };
 
     const onRuntimeEvent = (event: RuntimeEvent) => {
       if (event.type === "stream:text" && event.message) {
+        flushPendingQuestionBlocks();
         streamedTextLength += event.message.length;
         streamedText += event.message;
+        mergeAdjacentTextSegment(assistantSegments, event.message);
         sendToken(event.message);
         return;
       }
@@ -983,7 +1060,7 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
       if (event.type === "tool:question") {
         const payload = event.data as unknown as RuntimeToolQuestionPayload | undefined;
         if (!payload) return;
-        if (payload.toolUseId && payload.toolUseId === lastToolPromptId) return;
+        if (payload.toolUseId && seenToolPromptIds.has(payload.toolUseId)) return;
         const rendered = formatToolQuestion(payload);
         if (rendered) {
           log.debug(
@@ -995,8 +1072,7 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
             "DEBUG [chat] tool:question rendered",
           );
           pendingQuestionBlocks.push(rendered);
-          questionBlocksText += rendered;
-          if (payload.toolUseId) lastToolPromptId = payload.toolUseId;
+          if (payload.toolUseId) seenToolPromptIds.add(payload.toolUseId);
         }
         return;
       }
@@ -1117,46 +1193,38 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
     }
 
     // Recover assistant text that never arrived as `stream:text` deltas.
-    // Claude CLI in partial-messages mode accumulates text assistant-blocks
-    // into `result.outputText` but doesn't re-emit them as `stream:text` once
-    // the block is complete (to avoid delta/block duplication). If a turn
-    // mixes text + AskUserQuestion, the live stream carries only the question
-    // (buffered above) while the intro text sits in `outputText`. Flush the
-    // intro first, then the buffered question blocks, so live chat:token
-    // order matches the final HTTP/DB order (intro → question).
-    if (streamedTextLength === 0 && result.outputText) {
+    // Claude CLI partial-messages can emit a mix where only part of assistant
+    // text arrives as deltas and the rest remains in `result.outputText`.
+    // Merge missing prefix/suffix fragments and emit them before any pending
+    // question blocks to keep intro-before-question ordering.
+    const recovered = recoverMissingTextParts(streamedText, result.outputText ?? "");
+    if (recovered.prefix) {
+      mergeAdjacentTextSegment(assistantSegments, recovered.prefix);
+      sendToken(recovered.prefix);
+    }
+    if (recovered.suffix) {
+      mergeAdjacentTextSegment(assistantSegments, recovered.suffix);
+      sendToken(recovered.suffix);
+    }
+    if (streamedTextLength === 0 && !streamedText && result.outputText) {
       streamedText = result.outputText;
-      sendToken(result.outputText);
     }
-    for (const block of pendingQuestionBlocks) {
-      sendToken(block);
-    }
+    flushPendingQuestionBlocks();
 
-    const fullAssistantResponse = streamedText + questionBlocksText;
+    const fullAssistantResponse = assistantSegments.map((segment) => segment.content).join("");
 
-    // Persist assistant response in local chat history for both fresh and
-    // resumed runtime sessions. Trim leading/trailing whitespace so the stored
-    // content matches what Claude's session-file parser returns (which does
-    // `.trim()`), keeping mergeRuntimeAndDbMessages dedupe consistent on page
-    // reload. Split intro and question into separate DB rows so the stored
-    // shape mirrors Claude replay's split of the assistant turn into a
-    // `session-message` plus a `tool:question`; a combined row would fail the
-    // exact-content match in the merger and surface as a third duplicate.
-    const trimmedStreamedText = streamedText.trim();
-    const trimmedQuestionBlocks = questionBlocksText.trim();
-    if (chatSessionId && trimmedStreamedText) {
-      createChatMessage({
-        sessionId: chatSessionId,
-        role: "assistant",
-        content: trimmedStreamedText,
-      });
-    }
-    if (chatSessionId && trimmedQuestionBlocks) {
-      createChatMessage({
-        sessionId: chatSessionId,
-        role: "assistant",
-        content: trimmedQuestionBlocks,
-      });
+    // Persist each ordered assistant segment separately. Keeping the same
+    // split shape as runtime replay makes mergeRuntimeAndDbMessages stable.
+    if (chatSessionId) {
+      for (const segment of assistantSegments) {
+        const trimmed = segment.content.trim();
+        if (!trimmed) continue;
+        createChatMessage({
+          sessionId: chatSessionId,
+          role: "assistant",
+          content: trimmed,
+        });
+      }
     }
     if (chatSessionId) {
       updateChatSessionTimestamp(chatSessionId);
