@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { Project, RuntimeProfile } from "@aif/shared/browser";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Select } from "@/components/ui/select";
@@ -13,6 +14,7 @@ import {
   useValidateRuntimeProfile,
 } from "@/hooks/useRuntimeProfiles";
 import { RuntimeProfileForm } from "@/components/settings/RuntimeProfileForm";
+import { getRuntimeLimitDisplay, runtimeLimitBadgeClassName } from "@/lib/runtimeLimits";
 
 interface Props {
   project: Project;
@@ -268,9 +270,9 @@ export function ProjectRuntimeSettings({
             {profiles.map((profile) => (
               <div
                 key={profile.id}
-                className="flex items-center justify-between rounded border border-border bg-background/40 px-2 py-1.5"
+                className="flex items-start justify-between rounded border border-border bg-background/40 px-2 py-1.5"
               >
-                <div>
+                <div className="min-w-0 pr-3">
                   <p className="text-xs font-medium">
                     {profile.name}{" "}
                     <span className="text-muted-foreground">
@@ -281,6 +283,40 @@ export function ProjectRuntimeSettings({
                     transport={profile.transport ?? "default"} model=
                     {profile.defaultModel ?? "auto"} {profile.enabled ? "" : "disabled"}
                   </p>
+                  {(() => {
+                    const limitDisplay = getRuntimeLimitDisplay(profile.runtimeLimitSnapshot, {
+                      checkedAt: profile.runtimeLimitUpdatedAt ?? null,
+                    });
+                    if (!limitDisplay) {
+                      return (
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          No recent runtime limit signal.
+                        </p>
+                      );
+                    }
+                    return (
+                      <div className="mt-1 space-y-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <Badge
+                            size="sm"
+                            className={runtimeLimitBadgeClassName(limitDisplay.tone)}
+                          >
+                            {limitDisplay.label.toUpperCase()}
+                          </Badge>
+                          <span className="text-[11px] text-muted-foreground">
+                            {limitDisplay.summary}
+                          </span>
+                        </div>
+                        {(limitDisplay.resetText || limitDisplay.checkedText) && (
+                          <p className="text-[11px] text-muted-foreground">
+                            {[limitDisplay.resetText, limitDisplay.checkedText]
+                              .filter(Boolean)
+                              .join(" ")}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
                 <div className="flex items-center gap-1">
                   <Button

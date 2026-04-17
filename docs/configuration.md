@@ -114,6 +114,21 @@ Only non-secret fields are persisted (`baseUrl`, `apiKeyEnvVar`, headers/options
 
 For concrete profile payloads and adapter capability differences, see [Providers](providers.md).
 
+### Runtime-Limit Auto-Pause
+
+Runtime-limit auto-pause does not currently have its own environment toggle. The behavior is driven by provider/runtime signals persisted on runtime profiles:
+
+- exact quota sources (for example provider/API headers) can proactively block new work when the configured safety threshold has already been crossed;
+- heuristic sources (for example provider SDK status events) only block when the provider explicitly reports the runtime as unavailable;
+- reset/resume timing comes from persisted `resetAt` / `retryAfterSeconds` metadata when available, falling back to legacy backoff only when no structured hint exists.
+
+SQLite is the source of truth for this state:
+
+- `runtime_profiles.runtime_limit_snapshot_json` stores the latest authoritative profile-level snapshot;
+- `tasks.runtime_limit_snapshot_json` stores the task-level copy used by blocked-task UI and audit trails.
+
+Short-lived in-memory caches only dedupe repeated writes and provider refresh attempts; they do not replace persisted state.
+
 ## Project Language
 
 `.ai-factory/config.yaml` carries a `language` block that controls the language AI produces for

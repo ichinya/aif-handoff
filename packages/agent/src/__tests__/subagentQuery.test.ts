@@ -3,6 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const queryMock = vi.fn();
 const logActivityMock = vi.fn();
 const incrementTaskTokenUsageMock = vi.fn();
+const persistRuntimeProfileLimitSnapshotMock = vi.fn();
+const clearRuntimeProfileLimitSnapshotMock = vi.fn();
+const notifyProjectRuntimeLimitBroadcastMock = vi.fn();
 const saveTaskSessionIdMock = vi.fn();
 const getTaskSessionIdMock = vi.fn(() => null);
 
@@ -55,9 +58,11 @@ vi.mock("@aif/data", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@aif/data")>();
   return {
     ...actual,
+    clearRuntimeProfileLimitSnapshot: clearRuntimeProfileLimitSnapshotMock,
     incrementTaskTokenUsage: incrementTaskTokenUsageMock,
     updateTaskHeartbeat: vi.fn(),
     renewTaskClaim: vi.fn(),
+    persistRuntimeProfileLimitSnapshot: persistRuntimeProfileLimitSnapshotMock,
     saveTaskSessionId: saveTaskSessionIdMock,
     getTaskSessionId: getTaskSessionIdMock,
     findTaskById: findTaskByIdMock,
@@ -134,6 +139,11 @@ vi.mock("../stderrCollector.js", () => ({
   }),
 }));
 
+vi.mock("../notifier.js", () => ({
+  notifyProjectRuntimeLimitBroadcast: (...args: unknown[]) =>
+    notifyProjectRuntimeLimitBroadcastMock(...args),
+}));
+
 const { executeSubagentQuery } = await import("../subagentQuery.js");
 
 function makeDelayedSuccess(delayMs: number, result: string) {
@@ -173,6 +183,9 @@ describe("executeSubagentQuery attribution", () => {
     queryMock.mockReset();
     logActivityMock.mockReset();
     incrementTaskTokenUsageMock.mockReset();
+    persistRuntimeProfileLimitSnapshotMock.mockReset();
+    clearRuntimeProfileLimitSnapshotMock.mockReset();
+    notifyProjectRuntimeLimitBroadcastMock.mockReset();
     saveTaskSessionIdMock.mockReset();
     getTaskSessionIdMock.mockReset();
     findTaskByIdMock.mockReset();
@@ -236,6 +249,9 @@ describe("executeSubagentQuery query_start_timeout retry", () => {
     queryMock.mockReset();
     logActivityMock.mockReset();
     incrementTaskTokenUsageMock.mockReset();
+    persistRuntimeProfileLimitSnapshotMock.mockReset();
+    clearRuntimeProfileLimitSnapshotMock.mockReset();
+    notifyProjectRuntimeLimitBroadcastMock.mockReset();
     saveTaskSessionIdMock.mockReset();
     getTaskSessionIdMock.mockReset();
     findTaskByIdMock.mockReset();
@@ -284,6 +300,9 @@ describe("executeSubagentQuery session persistence policy", () => {
     queryMock.mockReset();
     logActivityMock.mockReset();
     incrementTaskTokenUsageMock.mockReset();
+    persistRuntimeProfileLimitSnapshotMock.mockReset();
+    clearRuntimeProfileLimitSnapshotMock.mockReset();
+    notifyProjectRuntimeLimitBroadcastMock.mockReset();
     saveTaskSessionIdMock.mockReset();
     getTaskSessionIdMock.mockReset();
     findTaskByIdMock.mockReset();
@@ -339,6 +358,112 @@ describe("executeSubagentQuery session persistence policy", () => {
   });
 });
 
+describe("executeSubagentQuery runtime limit state refresh", () => {
+  beforeEach(() => {
+    (globalThis as { __AIF_CLAUDE_QUERY_MOCK__?: typeof queryMock }).__AIF_CLAUDE_QUERY_MOCK__ =
+      queryMock;
+    queryMock.mockReset();
+    logActivityMock.mockReset();
+    incrementTaskTokenUsageMock.mockReset();
+    persistRuntimeProfileLimitSnapshotMock.mockReset();
+    clearRuntimeProfileLimitSnapshotMock.mockReset();
+    notifyProjectRuntimeLimitBroadcastMock.mockReset();
+    saveTaskSessionIdMock.mockReset();
+    getTaskSessionIdMock.mockReset();
+    findTaskByIdMock.mockReset();
+    resolveEffectiveRuntimeProfileMock.mockReset();
+    getTaskSessionIdMock.mockReturnValue(null);
+    findTaskByIdMock.mockReturnValue({
+      id: "task-1",
+      projectId: "project-1",
+      runtimeOptionsJson: null,
+      modelOverride: null,
+    });
+    resolveEffectiveRuntimeProfileMock.mockReturnValue({
+      source: "project_default",
+      profile: {
+        id: "profile-1",
+        runtimeId: "claude",
+        providerId: "anthropic",
+        defaultModel: null,
+      },
+      taskRuntimeProfileId: null,
+      projectRuntimeProfileId: "profile-1",
+      systemRuntimeProfileId: null,
+    });
+  });
+
+  it("persists runtime profile limit snapshots from Claude rate_limit_event", async () => {
+    queryMock.mockImplementation(async function* () {
+      yield {
+        type: "rate_limit_event",
+        rate_limit_info: {
+          status: "allowed_warning",
+          rateLimitType: "five_hour",
+          utilization: 0.96,
+          resetsAt: 1_776_389_600,
+        },
+      };
+      yield {
+        type: "result",
+        subtype: "success",
+        result: "done",
+        usage: {},
+        total_cost_usd: 0,
+      };
+    });
+
+    await executeSubagentQuery({
+      taskId: "task-limit",
+      projectRoot: "/tmp/project",
+      agentName: "implement-coordinator",
+      prompt: "run",
+      workflowKind: "implementer",
+    });
+
+    expect(persistRuntimeProfileLimitSnapshotMock).toHaveBeenCalledTimes(1);
+    expect(persistRuntimeProfileLimitSnapshotMock).toHaveBeenCalledWith(
+      "profile-1",
+      expect.objectContaining({
+        status: "warning",
+        source: "sdk_event",
+        profileId: "profile-1",
+        runtimeId: "claude",
+        providerId: "anthropic",
+      }),
+      expect.any(String),
+    );
+    expect(clearRuntimeProfileLimitSnapshotMock).not.toHaveBeenCalled();
+    expect(notifyProjectRuntimeLimitBroadcastMock).toHaveBeenCalledWith("project-1", "profile-1", {
+      taskId: "task-limit",
+    });
+  });
+
+  it("preserves runtime profile limit state after successful runs without limit metadata", async () => {
+    queryMock.mockImplementation(async function* () {
+      yield {
+        type: "result",
+        subtype: "success",
+        result: "done",
+        usage: {},
+        total_cost_usd: 0,
+      };
+    });
+
+    await executeSubagentQuery({
+      taskId: "task-clear-limit",
+      projectRoot: "/tmp/project",
+      agentName: "implement-coordinator",
+      prompt: "run",
+      workflowKind: "implementer",
+    });
+
+    expect(clearRuntimeProfileLimitSnapshotMock).not.toHaveBeenCalled();
+    expect(persistRuntimeProfileLimitSnapshotMock).not.toHaveBeenCalled();
+    expect(notifyProjectRuntimeLimitBroadcastMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("executeSubagentQuery model fallback policy", () => {
   beforeEach(() => {
     (globalThis as { __AIF_CLAUDE_QUERY_MOCK__?: typeof queryMock }).__AIF_CLAUDE_QUERY_MOCK__ =
@@ -346,6 +471,8 @@ describe("executeSubagentQuery model fallback policy", () => {
     queryMock.mockReset();
     logActivityMock.mockReset();
     incrementTaskTokenUsageMock.mockReset();
+    persistRuntimeProfileLimitSnapshotMock.mockReset();
+    clearRuntimeProfileLimitSnapshotMock.mockReset();
     saveTaskSessionIdMock.mockReset();
     getTaskSessionIdMock.mockReset();
     findTaskByIdMock.mockReset();

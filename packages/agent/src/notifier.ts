@@ -11,6 +11,7 @@ export interface TaskNotificationInfo {
 }
 
 type ProjectBroadcastType = "project:auto_queue_mode_changed" | "project:auto_queue_advanced";
+type RuntimeLimitBroadcastType = "project:runtime_limit_updated";
 
 /** Best-effort project-scoped WS broadcast via the API. */
 export async function notifyProjectBroadcast(
@@ -36,6 +37,43 @@ export async function notifyProjectBroadcast(
     }
   } catch (err) {
     log.warn({ projectId, type, err, url }, "Project broadcast request failed");
+  }
+}
+
+export async function notifyProjectRuntimeLimitBroadcast(
+  projectId: string,
+  runtimeProfileId: string | null,
+  info: { taskId?: string | null } = {},
+): Promise<void> {
+  const baseUrl = getEnv().API_BASE_URL;
+  const type: RuntimeLimitBroadcastType = "project:runtime_limit_updated";
+  const url = `${baseUrl}/projects/${projectId}/broadcast`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type,
+        taskId: info.taskId ?? null,
+        runtimeProfileId,
+      }),
+    });
+    if (res.ok) {
+      log.info(
+        { projectId, type, taskId: info.taskId ?? null, runtimeProfileId },
+        "Runtime limit broadcast sent",
+      );
+    } else {
+      log.warn(
+        { projectId, type, taskId: info.taskId ?? null, runtimeProfileId, status: res.status, url },
+        "Runtime limit broadcast request returned non-OK status",
+      );
+    }
+  } catch (err) {
+    log.warn(
+      { projectId, type, taskId: info.taskId ?? null, runtimeProfileId, err, url },
+      "Runtime limit broadcast request failed",
+    );
   }
 }
 

@@ -102,6 +102,8 @@ function ensureTables(sqlite: Database.Database): void {
       model_override TEXT,
       runtime_options_json TEXT,
       session_id TEXT,
+      runtime_limit_snapshot_json TEXT,
+      runtime_limit_updated_at TEXT,
       locked_by TEXT,
       locked_until TEXT,
       scheduled_at TEXT,
@@ -133,6 +135,8 @@ function ensureTables(sqlite: Database.Database): void {
       headers_json TEXT NOT NULL DEFAULT '{}',
       options_json TEXT NOT NULL DEFAULT '{}',
       enabled INTEGER NOT NULL DEFAULT 1,
+      runtime_limit_snapshot_json TEXT,
+      runtime_limit_updated_at TEXT,
       created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
       updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     )
@@ -401,6 +405,16 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE projects ADD COLUMN auto_queue_mode INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    version: 13,
+    description: "Persist runtime limit snapshots on runtime_profiles and tasks",
+    sql: `
+      ALTER TABLE runtime_profiles ADD COLUMN runtime_limit_snapshot_json TEXT;
+      ALTER TABLE runtime_profiles ADD COLUMN runtime_limit_updated_at TEXT;
+      ALTER TABLE tasks ADD COLUMN runtime_limit_snapshot_json TEXT;
+      ALTER TABLE tasks ADD COLUMN runtime_limit_updated_at TEXT;
+    `,
+  },
 ];
 
 function splitSqlStatements(sqlText: string): string[] {
@@ -556,6 +570,40 @@ function runRuntimeBackfills(sqlite: Database.Database): void {
     log.info(
       { backfilledRows: manualReviewBackfill.changes },
       "Backfilled task manual_review_required defaults",
+    );
+  }
+
+  if (hasColumn(sqlite, "runtime_profiles", "runtime_limit_snapshot_json")) {
+    const runtimeProfileLimitBackfill = sqlite
+      .prepare(
+        `
+        UPDATE runtime_profiles
+        SET runtime_limit_snapshot_json = NULL
+        WHERE runtime_limit_snapshot_json IS NOT NULL
+          AND trim(runtime_limit_snapshot_json) = ''
+      `,
+      )
+      .run();
+    log.info(
+      { backfilledRows: runtimeProfileLimitBackfill.changes },
+      "Backfilled runtime profile empty runtime_limit_snapshot_json values",
+    );
+  }
+
+  if (hasColumn(sqlite, "tasks", "runtime_limit_snapshot_json")) {
+    const taskLimitBackfill = sqlite
+      .prepare(
+        `
+        UPDATE tasks
+        SET runtime_limit_snapshot_json = NULL
+        WHERE runtime_limit_snapshot_json IS NOT NULL
+          AND trim(runtime_limit_snapshot_json) = ''
+      `,
+      )
+      .run();
+    log.info(
+      { backfilledRows: taskLimitBackfill.changes },
+      "Backfilled task empty runtime_limit_snapshot_json values",
     );
   }
 }

@@ -7,9 +7,14 @@ import {
   redactResolvedRuntimeProfile,
   resolveAdapterCapabilities,
   resolveRuntimeProfile,
+  RUNTIME_LIMIT_EVENT_TYPE,
+  RuntimeExecutionError,
   RUNTIME_TRUST_TOKEN,
   type RuntimeRunResult,
   type RuntimeCapabilityName,
+  type RuntimeEvent,
+  type RuntimeLimitEventPayload,
+  type RuntimeLimitSnapshot,
   type ResolvedRuntimeProfile,
   type RuntimeAdapter,
   type RuntimeModelDiscoveryService,
@@ -19,19 +24,23 @@ import {
 } from "@aif/runtime";
 import { getEnv, logger } from "@aif/shared";
 import {
+  clearRuntimeProfileLimitSnapshot,
   createDbUsageSink,
   findProjectById,
   findRuntimeProfileById,
   findTaskById,
+  persistRuntimeProfileLimitSnapshot,
   resolveEffectiveRuntimeProfile,
   toRuntimeProfileResponse,
   type ProjectRow,
 } from "@aif/data";
+import { broadcast } from "../ws.js";
 
 const log = logger("api-runtime");
 
 let runtimeRegistryPromise: Promise<RuntimeRegistry> | null = null;
 let modelDiscoveryService: RuntimeModelDiscoveryService | null = null;
+const runtimeLimitStateCache = createRuntimeMemoryCache<string>({ defaultTtlMs: 30_000 });
 
 export async function getApiRuntimeRegistry(): Promise<RuntimeRegistry> {
   if (!runtimeRegistryPromise) {
@@ -81,6 +90,224 @@ export async function getApiRuntimeModelDiscoveryService(): Promise<RuntimeModel
     });
   }
   return modelDiscoveryService;
+}
+
+function extractRuntimeLimitSnapshotFromEvent(event: RuntimeEvent): RuntimeLimitSnapshot | null {
+  if (event.type !== RUNTIME_LIMIT_EVENT_TYPE) return null;
+
+  const payload = event.data as RuntimeLimitEventPayload | undefined;
+  const snapshot = payload?.snapshot;
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
+    log.warn(
+      {
+        eventType: event.type,
+        runtimeEventTimestamp: event.timestamp,
+      },
+      "Dropped runtime limit event with malformed snapshot payload",
+    );
+    return null;
+  }
+  return snapshot;
+}
+
+export function observeRuntimeLimitEvent(
+  event: RuntimeEvent,
+  currentSnapshot: RuntimeLimitSnapshot | null,
+  logContext: Record<string, unknown> = {},
+): RuntimeLimitSnapshot | null {
+  const snapshot = extractRuntimeLimitSnapshotFromEvent(event);
+  if (!snapshot) return currentSnapshot;
+
+  log.debug(
+    {
+      ...logContext,
+      runtimeId: snapshot.runtimeId ?? null,
+      providerId: snapshot.providerId,
+      profileId: snapshot.profileId ?? null,
+      status: snapshot.status,
+      precision: snapshot.precision,
+      source: snapshot.source,
+      resetAt: snapshot.resetAt ?? null,
+    },
+    "Observed runtime limit event during API execution",
+  );
+  return snapshot;
+}
+
+export function extractLatestRuntimeLimitSnapshot(
+  events: RuntimeEvent[] | null | undefined,
+): RuntimeLimitSnapshot | null {
+  if (!events?.length) return null;
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const snapshot = extractRuntimeLimitSnapshotFromEvent(events[index]!);
+    if (snapshot) return snapshot;
+  }
+  return null;
+}
+
+export function extractRuntimeLimitSnapshotFromError(error: unknown): RuntimeLimitSnapshot | null {
+  if (error instanceof RuntimeExecutionError && error.limitSnapshot) {
+    return error.limitSnapshot;
+  }
+  if (error instanceof Error && "cause" in error && error.cause) {
+    return extractRuntimeLimitSnapshotFromError(error.cause);
+  }
+  return null;
+}
+
+function buildRuntimeLimitCacheSignature(
+  snapshot: RuntimeLimitSnapshot | null,
+  clearOnMissing: boolean,
+): string | null {
+  if (snapshot) {
+    return `persist:${JSON.stringify(snapshot)}`;
+  }
+  if (clearOnMissing) {
+    return "clear";
+  }
+  return null;
+}
+
+function broadcastRuntimeLimitUpdate(input: {
+  projectId?: string | null;
+  taskId?: string | null;
+  runtimeProfileId: string;
+}): void {
+  const projectId = input.projectId ?? null;
+  if (!projectId) {
+    log.debug(
+      {
+        runtimeProfileId: input.runtimeProfileId,
+        taskId: input.taskId ?? null,
+      },
+      "Skipping runtime limit WS broadcast because no project is associated",
+    );
+    return;
+  }
+
+  broadcast({
+    type: "project:runtime_limit_updated",
+    payload: {
+      projectId,
+      runtimeProfileId: input.runtimeProfileId,
+      taskId: input.taskId ?? null,
+    },
+  });
+}
+
+export function refreshRuntimeProfileLimitState(input: {
+  runtimeProfileId?: string | null;
+  runtimeId?: string | null;
+  providerId?: string | null;
+  snapshot?: RuntimeLimitSnapshot | null;
+  clearOnMissing?: boolean;
+  taskId?: string | null;
+  projectId?: string | null;
+  conversationId?: string | null;
+  workflowKind?: string | null;
+  reason: string;
+}): void {
+  const runtimeProfileId = input.runtimeProfileId ?? input.snapshot?.profileId ?? null;
+  if (!runtimeProfileId) {
+    log.debug(
+      {
+        runtimeId: input.runtimeId ?? input.snapshot?.runtimeId ?? null,
+        providerId: input.providerId ?? input.snapshot?.providerId ?? null,
+        taskId: input.taskId ?? null,
+        projectId: input.projectId ?? null,
+        conversationId: input.conversationId ?? null,
+        workflowKind: input.workflowKind ?? null,
+        reason: input.reason,
+      },
+      "Skipping runtime limit state refresh because no runtime profile is associated",
+    );
+    return;
+  }
+
+  const signature = buildRuntimeLimitCacheSignature(
+    input.snapshot ?? null,
+    input.clearOnMissing === true,
+  );
+  if (!signature) {
+    log.debug(
+      {
+        runtimeProfileId,
+        runtimeId: input.runtimeId ?? input.snapshot?.runtimeId ?? null,
+        providerId: input.providerId ?? input.snapshot?.providerId ?? null,
+        taskId: input.taskId ?? null,
+        projectId: input.projectId ?? null,
+        conversationId: input.conversationId ?? null,
+        workflowKind: input.workflowKind ?? null,
+        reason: input.reason,
+      },
+      "No runtime limit snapshot or clear action available for refresh",
+    );
+    return;
+  }
+
+  const cachedSignature = runtimeLimitStateCache.get(runtimeProfileId);
+  if (cachedSignature === signature) {
+    log.debug(
+      {
+        runtimeProfileId,
+        runtimeId: input.runtimeId ?? input.snapshot?.runtimeId ?? null,
+        providerId: input.providerId ?? input.snapshot?.providerId ?? null,
+        taskId: input.taskId ?? null,
+        projectId: input.projectId ?? null,
+        conversationId: input.conversationId ?? null,
+        workflowKind: input.workflowKind ?? null,
+        reason: input.reason,
+      },
+      "Skipped runtime limit state refresh because identical state is still cached",
+    );
+    return;
+  }
+
+  const persistedAt = new Date().toISOString();
+  log.debug(
+    {
+      runtimeProfileId,
+      runtimeId: input.runtimeId ?? input.snapshot?.runtimeId ?? null,
+      providerId: input.providerId ?? input.snapshot?.providerId ?? null,
+      taskId: input.taskId ?? null,
+      projectId: input.projectId ?? null,
+      conversationId: input.conversationId ?? null,
+      workflowKind: input.workflowKind ?? null,
+      reason: input.reason,
+      cacheHit: false,
+      action: input.snapshot ? "persist" : "clear",
+    },
+    "Refreshing runtime profile limit state",
+  );
+
+  try {
+    if (input.snapshot) {
+      persistRuntimeProfileLimitSnapshot(runtimeProfileId, input.snapshot, persistedAt);
+    } else {
+      clearRuntimeProfileLimitSnapshot(runtimeProfileId, persistedAt);
+    }
+    runtimeLimitStateCache.set(runtimeProfileId, signature);
+    broadcastRuntimeLimitUpdate({
+      projectId: input.projectId ?? null,
+      taskId: input.taskId ?? null,
+      runtimeProfileId,
+    });
+  } catch (error) {
+    log.warn(
+      {
+        err: error,
+        runtimeProfileId,
+        runtimeId: input.runtimeId ?? input.snapshot?.runtimeId ?? null,
+        providerId: input.providerId ?? input.snapshot?.providerId ?? null,
+        taskId: input.taskId ?? null,
+        projectId: input.projectId ?? null,
+        conversationId: input.conversationId ?? null,
+        workflowKind: input.workflowKind ?? null,
+        reason: input.reason,
+      },
+      "Failed to refresh runtime profile limit state",
+    );
+  }
 }
 
 function parseRuntimeOptions(
@@ -289,54 +516,107 @@ export async function runApiRuntimeOneShot(input: {
   });
 
   const bypassPermissions = env.AGENT_BYPASS_PERMISSIONS;
-  const result = await context.adapter.run({
-    runtimeId: context.resolvedProfile.runtimeId,
-    providerId: context.resolvedProfile.providerId,
-    profileId: context.resolvedProfile.profileId,
-    transport: context.resolvedProfile.transport,
-    workflowKind: workflow.workflowKind,
-    prompt: input.prompt,
-    model: context.resolvedProfile.model ?? undefined,
-    projectRoot: input.projectRoot,
-    cwd: input.projectRoot,
-    headers: context.resolvedProfile.headers,
-    // Merge caller's usageContext with scope fields we already know here.
-    // The caller chooses the source (commit, fast-fix, ...); we fill in
-    // projectId + taskId so the sink has the full scope automatically.
-    usageContext: {
-      ...input.usageContext,
+  let latestLimitSnapshot: RuntimeLimitSnapshot | null = null;
+  const onRuntimeEvent = (event: RuntimeEvent) => {
+    latestLimitSnapshot = observeRuntimeLimitEvent(event, latestLimitSnapshot, {
       projectId: input.projectId,
       taskId: input.taskId ?? null,
-    },
-    options: {
-      ...context.resolvedProfile.options,
-      ...(context.resolvedProfile.baseUrl ? { baseUrl: context.resolvedProfile.baseUrl } : {}),
-      ...(context.resolvedProfile.apiKeyEnvVar
-        ? { apiKeyEnvVar: context.resolvedProfile.apiKeyEnvVar }
-        : {}),
-    },
-    execution: {
-      // CLI/API transports produce output only after the full run completes,
-      // so start timeout is meaningless — disable it and rely on run timeout only.
-      startTimeoutMs:
-        context.resolvedProfile.transport === "sdk" ? env.API_RUNTIME_START_TIMEOUT_MS : 0,
-      runTimeoutMs: env.API_RUNTIME_RUN_TIMEOUT_MS,
-      includePartialMessages: input.includePartialMessages ?? false,
-      maxTurns: input.maxTurns,
-      systemPromptAppend: input.systemPromptAppend,
-      bypassPermissions,
-      environment: input.taskId
-        ? { HANDOFF_MODE: "1", HANDOFF_TASK_ID: input.taskId }
-        : { HANDOFF_MODE: "1" },
-      hooks: {
-        permissionMode: bypassPermissions ? "bypassPermissions" : "acceptEdits",
-        allowDangerouslySkipPermissions: bypassPermissions,
-        _trustToken: RUNTIME_TRUST_TOKEN,
-        settings: { attribution: { commit: "", pr: "" } },
-        settingSources: ["project"],
+      workflowKind: workflow.workflowKind,
+      runtimeId: context.resolvedProfile.runtimeId,
+      runtimeProfileId: context.resolvedProfile.profileId,
+    });
+  };
+  let result: RuntimeRunResult;
+  try {
+    result = await context.adapter.run({
+      runtimeId: context.resolvedProfile.runtimeId,
+      providerId: context.resolvedProfile.providerId,
+      profileId: context.resolvedProfile.profileId,
+      transport: context.resolvedProfile.transport,
+      workflowKind: workflow.workflowKind,
+      prompt: input.prompt,
+      model: context.resolvedProfile.model ?? undefined,
+      projectRoot: input.projectRoot,
+      cwd: input.projectRoot,
+      headers: context.resolvedProfile.headers,
+      // Merge caller's usageContext with scope fields we already know here.
+      // The caller chooses the source (commit, fast-fix, ...); we fill in
+      // projectId + taskId so the sink has the full scope automatically.
+      usageContext: {
+        ...input.usageContext,
+        projectId: input.projectId,
+        taskId: input.taskId ?? null,
       },
-    },
-  });
+      options: {
+        ...context.resolvedProfile.options,
+        ...(context.resolvedProfile.baseUrl ? { baseUrl: context.resolvedProfile.baseUrl } : {}),
+        ...(context.resolvedProfile.apiKeyEnvVar
+          ? { apiKeyEnvVar: context.resolvedProfile.apiKeyEnvVar }
+          : {}),
+      },
+      execution: {
+        // CLI/API transports produce output only after the full run completes,
+        // so start timeout is meaningless — disable it and rely on run timeout only.
+        startTimeoutMs:
+          context.resolvedProfile.transport === "sdk" ? env.API_RUNTIME_START_TIMEOUT_MS : 0,
+        runTimeoutMs: env.API_RUNTIME_RUN_TIMEOUT_MS,
+        includePartialMessages: input.includePartialMessages ?? false,
+        maxTurns: input.maxTurns,
+        onEvent: onRuntimeEvent,
+        systemPromptAppend: input.systemPromptAppend,
+        bypassPermissions,
+        environment: input.taskId
+          ? { HANDOFF_MODE: "1", HANDOFF_TASK_ID: input.taskId }
+          : { HANDOFF_MODE: "1" },
+        hooks: {
+          permissionMode: bypassPermissions ? "bypassPermissions" : "acceptEdits",
+          allowDangerouslySkipPermissions: bypassPermissions,
+          _trustToken: RUNTIME_TRUST_TOKEN,
+          settings: { attribution: { commit: "", pr: "" } },
+          settingSources: ["project"],
+        },
+      },
+    });
+
+    latestLimitSnapshot = extractLatestRuntimeLimitSnapshot(result.events) ?? latestLimitSnapshot;
+    if (latestLimitSnapshot) {
+      refreshRuntimeProfileLimitState({
+        runtimeProfileId: context.resolvedProfile.profileId,
+        runtimeId: context.resolvedProfile.runtimeId,
+        providerId: context.resolvedProfile.providerId,
+        snapshot: latestLimitSnapshot,
+        taskId: input.taskId ?? null,
+        projectId: input.projectId,
+        workflowKind: workflow.workflowKind,
+        reason: "oneshot:success",
+      });
+    } else {
+      log.debug(
+        {
+          runtimeProfileId: context.resolvedProfile.profileId,
+          runtimeId: context.resolvedProfile.runtimeId,
+          providerId: context.resolvedProfile.providerId,
+          taskId: input.taskId ?? null,
+          projectId: input.projectId,
+          workflowKind: workflow.workflowKind,
+        },
+        "[FIX] Preserving runtime limit state after successful API execution without an authoritative recovery signal",
+      );
+    }
+  } catch (error) {
+    refreshRuntimeProfileLimitState({
+      runtimeProfileId: context.resolvedProfile.profileId,
+      runtimeId: context.resolvedProfile.runtimeId,
+      providerId: context.resolvedProfile.providerId,
+      snapshot: extractRuntimeLimitSnapshotFromError(error) ?? latestLimitSnapshot,
+      clearOnMissing: false,
+      taskId: input.taskId ?? null,
+      projectId: input.projectId,
+      workflowKind: workflow.workflowKind,
+      reason: "oneshot:error",
+    });
+    throw error;
+  }
 
   log.info(
     {

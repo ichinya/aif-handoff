@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { tasks, projects } from "@aif/shared";
+import { tasks, projects, runtimeProfiles } from "@aif/shared";
 import { createTestDb } from "@aif/shared/server";
 import { RuntimeExecutionError } from "@aif/runtime";
 import { eq } from "drizzle-orm";
@@ -75,6 +75,29 @@ describe("coordinator", () => {
     resetCoordinatorRuntimeCountersForTests();
     getStageSemaphore().reset();
   });
+
+  function insertRuntimeProfile(input: {
+    id: string;
+    projectId?: string | null;
+    snapshot: Record<string, unknown>;
+  }): void {
+    const now = new Date().toISOString();
+    testDb.current
+      .insert(runtimeProfiles)
+      .values({
+        id: input.id,
+        projectId: input.projectId ?? "test-project",
+        name: `Profile ${input.id}`,
+        runtimeId: "claude",
+        providerId: "anthropic",
+        enabled: true,
+        runtimeLimitSnapshotJson: JSON.stringify(input.snapshot),
+        runtimeLimitUpdatedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
+  }
 
   it("should pick up planning tasks and process through full pipeline", async () => {
     const db = testDb.current;
@@ -409,6 +432,205 @@ describe("coordinator", () => {
     expect(task!.blockedReason).toContain("code 1");
     expect(task!.retryAfter).toBeTruthy();
     expect(task!.retryCount).toBe(1);
+  });
+
+  it("should use structured resetAt and persist task limit snapshot on quota exhaustion", async () => {
+    const db = testDb.current;
+    const resetAt = new Date(Date.now() + 60 * 60_000).toISOString();
+    db.insert(tasks)
+      .values({
+        id: "task-ext-limit",
+        projectId: "test-project",
+        title: "External rate limit",
+        status: "planning",
+      })
+      .run();
+
+    vi.mocked(runPlanner).mockRejectedValueOnce(
+      new RuntimeExecutionError("Usage limit exceeded", undefined, "rate_limit", {
+        resetAt,
+        limitSnapshot: {
+          source: "sdk_event",
+          status: "blocked",
+          precision: "heuristic",
+          checkedAt: "2026-04-17T00:00:00.000Z",
+          providerId: "anthropic",
+          runtimeId: "claude",
+          profileId: "profile-1",
+          primaryScope: "time",
+          resetAt,
+          retryAfterSeconds: null,
+          warningThreshold: null,
+          windows: [{ scope: "time", resetAt }],
+          providerMeta: null,
+        },
+      }),
+    );
+
+    await pollAndProcess();
+
+    const task = db.select().from(tasks).where(eq(tasks.id, "task-ext-limit")).get();
+    expect(task!.status).toBe("blocked_external");
+    expect(task!.blockedFromStatus).toBe("planning");
+    expect(task!.retryAfter).toBe(resetAt);
+    expect(task!.runtimeLimitSnapshotJson).toContain('"status":"blocked"');
+    expect(task!.runtimeLimitSnapshotJson).toContain('"profileId":"profile-1"');
+  });
+
+  it("should proactively block planning work when the effective runtime profile is provider-blocked", async () => {
+    const db = testDb.current;
+    const resetAt = new Date(Date.now() + 30 * 60_000).toISOString();
+    insertRuntimeProfile({
+      id: "profile-plan-blocked",
+      snapshot: {
+        source: "sdk_event",
+        status: "blocked",
+        precision: "heuristic",
+        checkedAt: "2026-04-17T00:00:00.000Z",
+        providerId: "anthropic",
+        runtimeId: "claude",
+        profileId: "profile-plan-blocked",
+        primaryScope: "time",
+        resetAt,
+        retryAfterSeconds: null,
+        warningThreshold: null,
+        windows: [{ scope: "time", resetAt }],
+        providerMeta: null,
+      },
+    });
+    db.update(projects)
+      .set({ defaultPlanRuntimeProfileId: "profile-plan-blocked" })
+      .where(eq(projects.id, "test-project"))
+      .run();
+    db.insert(tasks)
+      .values({
+        id: "task-preblocked",
+        projectId: "test-project",
+        title: "Preblocked plan",
+        status: "planning",
+      })
+      .run();
+
+    await pollAndProcess();
+
+    expect(runPlanner).not.toHaveBeenCalled();
+    const task = db.select().from(tasks).where(eq(tasks.id, "task-preblocked")).get();
+    expect(task!.status).toBe("blocked_external");
+    expect(task!.blockedFromStatus).toBe("planning");
+    expect(task!.blockedReason).toContain("provider runtime limit still blocked");
+    expect(task!.retryAfter).toBe(resetAt);
+    expect(task!.runtimeLimitSnapshotJson).toContain('"profileId":"profile-plan-blocked"');
+  });
+
+  it("should proactively block exact-threshold planning work before the provider hard-fails", async () => {
+    const db = testDb.current;
+    const resetAt = new Date(Date.now() + 45 * 60_000).toISOString();
+    insertRuntimeProfile({
+      id: "profile-plan-threshold",
+      snapshot: {
+        source: "api_headers",
+        status: "warning",
+        precision: "exact",
+        checkedAt: "2026-04-17T00:00:00.000Z",
+        providerId: "anthropic",
+        runtimeId: "claude",
+        profileId: "profile-plan-threshold",
+        primaryScope: "requests",
+        resetAt,
+        retryAfterSeconds: null,
+        warningThreshold: 10,
+        windows: [
+          {
+            scope: "requests",
+            percentRemaining: 5,
+            warningThreshold: 10,
+            resetAt,
+          },
+        ],
+        providerMeta: null,
+      },
+    });
+    db.update(projects)
+      .set({ defaultPlanRuntimeProfileId: "profile-plan-threshold" })
+      .where(eq(projects.id, "test-project"))
+      .run();
+    db.insert(tasks)
+      .values({
+        id: "task-threshold",
+        projectId: "test-project",
+        title: "Threshold gate",
+        status: "planning",
+      })
+      .run();
+
+    await pollAndProcess();
+
+    expect(runPlanner).not.toHaveBeenCalled();
+    const task = db.select().from(tasks).where(eq(tasks.id, "task-threshold")).get();
+    expect(task!.status).toBe("blocked_external");
+    expect(task!.blockedFromStatus).toBe("planning");
+    expect(task!.blockedReason).toContain("exact quota threshold reached");
+    expect(task!.blockedReason).toContain("5% <= 10%");
+    expect(task!.retryAfter).toBe(resetAt);
+    expect(task!.runtimeLimitSnapshotJson).toContain('"precision":"exact"');
+  });
+
+  it("should continue to later runnable candidates when the first planning task is gated by runtime limits", async () => {
+    const db = testDb.current;
+    const resetAt = new Date(Date.now() + 30 * 60_000).toISOString();
+    insertRuntimeProfile({
+      id: "profile-gated-first",
+      snapshot: {
+        source: "sdk_event",
+        status: "blocked",
+        precision: "heuristic",
+        checkedAt: "2026-04-17T00:00:00.000Z",
+        providerId: "anthropic",
+        runtimeId: "claude",
+        profileId: "profile-gated-first",
+        primaryScope: "time",
+        resetAt,
+        retryAfterSeconds: null,
+        warningThreshold: null,
+        windows: [{ scope: "time", resetAt }],
+        providerMeta: null,
+      },
+    });
+    db.update(projects)
+      .set({ defaultPlanRuntimeProfileId: "profile-gated-first" })
+      .where(eq(projects.id, "test-project"))
+      .run();
+    db.insert(projects)
+      .values({ id: "project-runnable", name: "Runnable", rootPath: "/tmp/runnable" })
+      .run();
+    db.insert(tasks)
+      .values({
+        id: "task-gated-first",
+        projectId: "test-project",
+        title: "Blocked first",
+        status: "planning",
+      })
+      .run();
+    db.insert(tasks)
+      .values({
+        id: "task-runnable-second",
+        projectId: "project-runnable",
+        title: "Runnable second",
+        status: "planning",
+      })
+      .run();
+
+    await pollAndProcess();
+
+    expect(runPlanner).not.toHaveBeenCalledWith("task-gated-first", "/tmp/test");
+    expect(runPlanner).toHaveBeenCalledWith("task-runnable-second", "/tmp/runnable");
+
+    const gatedTask = db.select().from(tasks).where(eq(tasks.id, "task-gated-first")).get();
+    const runnableTask = db.select().from(tasks).where(eq(tasks.id, "task-runnable-second")).get();
+
+    expect(gatedTask!.status).toBe("blocked_external");
+    expect(gatedTask!.retryAfter).toBe(resetAt);
+    expect(runnableTask!.status).toBe("done");
   });
 
   it("should not process blocked task before retryAfter", async () => {

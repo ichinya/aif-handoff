@@ -2,13 +2,17 @@ import type {
   RuntimeConnectionValidationInput,
   RuntimeConnectionValidationResult,
   RuntimeEvent,
+  RuntimeLimitSnapshot,
+  RuntimeLimitStatus,
   RuntimeModel,
   RuntimeModelListInput,
   RuntimeRunInput,
   RuntimeRunResult,
   RuntimeUsage,
 } from "../../types.js";
-import { RuntimeExecutionError } from "../../errors.js";
+import { RuntimeExecutionError, type RuntimeExecutionErrorMetadata } from "../../errors.js";
+import { buildRuntimeLimitEvent } from "../../limitEvents.js";
+import { buildOpenAiCompatibleLimitSnapshot } from "../../openaiRateLimits.js";
 import { isRetriableTimeoutError, resolveRetryDelay, sleepMs } from "../../timeouts.js";
 import { classifyOpenRouterRuntimeError } from "./errors.js";
 
@@ -241,6 +245,72 @@ function isAbortTimeoutError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "TimeoutError";
 }
 
+function hasOpenAiRateLimitHints(headers: Headers): boolean {
+  return [
+    "retry-after",
+    "x-ratelimit-limit-requests",
+    "x-ratelimit-remaining-requests",
+    "x-ratelimit-reset-requests",
+    "x-ratelimit-limit-tokens",
+    "x-ratelimit-remaining-tokens",
+    "x-ratelimit-reset-tokens",
+  ].some((name) => headers.has(name));
+}
+
+function buildOpenRouterLimitSnapshot(
+  input: RuntimeRunInput,
+  headers: Headers,
+  statusOverride?: RuntimeLimitStatus,
+): RuntimeLimitSnapshot | null {
+  return buildOpenAiCompatibleLimitSnapshot(headers, {
+    providerId: input.providerId ?? "openrouter",
+    runtimeId: input.runtimeId,
+    profileId: input.profileId ?? null,
+    statusOverride,
+  });
+}
+
+function buildLimitErrorMetadata(
+  snapshot: RuntimeLimitSnapshot | null,
+  httpStatus?: number,
+): RuntimeExecutionErrorMetadata {
+  const retryAfterSeconds = snapshot?.retryAfterSeconds ?? null;
+  return {
+    httpStatus,
+    resetAt: snapshot?.resetAt ?? null,
+    retryAfterSeconds,
+    retryAfterMs: retryAfterSeconds != null ? retryAfterSeconds * 1000 : null,
+    limitSnapshot: snapshot,
+    providerMeta: snapshot?.providerMeta ?? null,
+  };
+}
+
+function emitLimitSnapshotEvent(
+  input: RuntimeRunInput,
+  events: RuntimeEvent[],
+  snapshot: RuntimeLimitSnapshot | null,
+  logger?: OpenRouterApiLogger,
+): void {
+  if (!snapshot) return;
+
+  const event = buildRuntimeLimitEvent(snapshot);
+  events.push(event);
+  input.execution?.onEvent?.(event);
+  logger?.debug?.(
+    {
+      runtimeId: input.runtimeId,
+      providerId: snapshot.providerId,
+      profileId: snapshot.profileId ?? null,
+      status: snapshot.status,
+      precision: snapshot.precision,
+      source: snapshot.source,
+      primaryScope: snapshot.primaryScope ?? null,
+      resetAt: snapshot.resetAt ?? null,
+    },
+    "Translated OpenAI-compatible rate-limit headers into runtime limit snapshot",
+  );
+}
+
 async function postChatCompletionsWith429Retry(
   input: RuntimeRunInput,
   url: string,
@@ -315,11 +385,29 @@ export async function runOpenRouterApi(
     const response = await postChatCompletionsWith429Retry(input, url, false, logger, signal);
 
     const rawText = await response.text();
+    const limitSnapshot = buildOpenRouterLimitSnapshot(
+      input,
+      response.headers,
+      response.status === 429 ? "blocked" : undefined,
+    );
+    if (!limitSnapshot && hasOpenAiRateLimitHints(response.headers)) {
+      logger?.warn?.(
+        {
+          runtimeId: input.runtimeId,
+          providerId: input.providerId ?? "openrouter",
+          profileId: input.profileId ?? null,
+          status: response.status,
+        },
+        "Dropped OpenAI-compatible rate-limit metadata because it could not be normalized",
+      );
+    }
+
     if (!response.ok) {
       return Promise.reject(
         classifyOpenRouterRuntimeError(
           new Error(rawText || "OpenRouter request failed"),
           response.status,
+          buildLimitErrorMetadata(limitSnapshot, response.status),
         ),
       );
     }
@@ -327,6 +415,8 @@ export async function runOpenRouterApi(
     const payload = rawText.trim().length > 0 ? JSON.parse(rawText) : {};
     const choice = Array.isArray(payload.choices) ? payload.choices[0] : null;
     const outputText = choice?.message?.content ?? "";
+    const events: RuntimeEvent[] = [];
+    emitLimitSnapshotEvent(input, events, limitSnapshot, logger);
 
     logger?.debug?.(
       {
@@ -341,6 +431,7 @@ export async function runOpenRouterApi(
       outputText,
       sessionId: payload.id ?? null,
       usage: normalizeUsage(payload.usage),
+      ...(events.length > 0 ? { events } : {}),
       raw: payload,
     };
   } catch (error) {
@@ -368,23 +459,45 @@ async function runOpenRouterStreamingAttempt(
   const signal = buildRunTimeoutSignal(input);
 
   const response = await postChatCompletionsWith429Retry(input, url, true, logger, signal);
+  const limitSnapshot = buildOpenRouterLimitSnapshot(
+    input,
+    response.headers,
+    response.status === 429 ? "blocked" : undefined,
+  );
+  if (!limitSnapshot && hasOpenAiRateLimitHints(response.headers)) {
+    logger?.warn?.(
+      {
+        runtimeId: input.runtimeId,
+        providerId: input.providerId ?? "openrouter",
+        profileId: input.profileId ?? null,
+        status: response.status,
+      },
+      "Dropped OpenAI-compatible rate-limit metadata because it could not be normalized",
+    );
+  }
 
   if (!response.ok) {
     const rawText = await response.text();
     throw classifyOpenRouterRuntimeError(
       new Error(rawText || "OpenRouter streaming request failed"),
       response.status,
+      buildLimitErrorMetadata(limitSnapshot, response.status),
     );
   }
 
   if (!response.body) {
-    throw classifyOpenRouterRuntimeError(new Error("OpenRouter streaming response has no body"));
+    throw classifyOpenRouterRuntimeError(
+      new Error("OpenRouter streaming response has no body"),
+      undefined,
+      buildLimitErrorMetadata(limitSnapshot),
+    );
   }
 
   let outputText = "";
   let sessionId: string | null = null;
   let usage: RuntimeUsage | null = null;
   const events: RuntimeEvent[] = [];
+  emitLimitSnapshotEvent(input, events, limitSnapshot, logger);
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -467,6 +580,7 @@ async function runOpenRouterStreamingAttempt(
       `Start timeout: OpenRouter streaming produced no data within ${startMs}ms`,
       undefined,
       "timeout",
+      buildLimitErrorMetadata(limitSnapshot),
     );
     (err as unknown as Record<string, unknown>).__timeoutRetriable__ = true;
     throw err;

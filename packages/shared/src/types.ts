@@ -126,6 +126,8 @@ export interface Task {
   modelOverride?: string | null;
   runtimeOptions?: Record<string, unknown> | null;
   sessionId: string | null;
+  runtimeLimitSnapshot?: RuntimeLimitSnapshot | null;
+  runtimeLimitUpdatedAt?: string | null;
   scheduledAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -259,6 +261,7 @@ export type WsEventType =
   | "task:scheduled_fired"
   | "project:auto_queue_mode_changed"
   | "project:auto_queue_advanced"
+  | "project:runtime_limit_updated"
   | "task:commit_started"
   | "task:commit_done"
   | "task:commit_failed";
@@ -291,6 +294,12 @@ export interface TaskCommitPayload {
   error?: string;
 }
 
+export interface RuntimeLimitBroadcastPayload {
+  projectId: string;
+  runtimeProfileId: string | null;
+  taskId?: string | null;
+}
+
 export interface WsEvent {
   type: WsEventType;
   payload:
@@ -303,7 +312,8 @@ export interface WsEvent {
     | ChatDonePayload
     | ChatErrorPayload
     | ChatSession
-    | TaskCommitPayload;
+    | TaskCommitPayload
+    | RuntimeLimitBroadcastPayload;
 }
 
 export const RuntimeTransport = {
@@ -352,6 +362,8 @@ export interface RuntimeProfile {
   headers: Record<string, string>;
   options: Record<string, unknown>;
   enabled: boolean;
+  runtimeLimitSnapshot?: RuntimeLimitSnapshot | null;
+  runtimeLimitUpdatedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -396,6 +408,80 @@ export interface EffectiveRuntimeProfileSelection {
   taskRuntimeProfileId: string | null;
   projectRuntimeProfileId: string | null;
   systemRuntimeProfileId: string | null;
+}
+
+export const RuntimeLimitSource = {
+  PROVIDER_API: "provider_api",
+  SDK_EVENT: "sdk_event",
+  API_HEADERS: "api_headers",
+  TURN_USAGE: "turn_usage",
+} as const;
+
+export type RuntimeLimitSource = (typeof RuntimeLimitSource)[keyof typeof RuntimeLimitSource];
+
+export const RuntimeLimitStatus = {
+  OK: "ok",
+  WARNING: "warning",
+  BLOCKED: "blocked",
+  UNKNOWN: "unknown",
+} as const;
+
+export type RuntimeLimitStatus = (typeof RuntimeLimitStatus)[keyof typeof RuntimeLimitStatus];
+
+export const RuntimeLimitPrecision = {
+  EXACT: "exact",
+  HEURISTIC: "heuristic",
+} as const;
+
+export type RuntimeLimitPrecision =
+  (typeof RuntimeLimitPrecision)[keyof typeof RuntimeLimitPrecision];
+
+export const RuntimeLimitScope = {
+  REQUESTS: "requests",
+  TOKENS: "tokens",
+  TIME: "time",
+  SPEND: "spend",
+  TURN_USAGE: "turn_usage",
+  MODEL_USAGE: "model_usage",
+  TOOL_USAGE: "tool_usage",
+  OTHER: "other",
+} as const;
+
+export type RuntimeLimitScope = (typeof RuntimeLimitScope)[keyof typeof RuntimeLimitScope];
+
+export interface RuntimeLimitWindow {
+  scope: RuntimeLimitScope;
+  name?: string | null;
+  unit?: string | null;
+  limit?: number | null;
+  remaining?: number | null;
+  used?: number | null;
+  percentUsed?: number | null;
+  percentRemaining?: number | null;
+  resetAt?: string | null;
+  retryAfterSeconds?: number | null;
+  warningThreshold?: number | null;
+}
+
+export interface RuntimeLimitSnapshot {
+  source: RuntimeLimitSource;
+  status: RuntimeLimitStatus;
+  precision: RuntimeLimitPrecision;
+  checkedAt: string;
+  providerId: string;
+  runtimeId?: string | null;
+  profileId?: string | null;
+  primaryScope?: RuntimeLimitScope | null;
+  resetAt?: string | null;
+  retryAfterSeconds?: number | null;
+  warningThreshold?: number | null;
+  windows: RuntimeLimitWindow[];
+  providerMeta?: Record<string, unknown> | null;
+}
+
+export interface RuntimeLimitEventPayload {
+  snapshot: RuntimeLimitSnapshot;
+  rawType?: string | null;
 }
 
 // ── Chat session types ──────────────────────────────────────
@@ -503,10 +589,18 @@ export interface ChatDonePayload {
   conversationId: string;
   /** Null when the adapter/transport does not report usage for this turn. */
   usage?: ChatDoneUsage | null;
+  projectId?: string;
+  taskId?: string | null;
+  runtimeProfileId?: string | null;
+  runtimeLimitSnapshot?: RuntimeLimitSnapshot | null;
 }
 
 export interface ChatErrorPayload {
   conversationId: string;
   message: string;
   code?: string;
+  projectId?: string;
+  taskId?: string | null;
+  runtimeProfileId?: string | null;
+  runtimeLimitSnapshot?: RuntimeLimitSnapshot | null;
 }

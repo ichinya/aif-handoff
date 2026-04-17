@@ -327,6 +327,29 @@ describe("runtimeProfiles API", () => {
           runtimeId: "claude",
           providerId: "anthropic",
           enabled: true,
+          runtimeLimitSnapshotJson: JSON.stringify({
+            source: "api_headers",
+            status: "warning",
+            precision: "exact",
+            checkedAt: "2026-04-17T00:00:00.000Z",
+            providerId: "anthropic",
+            runtimeId: "claude",
+            profileId: "profile-task-default",
+            primaryScope: "requests",
+            resetAt: "2026-04-17T01:00:00.000Z",
+            retryAfterSeconds: null,
+            warningThreshold: 10,
+            windows: [
+              {
+                scope: "requests",
+                percentRemaining: 8,
+                warningThreshold: 10,
+                resetAt: "2026-04-17T01:00:00.000Z",
+              },
+            ],
+            providerMeta: null,
+          }),
+          runtimeLimitUpdatedAt: "2026-04-17T00:00:00.000Z",
         },
         {
           id: "profile-chat-default",
@@ -366,6 +389,21 @@ describe("runtimeProfiles API", () => {
     const chatBody = await chatRes.json();
     expect(chatBody.source).toBe("project_default");
     expect(chatBody.profile.id).toBe("profile-chat-default");
+
+    const listRes = await app.request("/runtime-profiles?projectId=project-1&includeGlobal=true");
+    expect(listRes.status).toBe(200);
+    const listed = await listRes.json();
+    const taskDefault = listed.find(
+      (profile: { id: string }) => profile.id === "profile-task-default",
+    );
+    expect(taskDefault.runtimeLimitSnapshot).toEqual(
+      expect.objectContaining({
+        status: "warning",
+        precision: "exact",
+        profileId: "profile-task-default",
+      }),
+    );
+    expect(taskDefault.runtimeLimitUpdatedAt).toBe("2026-04-17T00:00:00.000Z");
   });
 
   it("returns 404 for missing runtime profile/task resources", async () => {

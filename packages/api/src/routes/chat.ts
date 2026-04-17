@@ -11,6 +11,7 @@ import {
   UsageSource,
   type RuntimeAdapter,
   type RuntimeEvent,
+  type RuntimeLimitSnapshot,
   type RuntimeRunInput,
   type RuntimeToolQuestionPayload,
 } from "@aif/runtime";
@@ -52,7 +53,11 @@ import {
 } from "../services/sessionCache.js";
 import {
   assertApiRuntimeCapabilities,
+  extractLatestRuntimeLimitSnapshot,
+  extractRuntimeLimitSnapshotFromError,
   getApiRuntimeRegistry,
+  observeRuntimeLimitEvent,
+  refreshRuntimeProfileLimitState,
   resolveApiRuntimeContext,
 } from "../services/runtime.js";
 
@@ -936,6 +941,7 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
   // completed. Without this, aborting the first turn of a fresh chat would
   // break runtime continuity — the next turn would have no resume context.
   let runtimeSessionIdFromEvents: string | null = null;
+  let latestLimitSnapshot: RuntimeLimitSnapshot | null = null;
   // Hoisted so the abort branch can surface server-resolved attachment paths
   // to the client — without this, an aborted run with uploads would leave the
   // user bubble with a path-less chip until the session is reopened.
@@ -1104,6 +1110,14 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
     };
 
     const onRuntimeEvent = (event: RuntimeEvent) => {
+      latestLimitSnapshot = observeRuntimeLimitEvent(event, latestLimitSnapshot, {
+        conversationId: chatConversationId,
+        projectId,
+        taskId: taskId ?? null,
+        runtimeId,
+        runtimeProfileId,
+      });
+
       if (event.type === "stream:text" && event.message) {
         flushPendingQuestionBlocks();
         streamedTextLength += event.message.length;
@@ -1267,6 +1281,33 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
       );
     }
 
+    latestLimitSnapshot = extractLatestRuntimeLimitSnapshot(result.events) ?? latestLimitSnapshot;
+    if (latestLimitSnapshot) {
+      refreshRuntimeProfileLimitState({
+        runtimeProfileId,
+        runtimeId,
+        providerId: runtimeProviderId,
+        snapshot: latestLimitSnapshot,
+        taskId: taskId ?? null,
+        projectId,
+        conversationId: chatConversationId,
+        workflowKind: "chat",
+        reason: "chat:success",
+      });
+    } else {
+      log.debug(
+        {
+          conversationId: chatConversationId,
+          projectId,
+          taskId: taskId ?? null,
+          runtimeProfileId,
+          runtimeId,
+          providerId: runtimeProviderId,
+        },
+        "[FIX] Preserving runtime limit state after successful chat execution without an authoritative recovery signal",
+      );
+    }
+
     // Recover assistant text that never arrived as `stream:text` deltas.
     // Claude CLI partial-messages can emit a mix where only part of assistant
     // text arrives as deltas and the rest remains in `result.outputText`.
@@ -1309,6 +1350,10 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
       type: "chat:done",
       payload: {
         conversationId: chatConversationId,
+        projectId,
+        taskId: taskId ?? null,
+        runtimeProfileId: runtimeProfileId ?? null,
+        runtimeLimitSnapshot: latestLimitSnapshot,
         // Expose per-turn usage so the frontend can show token/cost spend
         // without a round-trip to the usage_events table. Recording of the
         // usage itself already happened inside the registry wrapper via the
@@ -1330,9 +1375,11 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
         profileId: runtimeProfileId,
         providerId: runtimeProviderId,
       },
+      runtimeLimitSnapshot: latestLimitSnapshot,
       ...(savedAttachments?.length ? { attachments: savedAttachments } : {}),
     });
   } catch (err) {
+    const errorLimitSnapshot = extractRuntimeLimitSnapshotFromError(err) ?? latestLimitSnapshot;
     const aborted = abortController.signal.aborted || isAbortError(err);
     if (aborted) {
       // Persist any tokens streamed before the abort so the partial assistant
@@ -1352,6 +1399,18 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
           runtimeSessionId: runtimeSessionIdFromEvents,
         });
       }
+      refreshRuntimeProfileLimitState({
+        runtimeProfileId,
+        runtimeId,
+        providerId: runtimeProviderId,
+        snapshot: errorLimitSnapshot,
+        clearOnMissing: false,
+        taskId: taskId ?? null,
+        projectId,
+        conversationId: chatConversationId,
+        workflowKind: "chat",
+        reason: "chat:aborted",
+      });
       log.info(
         {
           runtimeId,
@@ -1366,13 +1425,23 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
         type: "chat:error",
         payload: {
           conversationId: chatConversationId,
+          projectId,
+          taskId: taskId ?? null,
+          runtimeProfileId: runtimeProfileId ?? null,
+          runtimeLimitSnapshot: errorLimitSnapshot,
           message: "Chat run aborted by user",
           code: "aborted",
         },
       };
       const doneEvent: WsEvent = {
         type: "chat:done",
-        payload: { conversationId: chatConversationId },
+        payload: {
+          conversationId: chatConversationId,
+          projectId,
+          taskId: taskId ?? null,
+          runtimeProfileId: runtimeProfileId ?? null,
+          runtimeLimitSnapshot: errorLimitSnapshot,
+        },
       };
       if (clientId) {
         sendToClient(clientId, abortedEvent);
@@ -1384,6 +1453,7 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
           code: "aborted",
           conversationId: chatConversationId,
           sessionId: chatSessionId,
+          runtimeLimitSnapshot: errorLimitSnapshot,
           // Expose the partial assistant reply so clients without an active
           // WebSocket can render what was saved server-side. Mirrors the
           // success path's `assistantMessage`.
@@ -1396,6 +1466,18 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
       );
     }
 
+    refreshRuntimeProfileLimitState({
+      runtimeProfileId,
+      runtimeId,
+      providerId: runtimeProviderId,
+      snapshot: errorLimitSnapshot,
+      clearOnMissing: false,
+      taskId: taskId ?? null,
+      projectId,
+      conversationId: chatConversationId,
+      workflowKind: "chat",
+      reason: "chat:error",
+    });
     log.error(
       { err, runtimeId, runtimeProfileId, runtimeProviderId, conversationId: chatConversationId },
       "Chat request failed",
@@ -1406,6 +1488,10 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
       type: "chat:error",
       payload: {
         conversationId: chatConversationId,
+        projectId,
+        taskId: taskId ?? null,
+        runtimeProfileId: runtimeProfileId ?? null,
+        runtimeLimitSnapshot: errorLimitSnapshot,
         message: classified.message,
         code: classified.code,
       },
@@ -1416,13 +1502,26 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
 
     const doneEvent: WsEvent = {
       type: "chat:done",
-      payload: { conversationId: chatConversationId },
+      payload: {
+        conversationId: chatConversationId,
+        projectId,
+        taskId: taskId ?? null,
+        runtimeProfileId: runtimeProfileId ?? null,
+        runtimeLimitSnapshot: errorLimitSnapshot,
+      },
     };
     if (clientId) {
       sendToClient(clientId, doneEvent);
     }
 
-    return c.json({ error: classified.message, code: classified.code }, classified.status);
+    return c.json(
+      {
+        error: classified.message,
+        code: classified.code,
+        runtimeLimitSnapshot: errorLimitSnapshot,
+      },
+      classified.status,
+    );
   } finally {
     activeChatRuns.delete(chatConversationId);
   }

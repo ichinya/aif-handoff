@@ -1,4 +1,6 @@
 import {
+  clearTaskRuntimeLimitSnapshot,
+  evaluateRuntimeLimitGate,
   findCoordinatorTaskCandidates,
   findProjectById,
   hasActiveLockedTaskForProject,
@@ -12,12 +14,21 @@ import {
   nextBacklogTaskByPosition,
   countActivePipelineTasksForProject,
   claimBacklogTaskForAdvance,
+  persistTaskRuntimeLimitSnapshot,
+  resolveEffectiveRuntimeProfile,
   type CoordinatorStage,
   type TaskFieldsPatch,
   type TaskRow,
 } from "@aif/data";
 import { initProject, type RuntimeRegistry } from "@aif/runtime";
-import { logger, getEnv, CLEAN_STATE_RESET, withTimeout, type TaskStatus } from "@aif/shared";
+import {
+  logger,
+  getEnv,
+  CLEAN_STATE_RESET,
+  withTimeout,
+  type RuntimeLimitSnapshot,
+  type TaskStatus,
+} from "@aif/shared";
 import { runPlanner } from "./subagents/planner.js";
 import { runPlanChecker } from "./subagents/planChecker.js";
 import { runImplementer } from "./subagents/implementer.js";
@@ -32,7 +43,11 @@ import { handleAutoReviewGate } from "./autoReviewHandler.js";
 import { classifyStageError } from "./stageErrorHandler.js";
 import { setActiveStageAbortController } from "./stageAbort.js";
 import { setCoordinatorId } from "./subagentQuery.js";
-import { releaseDueBlockedTasks, recoverStaleInProgressTasks } from "./taskWatchdog.js";
+import {
+  getRandomBackoffMinutes,
+  releaseDueBlockedTasks,
+  recoverStaleInProgressTasks,
+} from "./taskWatchdog.js";
 
 const log = logger("coordinator");
 const env = getEnv();
@@ -178,6 +193,117 @@ function updateTaskStatus(
   void notifyTaskBroadcast(taskId, broadcastType, { ...info, toStatus: status });
 }
 
+function runtimeProfileModeForStage(stage: CoordinatorStage): "task" | "plan" | "review" {
+  if (stage === "planner" || stage === "plan-checker") {
+    return "plan";
+  }
+  if (stage === "reviewer") {
+    return "review";
+  }
+  return "task";
+}
+
+function resolveRuntimeGateRetryAfter(snapshot: RuntimeLimitSnapshot | null): {
+  retryAfter: string;
+  source: "resetAt" | "retryAfterSeconds" | "random_backoff";
+} {
+  if (snapshot?.resetAt) {
+    const resetAtMs = Date.parse(snapshot.resetAt);
+    if (Number.isFinite(resetAtMs)) {
+      return {
+        retryAfter: new Date(Math.max(resetAtMs, Date.now())).toISOString(),
+        source: "resetAt",
+      };
+    }
+  }
+
+  if (
+    snapshot &&
+    typeof snapshot.retryAfterSeconds === "number" &&
+    Number.isFinite(snapshot.retryAfterSeconds) &&
+    snapshot.retryAfterSeconds >= 0
+  ) {
+    return {
+      retryAfter: new Date(Date.now() + snapshot.retryAfterSeconds * 1000).toISOString(),
+      source: "retryAfterSeconds",
+    };
+  }
+
+  return {
+    retryAfter: new Date(Date.now() + getRandomBackoffMinutes() * 60_000).toISOString(),
+    source: "random_backoff",
+  };
+}
+
+function buildRuntimeGateBlockedReason(snapshot: RuntimeLimitSnapshot | null): string {
+  if (snapshot?.precision === "exact" && snapshot.status === "warning") {
+    const threshold = snapshot.windows.find((window) => {
+      const windowThreshold = window.warningThreshold ?? snapshot.warningThreshold;
+      return (
+        typeof window.percentRemaining === "number" &&
+        typeof windowThreshold === "number" &&
+        window.percentRemaining <= windowThreshold
+      );
+    });
+    if (threshold) {
+      const thresholdValue = threshold.warningThreshold ?? snapshot.warningThreshold;
+      return `Coordinator pre-start runtime gate: exact quota threshold reached (${threshold.percentRemaining}% <= ${thresholdValue}%)`;
+    }
+    return "Coordinator pre-start runtime gate: exact quota threshold reached";
+  }
+
+  return "Coordinator pre-start runtime gate: provider runtime limit still blocked";
+}
+
+function proactivelyBlockTaskForRuntimeGate(
+  task: TaskRow,
+  stage: CoordinatorStage,
+  selection: ReturnType<typeof resolveEffectiveRuntimeProfile>,
+  snapshot: RuntimeLimitSnapshot | null,
+): void {
+  const { retryAfter, source } = resolveRuntimeGateRetryAfter(snapshot);
+  const blockedReason = buildRuntimeGateBlockedReason(snapshot);
+
+  if (snapshot) {
+    persistTaskRuntimeLimitSnapshot(task.id, snapshot);
+  } else {
+    clearTaskRuntimeLimitSnapshot(task.id);
+  }
+
+  appendTaskActivityLog(
+    task.id,
+    `[${new Date().toISOString()}] Coordinator runtime gate blocked task before ${stage}: profile=${selection.profile?.id ?? "none"} source=${selection.source} retryAfter=${retryAfter} retryAfterSource=${source}`,
+  );
+  updateTaskStatus(
+    task.id,
+    "blocked_external",
+    {
+      blockedFromStatus: task.status,
+      blockedReason,
+      retryAfter,
+      retryCount: (task.retryCount ?? 0) + 1,
+    },
+    { title: task.title, fromStatus: task.status },
+  );
+
+  log.info(
+    {
+      taskId: task.id,
+      stage,
+      projectId: task.projectId,
+      runtimeProfileId: selection.profile?.id ?? null,
+      runtimeSelectionSource: selection.source,
+      providerId: snapshot?.providerId ?? selection.profile?.providerId ?? null,
+      runtimeId: snapshot?.runtimeId ?? selection.profile?.runtimeId ?? null,
+      limitStatus: snapshot?.status ?? null,
+      limitPrecision: snapshot?.precision ?? null,
+      retryAfter,
+      retryAfterSource: source,
+    },
+    "Blocked task before claim due to runtime limit gate",
+  );
+}
+
 // ── Single task processing ───────────────────────────────────
 
 /** Returns true on success, false on failure. */
@@ -223,6 +349,7 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
     flushActivityQueue(task.id);
 
     if (stage.label === "implementer" && task.skipReview) {
+      clearTaskRuntimeLimitSnapshot(task.id);
       updateTaskStatus(task.id, "done", CLEAN_STATE_RESET, {
         title: taskTitle,
         fromStatus: stage.inProgress,
@@ -241,6 +368,7 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
       });
 
       if (outcome?.status === "manual_review_required") {
+        clearTaskRuntimeLimitSnapshot(task.id);
         updateTaskStatus(
           task.id,
           "done",
@@ -273,6 +401,7 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
       }
 
       if (outcome?.status === "rework_requested") {
+        clearTaskRuntimeLimitSnapshot(task.id);
         updateTaskStatus(
           task.id,
           "implementing",
@@ -301,6 +430,7 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
       }
 
       if (outcome?.status === "accepted") {
+        clearTaskRuntimeLimitSnapshot(task.id);
         updateTaskStatus(task.id, "done", CLEAN_STATE_RESET, {
           title: taskTitle,
           fromStatus: stage.inProgress,
@@ -313,6 +443,7 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
       }
     }
 
+    clearTaskRuntimeLimitSnapshot(task.id);
     updateTaskStatus(
       task.id,
       stage.onSuccess,
@@ -349,6 +480,7 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
           },
           "Fast retry scheduled after transient stream interruption",
         );
+        clearTaskRuntimeLimitSnapshot(task.id);
         updateTaskStatus(
           task.id,
           stage.inProgress,
@@ -362,6 +494,11 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
         break;
 
       case "blocked_external":
+        if (recovery.limitSnapshot) {
+          persistTaskRuntimeLimitSnapshot(task.id, recovery.limitSnapshot);
+        } else {
+          clearTaskRuntimeLimitSnapshot(task.id);
+        }
         updateTaskStatus(
           task.id,
           "blocked_external",
@@ -376,6 +513,7 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
         break;
 
       case "revert":
+        clearTaskRuntimeLimitSnapshot(task.id);
         updateTaskStatus(
           task.id,
           stage.inProgress,
@@ -609,7 +747,8 @@ export async function pollAndProcess(): Promise<void> {
       continue;
     }
 
-    const candidates = findCoordinatorTaskCandidates(stage.label, available).filter(
+    const candidateWindow = Math.min(Math.max(available * 5, available), 50);
+    const candidates = findCoordinatorTaskCandidates(stage.label, candidateWindow).filter(
       (t) => !failedInCycle.has(t.id),
     );
 
@@ -619,7 +758,12 @@ export async function pollAndProcess(): Promise<void> {
     }
 
     log.debug(
-      { stage: stage.label, candidateCount: candidates.length, available },
+      {
+        stage: stage.label,
+        candidateCount: candidates.length,
+        candidateWindow,
+        available,
+      },
       "Task candidates selected",
     );
 
@@ -644,6 +788,34 @@ export async function pollAndProcess(): Promise<void> {
         log.debug(
           { taskId: task.id, projectId: task.projectId },
           "Non-parallel project has active lock from another cycle, skipping",
+        );
+        continue;
+      }
+
+      const runtimeSelection = resolveEffectiveRuntimeProfile({
+        taskId: task.id,
+        projectId: task.projectId,
+        mode: runtimeProfileModeForStage(stage.label),
+      });
+      const gateDecision = evaluateRuntimeLimitGate(runtimeSelection.profile);
+      if (gateDecision.blocked) {
+        log.debug(
+          {
+            taskId: task.id,
+            stage: stage.label,
+            projectId: task.projectId,
+            runtimeProfileId: gateDecision.runtimeProfileId,
+            runtimeSelectionSource: runtimeSelection.source,
+            gateReason: gateDecision.reason,
+            limitPrecision: gateDecision.snapshot?.precision ?? null,
+          },
+          "Task candidate blocked by proactive runtime gate",
+        );
+        proactivelyBlockTaskForRuntimeGate(
+          task,
+          stage.label,
+          runtimeSelection,
+          gateDecision.snapshot,
         );
         continue;
       }

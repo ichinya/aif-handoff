@@ -32,6 +32,7 @@ import { useChatSessions } from "@/hooks/useChatSessions";
 import { useTask } from "@/hooks/useTasks";
 import { useEffectiveChatRuntime, useRuntimeProfiles } from "@/hooks/useRuntimeProfiles";
 import { toAttachmentPayload } from "@/components/task/useTaskDetailActions";
+import { getRuntimeLimitDisplay } from "@/lib/runtimeLimits";
 import { SessionList } from "./SessionList";
 import { MessageBubble } from "./MessageBubble";
 import { TypingIndicator } from "./TypingIndicator";
@@ -72,6 +73,7 @@ export function ChatPanel({
     isStreaming,
     isLoadingMessages,
     chatErrorCode,
+    chatRuntimeLimitSnapshot,
     explore,
     setExplore,
     sendMessage,
@@ -199,6 +201,13 @@ export function ChatPanel({
       : "n/a";
   const activeRuntimeModel =
     displayProfile?.defaultModel ?? effectiveChatRuntime?.resolved?.model ?? "auto";
+  const chatRuntimeLimitDisplay = getRuntimeLimitDisplay(
+    chatRuntimeLimitSnapshot ?? displayProfile?.runtimeLimitSnapshot ?? null,
+    {
+      checkedAt:
+        displayProfile?.runtimeLimitUpdatedAt ?? chatRuntimeLimitSnapshot?.checkedAt ?? null,
+    },
+  );
 
   const content = (
     <div
@@ -342,11 +351,19 @@ export function ChatPanel({
                   variant="outline"
                   className="border-amber-600/60 text-amber-700 dark:border-amber-400/50 dark:text-amber-300"
                 >
-                  Usage Limit Reached
+                  {chatRuntimeLimitDisplay?.label === "Blocked"
+                    ? "Runtime Blocked"
+                    : "Usage Limit Reached"}
                 </Badge>
                 <p className="mt-1 text-xs text-amber-700/90 dark:text-amber-200/90">
-                  Runtime usage limit is currently exhausted. Wait for reset time and send again.
+                  {chatRuntimeLimitDisplay?.summary ??
+                    "Runtime usage limit is currently exhausted. Wait for reset time and send again."}
                 </p>
+                {chatRuntimeLimitDisplay?.resetText && (
+                  <p className="mt-1 text-xs text-amber-700/90 dark:text-amber-200/90">
+                    {chatRuntimeLimitDisplay.resetText}
+                  </p>
+                )}
               </div>
             </div>
           )}

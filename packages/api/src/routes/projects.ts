@@ -222,16 +222,28 @@ projectsRouter.patch("/:id/auto-queue-mode", jsonValidator(autoQueueModeSchema),
 // POST /projects/:id/broadcast — emit project-scoped WS event (used by agent coordinator)
 projectsRouter.post("/:id/broadcast", jsonValidator(broadcastProjectSchema), async (c) => {
   const { id } = c.req.param();
-  const { type, taskId } = c.req.valid("json");
+  const { type, taskId, runtimeProfileId } = c.req.valid("json");
   const project = findProjectById(id);
   if (!project) return c.json({ error: "Project not found" }, 404);
 
   if (type === "project:auto_queue_advanced" && taskId) {
     broadcast({ type, payload: { id: taskId } });
+  } else if (type === "project:runtime_limit_updated") {
+    broadcast({
+      type,
+      payload: {
+        projectId: id,
+        runtimeProfileId: runtimeProfileId ?? null,
+        taskId: taskId ?? null,
+      },
+    });
   } else {
     broadcast({ type, payload: project });
   }
-  log.debug({ projectId: id, type, taskId }, "Project WS broadcast triggered");
+  log.debug(
+    { projectId: id, type, taskId: taskId ?? null, runtimeProfileId: runtimeProfileId ?? null },
+    "Project WS broadcast triggered",
+  );
   return c.json({ success: true });
 });
 

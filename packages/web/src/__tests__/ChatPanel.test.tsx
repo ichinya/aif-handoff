@@ -16,6 +16,21 @@ let mockMessages: {
 let mockIsStreaming = false;
 let mockExplore = false;
 let mockChatErrorCode: string | null = null;
+let mockChatRuntimeLimitSnapshot: {
+  source: string;
+  status: string;
+  precision: string;
+  checkedAt: string;
+  providerId: string;
+  runtimeId?: string | null;
+  profileId?: string | null;
+  primaryScope?: string | null;
+  resetAt?: string | null;
+  retryAfterSeconds?: number | null;
+  warningThreshold?: number | null;
+  windows: Array<Record<string, unknown>>;
+  providerMeta?: Record<string, unknown> | null;
+} | null = null;
 let mockActiveSessionId: string | null = null;
 let mockEffectiveChatRuntime: {
   source: string;
@@ -24,6 +39,8 @@ let mockEffectiveChatRuntime: {
     runtimeId: string;
     providerId: string;
     defaultModel: string | null;
+    runtimeLimitSnapshot?: Record<string, unknown> | null;
+    runtimeLimitUpdatedAt?: string | null;
   } | null;
   resolved?: { runtimeId: string; providerId: string; model: string | null };
 } | null = null;
@@ -33,6 +50,7 @@ vi.mock("@/hooks/useChat", () => ({
     messages: mockMessages,
     isStreaming: mockIsStreaming,
     chatErrorCode: mockChatErrorCode,
+    chatRuntimeLimitSnapshot: mockChatRuntimeLimitSnapshot,
     explore: mockExplore,
     setExplore: mockSetExplore,
     sendMessage: mockSendMessage,
@@ -100,6 +118,7 @@ describe("ChatPanel", () => {
     mockIsStreaming = false;
     mockExplore = false;
     mockChatErrorCode = null;
+    mockChatRuntimeLimitSnapshot = null;
     mockActiveSessionId = null;
     mockEffectiveChatRuntime = null;
     mockSendMessage.mockClear();
@@ -214,13 +233,25 @@ describe("ChatPanel", () => {
 
   it("shows usage limit banner when chat error code is CHAT_USAGE_LIMIT", () => {
     mockChatErrorCode = "CHAT_USAGE_LIMIT";
+    mockChatRuntimeLimitSnapshot = {
+      source: "api_headers",
+      status: "blocked",
+      precision: "exact",
+      checkedAt: "2026-04-17T00:00:00.000Z",
+      providerId: "anthropic",
+      runtimeId: "claude",
+      primaryScope: "requests",
+      resetAt: "2026-04-17T01:00:00.000Z",
+      warningThreshold: 10,
+      windows: [{ scope: "requests", percentRemaining: 0, warningThreshold: 10 }],
+      providerMeta: null,
+    };
     renderPanel();
-    expect(screen.getByText("Usage Limit Reached")).toBeDefined();
+    expect(screen.getByText("Runtime Blocked")).toBeDefined();
     expect(
-      screen.getByText(
-        "Runtime usage limit is currently exhausted. Wait for reset time and send again.",
-      ),
+      screen.getByText("Request quota crossed the 10% safety threshold (0% remaining)."),
     ).toBeDefined();
+    expect(screen.getByText(/Resets/)).toBeDefined();
   });
 
   it("calls onClose when close button is clicked", () => {

@@ -21,13 +21,19 @@ const {
   createRuntimeProfile,
   findRuntimeProfileById,
   updateRuntimeProfile,
+  persistRuntimeProfileLimitSnapshot,
+  clearRuntimeProfileLimitSnapshot,
   deleteRuntimeProfile,
   listRuntimeProfiles,
   toRuntimeProfileResponse,
   updateProjectRuntimeDefaults,
   updateTaskRuntimeOverride,
+  persistTaskRuntimeLimitSnapshot,
+  clearTaskRuntimeLimitSnapshot,
   updateChatSessionRuntime,
   resolveEffectiveRuntimeProfile,
+  toTaskResponse,
+  evaluateRuntimeLimitGate,
 } = await import("../index.js");
 
 function seedProject(id = "proj-1") {
@@ -35,6 +41,33 @@ function seedProject(id = "proj-1") {
     .insert(projects)
     .values({ id, name: "Test", rootPath: "/tmp/test" })
     .run();
+}
+
+function makeLimitSnapshot() {
+  return {
+    source: "sdk_event" as const,
+    status: "warning" as const,
+    precision: "heuristic" as const,
+    checkedAt: "2026-04-17T10:00:00.000Z",
+    providerId: "anthropic",
+    runtimeId: "claude",
+    profileId: "profile-1",
+    primaryScope: "time" as const,
+    resetAt: "2026-04-17T15:00:00.000Z",
+    retryAfterSeconds: null,
+    warningThreshold: null,
+    windows: [
+      {
+        scope: "time" as const,
+        percentUsed: 92,
+        percentRemaining: 8,
+        resetAt: "2026-04-17T15:00:00.000Z",
+      },
+    ],
+    providerMeta: {
+      rateLimitType: "five_hour",
+    },
+  };
 }
 
 describe("runtime profiles data layer", () => {
@@ -81,6 +114,94 @@ describe("runtime profiles data layer", () => {
     expect(updated!.defaultModel).toBe("gpt-5.4");
     expect(updated!.enabled).toBe(false);
     expect(toRuntimeProfileResponse(updated!).options).toEqual({ mode: "cli" });
+  });
+
+  it("persists and clears runtime profile limit snapshots", () => {
+    const profile = createRuntimeProfile({
+      projectId: "proj-1",
+      name: "Claude Default",
+      runtimeId: "claude",
+      providerId: "anthropic",
+    });
+    const snapshot = {
+      ...makeLimitSnapshot(),
+      profileId: profile!.id,
+    };
+
+    const persisted = persistRuntimeProfileLimitSnapshot(
+      profile!.id,
+      snapshot,
+      "2026-04-17T10:00:05.000Z",
+    );
+    const mapped = toRuntimeProfileResponse(persisted!);
+    expect(mapped.runtimeLimitSnapshot).toEqual(snapshot);
+    expect(mapped.runtimeLimitUpdatedAt).toBe("2026-04-17T10:00:05.000Z");
+
+    const cleared = clearRuntimeProfileLimitSnapshot(profile!.id, "2026-04-17T11:00:00.000Z");
+    const clearedMapped = toRuntimeProfileResponse(cleared!);
+    expect(clearedMapped.runtimeLimitSnapshot).toBeNull();
+    expect(clearedMapped.runtimeLimitUpdatedAt).toBe("2026-04-17T11:00:00.000Z");
+  });
+
+  it("does not proactively gate provider-blocked snapshots without reset hints", () => {
+    const profile = createRuntimeProfile({
+      projectId: "proj-1",
+      name: "Claude Default",
+      runtimeId: "claude",
+      providerId: "anthropic",
+    });
+    persistRuntimeProfileLimitSnapshot(
+      profile!.id,
+      {
+        ...makeLimitSnapshot(),
+        status: "blocked",
+        profileId: profile!.id,
+        resetAt: null,
+        windows: [{ scope: "time", percentUsed: 100, percentRemaining: 0, resetAt: null }],
+      },
+      "2026-04-17T10:00:05.000Z",
+    );
+
+    const decision = evaluateRuntimeLimitGate(toRuntimeProfileResponse(findRuntimeProfileById(profile!.id)!), 0);
+    expect(decision.blocked).toBe(false);
+    expect(decision.reason).toBe("none");
+  });
+
+  it("does not proactively gate exact-threshold warnings without reset hints", () => {
+    const profile = createRuntimeProfile({
+      projectId: "proj-1",
+      name: "OpenAI Default",
+      runtimeId: "codex",
+      providerId: "openai",
+    });
+    persistRuntimeProfileLimitSnapshot(
+      profile!.id,
+      {
+        ...makeLimitSnapshot(),
+        status: "warning",
+        precision: "exact",
+        profileId: profile!.id,
+        resetAt: null,
+        warningThreshold: 10,
+        windows: [
+          {
+            scope: "requests",
+            limit: 100,
+            remaining: 4,
+            used: 96,
+            percentUsed: 96,
+            percentRemaining: 4,
+            warningThreshold: 10,
+            resetAt: null,
+          },
+        ],
+      },
+      "2026-04-17T10:00:05.000Z",
+    );
+
+    const decision = evaluateRuntimeLimitGate(toRuntimeProfileResponse(findRuntimeProfileById(profile!.id)!), 0);
+    expect(decision.blocked).toBe(false);
+    expect(decision.reason).toBe("none");
   });
 
   it("lists runtime profiles with global fallback", () => {
@@ -137,6 +258,25 @@ describe("runtime profiles data layer", () => {
     const chatAfter = findChatSessionById(chat!.id);
     expect(chatAfter?.runtimeProfileId).toBe(profile!.id);
     expect(chatAfter?.runtimeSessionId).toBe("runtime-session-1");
+  });
+
+  it("persists and clears task runtime limit snapshots", () => {
+    const task = createTask({ projectId: "proj-1", title: "T", description: "D" });
+    const snapshot = makeLimitSnapshot();
+
+    const persisted = persistTaskRuntimeLimitSnapshot(
+      task!.id,
+      snapshot,
+      "2026-04-17T10:00:05.000Z",
+    );
+    const mapped = toTaskResponse(persisted!);
+    expect(mapped.runtimeLimitSnapshot).toEqual(snapshot);
+    expect(mapped.runtimeLimitUpdatedAt).toBe("2026-04-17T10:00:05.000Z");
+
+    const cleared = clearTaskRuntimeLimitSnapshot(task!.id, "2026-04-17T11:00:00.000Z");
+    const clearedMapped = toTaskResponse(cleared!);
+    expect(clearedMapped.runtimeLimitSnapshot).toBeNull();
+    expect(clearedMapped.runtimeLimitUpdatedAt).toBe("2026-04-17T11:00:00.000Z");
   });
 
   it("resolves task override first", () => {

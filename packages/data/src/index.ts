@@ -18,6 +18,8 @@ import {
   type CreateRuntimeProfileInput,
   type EffectiveRuntimeProfileSelection,
   type RuntimeProfile,
+  type RuntimeLimitSnapshot,
+  type RuntimeLimitWindow,
   type UpdateRuntimeProfileInput,
   type Task,
   type TaskStatus,
@@ -38,7 +40,10 @@ export type TaskRow = typeof tasks.$inferSelect;
 export type CommentRow = typeof taskComments.$inferSelect;
 export type ProjectRow = typeof projects.$inferSelect;
 export type RuntimeProfileRow = typeof runtimeProfiles.$inferSelect;
-export type HydratedTaskRow = TaskRow & { autoReviewState?: AutoReviewState | null };
+export type HydratedTaskRow = TaskRow & {
+  autoReviewState?: AutoReviewState | null;
+  runtimeLimitSnapshot?: RuntimeLimitSnapshot | null;
+};
 
 export type CoordinatorStage = "planner" | "plan-checker" | "implementer" | "reviewer";
 
@@ -90,13 +95,21 @@ export type TaskFieldsUpdate = {
 
 
 export function toTaskResponse(task: TaskRow): Task {
-  const { attachments, tags, runtimeOptionsJson, autoReviewStateJson, ...rest } = task;
+  const {
+    attachments,
+    tags,
+    runtimeOptionsJson,
+    autoReviewStateJson,
+    runtimeLimitSnapshotJson,
+    ...rest
+  } = task;
   return {
     ...rest,
     attachments: parseAttachments(attachments),
     tags: parseTags(tags),
     autoReviewState: parseAutoReviewState(autoReviewStateJson),
     runtimeOptions: parseRuntimeObject(runtimeOptionsJson),
+    runtimeLimitSnapshot: parseRuntimeLimitSnapshot(runtimeLimitSnapshotJson, "task", task.id),
   };
 }
 
@@ -120,6 +133,167 @@ function parseRuntimeObject(raw: string | null | undefined): Record<string, unkn
   } catch {
     return null;
   }
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasOwnProperty(record: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(record, key);
+}
+
+function readStoredOptionalFiniteNumber(
+  record: Record<string, unknown>,
+  key: string,
+): number | null | undefined {
+  if (!hasOwnProperty(record, key)) return undefined;
+  const value = record[key];
+  if (value == null) return null;
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function readStoredOptionalString(
+  record: Record<string, unknown>,
+  key: string,
+): string | null | undefined {
+  if (!hasOwnProperty(record, key)) return undefined;
+  const value = record[key];
+  if (value == null) return null;
+  return typeof value === "string" ? value : undefined;
+}
+
+function parseRuntimeLimitWindow(
+  value: unknown,
+  entity: "task" | "runtime_profile",
+  entityId: string,
+  index: number,
+  rawPreview: string,
+): RuntimeLimitWindow | null {
+  if (!isObjectRecord(value) || typeof value.scope !== "string") {
+    log.warn(
+      { entity, entityId, index, raw: rawPreview },
+      "Malformed persisted runtime-limit window",
+    );
+    return null;
+  }
+
+  const name = readStoredOptionalString(value, "name");
+  const unit = readStoredOptionalString(value, "unit");
+  const limit = readStoredOptionalFiniteNumber(value, "limit");
+  const remaining = readStoredOptionalFiniteNumber(value, "remaining");
+  const used = readStoredOptionalFiniteNumber(value, "used");
+  const percentUsed = readStoredOptionalFiniteNumber(value, "percentUsed");
+  const percentRemaining = readStoredOptionalFiniteNumber(value, "percentRemaining");
+  const resetAt = readStoredOptionalString(value, "resetAt");
+  const retryAfterSeconds = readStoredOptionalFiniteNumber(value, "retryAfterSeconds");
+  const warningThreshold = readStoredOptionalFiniteNumber(value, "warningThreshold");
+
+  return {
+    scope: value.scope as RuntimeLimitWindow["scope"],
+    ...(name !== undefined ? { name } : {}),
+    ...(unit !== undefined ? { unit } : {}),
+    ...(limit !== undefined ? { limit } : {}),
+    ...(remaining !== undefined ? { remaining } : {}),
+    ...(used !== undefined ? { used } : {}),
+    ...(percentUsed !== undefined ? { percentUsed } : {}),
+    ...(percentRemaining !== undefined ? { percentRemaining } : {}),
+    ...(resetAt !== undefined ? { resetAt } : {}),
+    ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
+    ...(warningThreshold !== undefined ? { warningThreshold } : {}),
+  };
+}
+
+function parseRuntimeLimitSnapshot(
+  raw: string | null | undefined,
+  entity: "task" | "runtime_profile",
+  entityId: string,
+): RuntimeLimitSnapshot | null {
+  if (!raw) return null;
+
+  const preview = raw.length > 200 ? `${raw.slice(0, 200)}...` : raw;
+  const warnMalformed = (reason: string, extra: Record<string, unknown> = {}) => {
+    log.warn({ entity, entityId, reason, raw: preview, ...extra }, "Malformed persisted runtime-limit snapshot");
+  };
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isObjectRecord(parsed)) {
+      warnMalformed("root_not_object");
+      return null;
+    }
+
+    if (
+      typeof parsed.source !== "string" ||
+      typeof parsed.status !== "string" ||
+      typeof parsed.precision !== "string" ||
+      typeof parsed.checkedAt !== "string" ||
+      typeof parsed.providerId !== "string" ||
+      !Array.isArray(parsed.windows)
+    ) {
+      warnMalformed("missing_required_fields", {
+        hasSource: typeof parsed.source === "string",
+        hasStatus: typeof parsed.status === "string",
+        hasPrecision: typeof parsed.precision === "string",
+        hasCheckedAt: typeof parsed.checkedAt === "string",
+        hasProviderId: typeof parsed.providerId === "string",
+        hasWindows: Array.isArray(parsed.windows),
+      });
+      return null;
+    }
+
+    const windows: RuntimeLimitWindow[] = [];
+    for (const [index, window] of parsed.windows.entries()) {
+      const normalized = parseRuntimeLimitWindow(window, entity, entityId, index, preview);
+      if (!normalized) {
+        return null;
+      }
+      windows.push(normalized);
+    }
+
+    const runtimeId = readStoredOptionalString(parsed, "runtimeId");
+    const profileId = readStoredOptionalString(parsed, "profileId");
+    const primaryScope = readStoredOptionalString(parsed, "primaryScope");
+    const resetAt = readStoredOptionalString(parsed, "resetAt");
+    const retryAfterSeconds = readStoredOptionalFiniteNumber(parsed, "retryAfterSeconds");
+    const warningThreshold = readStoredOptionalFiniteNumber(parsed, "warningThreshold");
+    const providerMeta = hasOwnProperty(parsed, "providerMeta")
+      ? isObjectRecord(parsed.providerMeta)
+        ? parsed.providerMeta
+        : parsed.providerMeta == null
+          ? null
+          : undefined
+      : undefined;
+
+    return {
+      source: parsed.source as RuntimeLimitSnapshot["source"],
+      status: parsed.status as RuntimeLimitSnapshot["status"],
+      precision: parsed.precision as RuntimeLimitSnapshot["precision"],
+      checkedAt: parsed.checkedAt,
+      providerId: parsed.providerId,
+      ...(runtimeId !== undefined ? { runtimeId } : {}),
+      ...(profileId !== undefined ? { profileId } : {}),
+      ...(primaryScope !== undefined
+        ? { primaryScope: primaryScope as RuntimeLimitSnapshot["primaryScope"] }
+        : {}),
+      ...(resetAt !== undefined ? { resetAt } : {}),
+      ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
+      ...(warningThreshold !== undefined ? { warningThreshold } : {}),
+      windows,
+      ...(providerMeta !== undefined ? { providerMeta } : {}),
+    };
+  } catch (error) {
+    warnMalformed("json_parse_failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
+function serializeRuntimeLimitSnapshot(
+  snapshot: RuntimeLimitSnapshot | null | undefined,
+): string | null {
+  return snapshot == null ? null : JSON.stringify(snapshot);
 }
 
 function parseAutoReviewState(raw: string | null | undefined): AutoReviewState | null {
@@ -249,6 +423,7 @@ export function findTaskById(id: string): HydratedTaskRow | undefined {
   return {
     ...row,
     autoReviewState: parseAutoReviewState(row.autoReviewStateJson),
+    runtimeLimitSnapshot: parseRuntimeLimitSnapshot(row.runtimeLimitSnapshotJson, "task", row.id),
   };
 }
 
@@ -531,6 +706,51 @@ export function setTaskFields(id: string, fields: TaskFieldsPatch): void {
       autoReviewState === null ? null : JSON.stringify(autoReviewState);
   }
   getDb().update(tasks).set(patch).where(eq(tasks.id, id)).run();
+}
+
+export function persistTaskRuntimeLimitSnapshot(
+  taskId: string,
+  snapshot: RuntimeLimitSnapshot,
+  persistedAt = new Date().toISOString(),
+): TaskRow | undefined {
+  log.info(
+    {
+      taskId,
+      status: snapshot.status,
+      source: snapshot.source,
+      precision: snapshot.precision,
+      resetAt: snapshot.resetAt ?? null,
+      persistedAt,
+    },
+    "Persisting task runtime limit snapshot",
+  );
+  getDb()
+    .update(tasks)
+    .set({
+      runtimeLimitSnapshotJson: serializeRuntimeLimitSnapshot(snapshot),
+      runtimeLimitUpdatedAt: persistedAt,
+      updatedAt: persistedAt,
+    })
+    .where(eq(tasks.id, taskId))
+    .run();
+  return findTaskById(taskId);
+}
+
+export function clearTaskRuntimeLimitSnapshot(
+  taskId: string,
+  persistedAt = new Date().toISOString(),
+): TaskRow | undefined {
+  log.debug({ taskId, persistedAt }, "Clearing task runtime limit snapshot");
+  getDb()
+    .update(tasks)
+    .set({
+      runtimeLimitSnapshotJson: null,
+      runtimeLimitUpdatedAt: persistedAt,
+      updatedAt: persistedAt,
+    })
+    .where(eq(tasks.id, taskId))
+    .run();
+  return findTaskById(taskId);
 }
 
 export function deleteTask(id: string): void {
@@ -1335,6 +1555,12 @@ export function toRuntimeProfileResponse(row: RuntimeProfileRow): RuntimeProfile
     headers: parseRuntimeHeaders(row.headersJson),
     options: parseRuntimeObject(row.optionsJson) ?? {},
     enabled: row.enabled,
+    runtimeLimitSnapshot: parseRuntimeLimitSnapshot(
+      row.runtimeLimitSnapshotJson,
+      "runtime_profile",
+      row.id,
+    ),
+    runtimeLimitUpdatedAt: row.runtimeLimitUpdatedAt ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -1446,6 +1672,51 @@ export function updateRuntimeProfile(
   return findRuntimeProfileById(id);
 }
 
+export function persistRuntimeProfileLimitSnapshot(
+  runtimeProfileId: string,
+  snapshot: RuntimeLimitSnapshot,
+  persistedAt = new Date().toISOString(),
+): RuntimeProfileRow | undefined {
+  log.info(
+    {
+      runtimeProfileId,
+      status: snapshot.status,
+      source: snapshot.source,
+      precision: snapshot.precision,
+      resetAt: snapshot.resetAt ?? null,
+      persistedAt,
+    },
+    "Persisting runtime profile limit snapshot",
+  );
+  getDb()
+    .update(runtimeProfiles)
+    .set({
+      runtimeLimitSnapshotJson: serializeRuntimeLimitSnapshot(snapshot),
+      runtimeLimitUpdatedAt: persistedAt,
+      updatedAt: persistedAt,
+    })
+    .where(eq(runtimeProfiles.id, runtimeProfileId))
+    .run();
+  return findRuntimeProfileById(runtimeProfileId);
+}
+
+export function clearRuntimeProfileLimitSnapshot(
+  runtimeProfileId: string,
+  persistedAt = new Date().toISOString(),
+): RuntimeProfileRow | undefined {
+  log.debug({ runtimeProfileId, persistedAt }, "Clearing runtime profile limit snapshot");
+  getDb()
+    .update(runtimeProfiles)
+    .set({
+      runtimeLimitSnapshotJson: null,
+      runtimeLimitUpdatedAt: persistedAt,
+      updatedAt: persistedAt,
+    })
+    .where(eq(runtimeProfiles.id, runtimeProfileId))
+    .run();
+  return findRuntimeProfileById(runtimeProfileId);
+}
+
 export function deleteRuntimeProfile(id: string): void {
   log.debug({ runtimeProfileId: id }, "Deleting runtime profile");
   getDb().delete(runtimeProfiles).where(eq(runtimeProfiles.id, id)).run();
@@ -1527,6 +1798,99 @@ export function updateChatSessionRuntime(
     .where(eq(chatSessions.id, sessionId))
     .run();
   return findChatSessionById(sessionId);
+}
+
+export interface RuntimeLimitGateDecision {
+  blocked: boolean;
+  reason: "none" | "provider_blocked" | "exact_threshold";
+  runtimeProfileId: string | null;
+  snapshot: RuntimeLimitSnapshot | null;
+}
+
+function parseRuntimeLimitResetMs(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isFutureRuntimeLimitReset(value: string | null | undefined, nowMs: number): boolean {
+  const parsed = parseRuntimeLimitResetMs(value);
+  return parsed != null && parsed > nowMs;
+}
+
+export function evaluateRuntimeLimitGate(
+  profile: RuntimeProfile | null | undefined,
+  nowMs = Date.now(),
+): RuntimeLimitGateDecision {
+  const snapshot = profile?.runtimeLimitSnapshot ?? null;
+  const runtimeProfileId = profile?.id ?? null;
+  if (!snapshot) {
+    return { blocked: false, reason: "none", runtimeProfileId, snapshot: null };
+  }
+
+  const resetAtMs = parseRuntimeLimitResetMs(snapshot.resetAt ?? null);
+  const resetPending = resetAtMs != null && resetAtMs > nowMs;
+  const requiresResetHint = snapshot.status === "blocked";
+  if (requiresResetHint && resetAtMs == null) {
+    log.debug(
+      {
+        runtimeProfileId,
+        status: snapshot.status,
+        precision: snapshot.precision,
+        checkedAt: snapshot.checkedAt,
+      },
+      "[FIX] Skipping proactive runtime gate because the persisted snapshot has no structured reset hint",
+    );
+  }
+  if (snapshot.status === "blocked" && resetPending) {
+    return {
+      blocked: true,
+      reason: "provider_blocked",
+      runtimeProfileId,
+      snapshot,
+    };
+  }
+
+  const warningThreshold = snapshot.warningThreshold ?? null;
+  const exactThresholdReached =
+    snapshot.precision === "exact" &&
+    snapshot.status === "warning" &&
+    snapshot.windows.some((window) => {
+      const threshold = window.warningThreshold ?? warningThreshold;
+      return (
+        typeof window.percentRemaining === "number" &&
+        typeof threshold === "number" &&
+        window.percentRemaining <= threshold
+      );
+    });
+
+  if (exactThresholdReached && resetAtMs == null) {
+    log.debug(
+      {
+        runtimeProfileId,
+        status: snapshot.status,
+        precision: snapshot.precision,
+        checkedAt: snapshot.checkedAt,
+      },
+      "[FIX] Skipping proactive exact-threshold gate because the persisted snapshot has no structured reset hint",
+    );
+  }
+
+  if (exactThresholdReached && resetPending) {
+    return {
+      blocked: true,
+      reason: "exact_threshold",
+      runtimeProfileId,
+      snapshot,
+    };
+  }
+
+  return {
+    blocked: false,
+    reason: "none",
+    runtimeProfileId,
+    snapshot,
+  };
 }
 
 export function resolveEffectiveRuntimeProfile(input: {

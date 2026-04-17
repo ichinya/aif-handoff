@@ -19,6 +19,7 @@ const mockResolveApiRuntimeContext = vi.fn();
 const mockAssertApiRuntimeCapabilities = vi.fn();
 const mockGetApiRuntimeRegistry = vi.fn();
 const mockPersistAttachments = vi.fn();
+const mockRefreshRuntimeProfileLimitState = vi.fn();
 
 const mockAdapterRun = vi.fn();
 const mockAdapterResume = vi.fn();
@@ -68,6 +69,26 @@ vi.mock("../services/runtime.js", () => ({
   resolveApiRuntimeContext: (input: unknown) => mockResolveApiRuntimeContext(input),
   assertApiRuntimeCapabilities: (input: unknown) => mockAssertApiRuntimeCapabilities(input),
   getApiRuntimeRegistry: () => mockGetApiRuntimeRegistry(),
+  observeRuntimeLimitEvent: (
+    event: { type: string; data?: Record<string, unknown> },
+    current: unknown,
+  ) => (event.type === "runtime:limit" ? (event.data?.snapshot ?? current) : current),
+  extractLatestRuntimeLimitSnapshot: (
+    events: Array<{ type: string; data?: Record<string, unknown> }> | null | undefined,
+  ) => {
+    if (!events?.length) return null;
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const event = events[index];
+      if (event?.type === "runtime:limit") {
+        return event.data?.snapshot ?? null;
+      }
+    }
+    return null;
+  },
+  extractRuntimeLimitSnapshotFromError: (error: unknown) =>
+    error instanceof RuntimeExecutionError ? (error.limitSnapshot ?? null) : null,
+  refreshRuntimeProfileLimitState: (...args: unknown[]) =>
+    mockRefreshRuntimeProfileLimitState(...args),
 }));
 
 vi.mock("../services/attachmentPersistence.js", () => ({
@@ -234,6 +255,21 @@ describe("chat API", () => {
     );
   });
 
+  it("preserves runtime limit state after successful chat runs without snapshots", async () => {
+    const res = await app.request("/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: "project-1",
+        message: "plain prompt",
+        clientId: "client-1",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(mockRefreshRuntimeProfileLimitState).not.toHaveBeenCalled();
+  });
+
   it("returns assistant text in HTTP response when websocket clientId is absent", async () => {
     mockAdapterRun.mockResolvedValueOnce({
       outputText: "runtime output without ws",
@@ -362,7 +398,7 @@ describe("chat API", () => {
     });
 
     expect(res.status).toBe(500);
-    expect(await res.json()).toEqual({
+    expect(await res.json()).toMatchObject({
       error: "unexpected failure",
       code: "CHAT_REQUEST_FAILED",
     });
@@ -383,7 +419,7 @@ describe("chat API", () => {
     });
 
     expect(res.status).toBe(500);
-    expect(await res.json()).toEqual({
+    expect(await res.json()).toMatchObject({
       error: "Chat request failed",
       code: "CHAT_REQUEST_FAILED",
     });

@@ -7,6 +7,7 @@ import { projects } from "@aif/shared";
 import { createTestDb } from "@aif/shared/server";
 
 const testDb = { current: createTestDb() };
+const mockBroadcast = vi.fn();
 
 vi.mock("@aif/shared/server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@aif/shared/server")>();
@@ -37,7 +38,7 @@ vi.mock("../services/runtime.js", () => ({
 }));
 
 vi.mock("../ws.js", () => ({
-  broadcast: vi.fn(),
+  broadcast: (...args: unknown[]) => mockBroadcast(...args),
   setupWebSocket: vi.fn(() => ({
     injectWebSocket: vi.fn(),
     upgradeWebSocket: vi.fn(),
@@ -59,6 +60,7 @@ describe("projects API", () => {
   beforeEach(() => {
     testDb.current = createTestDb();
     app = createApp();
+    mockBroadcast.mockReset();
   });
 
   it("returns projects list", async () => {
@@ -334,6 +336,33 @@ describe("projects API", () => {
     it("returns 404 for unknown project", async () => {
       const res = await app.request("/projects/missing/auto-queue-mode");
       expect(res.status).toBe(404);
+    });
+  });
+
+  it("broadcasts runtime-limit updates with project-scoped payloads", async () => {
+    const db = testDb.current;
+    db.insert(projects)
+      .values({ id: "proj-broadcast", name: "Broadcast", rootPath: "/tmp/b" })
+      .run();
+
+    const res = await app.request("/projects/proj-broadcast/broadcast", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "project:runtime_limit_updated",
+        runtimeProfileId: "profile-1",
+        taskId: "task-1",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(mockBroadcast).toHaveBeenCalledWith({
+      type: "project:runtime_limit_updated",
+      payload: {
+        projectId: "proj-broadcast",
+        runtimeProfileId: "profile-1",
+        taskId: "task-1",
+      },
     });
   });
 });

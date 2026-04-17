@@ -1,7 +1,9 @@
 import {
+  clearRuntimeProfileLimitSnapshot,
   createDbUsageSink,
   findTaskById,
   getTaskSessionId,
+  persistRuntimeProfileLimitSnapshot,
   renewTaskClaim,
   resolveEffectiveRuntimeProfile,
   saveTaskSessionId,
@@ -10,20 +12,26 @@ import {
 import {
   assertRuntimeCapabilities,
   bootstrapRuntimeRegistry,
+  createRuntimeMemoryCache,
   createRuntimeWorkflowSpec,
   getResultSessionId,
   redactResolvedRuntimeProfile,
   resolveAdapterCapabilities,
   resolveRuntimeProfile,
   resolveRuntimePromptPolicy,
+  RUNTIME_LIMIT_EVENT_TYPE,
+  RuntimeExecutionError,
   RUNTIME_TRUST_TOKEN,
   UsageSource,
   type RuntimeAdapter,
   type RuntimeCapabilities,
   type RuntimeCapabilityName,
+  type RuntimeEvent,
   type RuntimeRegistry,
   type RuntimeRegistryLogger,
   type RuntimeSessionReusePolicy,
+  type RuntimeLimitEventPayload,
+  type RuntimeLimitSnapshot,
   type RuntimeTransport,
   type RuntimeWorkflowSpec,
 } from "@aif/runtime";
@@ -33,6 +41,7 @@ import { PROJECT_SCOPE_SYSTEM_APPEND, REVIEW_DIFF_SCOPE_SYSTEM_APPEND } from "./
 import { createStderrCollector } from "./stderrCollector.js";
 import { writeQueryAudit } from "./queryAudit.js";
 import { getActiveStageAbortController } from "./stageAbort.js";
+import { notifyProjectRuntimeLimitBroadcast } from "./notifier.js";
 
 const log = logger("subagent-query");
 
@@ -40,6 +49,186 @@ const HEARTBEAT_INTERVAL_MS = 30_000;
 
 const FIRST_ACTIVITY_TIMEOUT_ERROR = "first_activity_timeout";
 const FIRST_ACTIVITY_MAX_RETRIES = 2;
+const runtimeLimitStateCache = createRuntimeMemoryCache<string>({ defaultTtlMs: 30_000 });
+
+function extractRuntimeLimitSnapshotFromEvent(event: RuntimeEvent): RuntimeLimitSnapshot | null {
+  if (event.type !== RUNTIME_LIMIT_EVENT_TYPE) return null;
+
+  const payload = event.data as RuntimeLimitEventPayload | undefined;
+  const snapshot = payload?.snapshot;
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
+    log.warn(
+      {
+        eventType: event.type,
+        runtimeEventTimestamp: event.timestamp,
+      },
+      "Dropped runtime limit event with malformed snapshot payload",
+    );
+    return null;
+  }
+  return snapshot;
+}
+
+function observeRuntimeLimitEvent(
+  event: RuntimeEvent,
+  currentSnapshot: RuntimeLimitSnapshot | null,
+  logContext: Record<string, unknown> = {},
+): RuntimeLimitSnapshot | null {
+  const snapshot = extractRuntimeLimitSnapshotFromEvent(event);
+  if (!snapshot) return currentSnapshot;
+
+  log.debug(
+    {
+      ...logContext,
+      runtimeId: snapshot.runtimeId ?? null,
+      providerId: snapshot.providerId,
+      profileId: snapshot.profileId ?? null,
+      status: snapshot.status,
+      precision: snapshot.precision,
+      source: snapshot.source,
+      resetAt: snapshot.resetAt ?? null,
+    },
+    "Observed runtime limit event during subagent execution",
+  );
+  return snapshot;
+}
+
+function extractLatestRuntimeLimitSnapshot(
+  events: RuntimeEvent[] | null | undefined,
+): RuntimeLimitSnapshot | null {
+  if (!events?.length) return null;
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const snapshot = extractRuntimeLimitSnapshotFromEvent(events[index]!);
+    if (snapshot) return snapshot;
+  }
+  return null;
+}
+
+function extractRuntimeLimitSnapshotFromError(error: unknown): RuntimeLimitSnapshot | null {
+  if (error instanceof RuntimeExecutionError && error.limitSnapshot) {
+    return error.limitSnapshot;
+  }
+  if (error instanceof Error && "cause" in error && error.cause) {
+    return extractRuntimeLimitSnapshotFromError(error.cause);
+  }
+  return null;
+}
+
+function buildRuntimeLimitCacheSignature(
+  snapshot: RuntimeLimitSnapshot | null,
+  clearOnMissing: boolean,
+): string | null {
+  if (snapshot) {
+    return `persist:${JSON.stringify(snapshot)}`;
+  }
+  if (clearOnMissing) {
+    return "clear";
+  }
+  return null;
+}
+
+function refreshRuntimeProfileLimitState(input: {
+  runtimeProfileId?: string | null;
+  runtimeId?: string | null;
+  providerId?: string | null;
+  snapshot?: RuntimeLimitSnapshot | null;
+  clearOnMissing?: boolean;
+  taskId: string;
+  workflowKind?: string | null;
+  reason: string;
+}): void {
+  const runtimeProfileId = input.runtimeProfileId ?? input.snapshot?.profileId ?? null;
+  if (!runtimeProfileId) {
+    log.debug(
+      {
+        taskId: input.taskId,
+        runtimeId: input.runtimeId ?? input.snapshot?.runtimeId ?? null,
+        providerId: input.providerId ?? input.snapshot?.providerId ?? null,
+        workflowKind: input.workflowKind ?? null,
+        reason: input.reason,
+      },
+      "Skipping runtime limit state refresh because no runtime profile is associated",
+    );
+    return;
+  }
+
+  const signature = buildRuntimeLimitCacheSignature(
+    input.snapshot ?? null,
+    input.clearOnMissing === true,
+  );
+  if (!signature) {
+    log.debug(
+      {
+        taskId: input.taskId,
+        runtimeProfileId,
+        runtimeId: input.runtimeId ?? input.snapshot?.runtimeId ?? null,
+        providerId: input.providerId ?? input.snapshot?.providerId ?? null,
+        workflowKind: input.workflowKind ?? null,
+        reason: input.reason,
+      },
+      "No runtime limit snapshot or clear action available for refresh",
+    );
+    return;
+  }
+
+  const cachedSignature = runtimeLimitStateCache.get(runtimeProfileId);
+  if (cachedSignature === signature) {
+    log.debug(
+      {
+        taskId: input.taskId,
+        runtimeProfileId,
+        runtimeId: input.runtimeId ?? input.snapshot?.runtimeId ?? null,
+        providerId: input.providerId ?? input.snapshot?.providerId ?? null,
+        workflowKind: input.workflowKind ?? null,
+        reason: input.reason,
+      },
+      "Skipped runtime limit state refresh because identical state is still cached",
+    );
+    return;
+  }
+
+  const persistedAt = new Date().toISOString();
+  log.debug(
+    {
+      taskId: input.taskId,
+      runtimeProfileId,
+      runtimeId: input.runtimeId ?? input.snapshot?.runtimeId ?? null,
+      providerId: input.providerId ?? input.snapshot?.providerId ?? null,
+      workflowKind: input.workflowKind ?? null,
+      reason: input.reason,
+      action: input.snapshot ? "persist" : "clear",
+    },
+    "Refreshing runtime profile limit state for subagent execution",
+  );
+
+  try {
+    if (input.snapshot) {
+      persistRuntimeProfileLimitSnapshot(runtimeProfileId, input.snapshot, persistedAt);
+    } else {
+      clearRuntimeProfileLimitSnapshot(runtimeProfileId, persistedAt);
+    }
+    runtimeLimitStateCache.set(runtimeProfileId, signature);
+    const projectId = findTaskById(input.taskId)?.projectId ?? null;
+    if (projectId) {
+      void notifyProjectRuntimeLimitBroadcast(projectId, runtimeProfileId, {
+        taskId: input.taskId,
+      });
+    }
+  } catch (error) {
+    log.warn(
+      {
+        err: error,
+        taskId: input.taskId,
+        runtimeProfileId,
+        runtimeId: input.runtimeId ?? input.snapshot?.runtimeId ?? null,
+        providerId: input.providerId ?? input.snapshot?.providerId ?? null,
+        workflowKind: input.workflowKind ?? null,
+        reason: input.reason,
+      },
+      "Failed to refresh runtime profile limit state for subagent execution",
+    );
+  }
+}
 
 function getLockRenewalMs(): number {
   return Math.max(getEnv().AGENT_STAGE_RUN_TIMEOUT_MS, 60_000) + 5 * 60 * 1000;
@@ -432,12 +621,19 @@ export async function executeSubagentQuery(
   const heartbeatTimer = startHeartbeat(taskId);
 
   let runtimeIdForError = getEnv().AIF_DEFAULT_RUNTIME_ID;
+  let providerIdForError = getEnv().AIF_DEFAULT_PROVIDER_ID;
+  let runtimeProfileIdForError: string | null = null;
+  let workflowKindForError: string | null = null;
+  let latestLimitSnapshot: RuntimeLimitSnapshot | null = null;
   let adapter: RuntimeAdapter | null = null;
   let watchdog: ReturnType<typeof createFirstActivityWatchdog> | null = null;
 
   try {
     const context = await resolveExecutionContext(options);
     runtimeIdForError = context.runtimeId;
+    providerIdForError = context.providerId;
+    runtimeProfileIdForError = context.profileId;
+    workflowKindForError = context.workflow.workflowKind;
     logActivity(
       taskId,
       "Agent",
@@ -488,6 +684,7 @@ export async function executeSubagentQuery(
 
     // Retry loop: if agent stalls (no runtime activity after start), kill and restart
     for (let attempt = 0; attempt <= FIRST_ACTIVITY_MAX_RETRIES; attempt++) {
+      latestLimitSnapshot = null;
       // Fresh AbortController per attempt — AbortController is single-use
       const attemptAbort = new AbortController();
       // Chain to the external abort if provided (stage timeout, shutdown)
@@ -542,6 +739,13 @@ export async function executeSubagentQuery(
       const originalOnSubagentStart = executionIntent.onSubagentStart;
       executionIntent.onEvent = (event) => {
         wd.markActivity();
+        latestLimitSnapshot = observeRuntimeLimitEvent(event, latestLimitSnapshot, {
+          taskId,
+          runtimeId: context.runtimeId,
+          runtimeProfileId: context.profileId,
+          workflowKind: context.workflow.workflowKind,
+          attempt: attempt + 1,
+        });
         originalOnEvent(event);
       };
       if (originalOnToolUse) {
@@ -613,6 +817,30 @@ export async function executeSubagentQuery(
       );
     }
 
+    latestLimitSnapshot = extractLatestRuntimeLimitSnapshot(result.events) ?? latestLimitSnapshot;
+    if (latestLimitSnapshot) {
+      refreshRuntimeProfileLimitState({
+        runtimeProfileId: context.profileId,
+        runtimeId: context.runtimeId,
+        providerId: context.providerId,
+        snapshot: latestLimitSnapshot,
+        taskId,
+        workflowKind: context.workflow.workflowKind,
+        reason: "subagent:success",
+      });
+    } else {
+      log.debug(
+        {
+          taskId,
+          runtimeProfileId: context.profileId,
+          runtimeId: context.runtimeId,
+          providerId: context.providerId,
+          workflowKind: context.workflow.workflowKind,
+        },
+        "[FIX] Preserving runtime limit state after successful subagent execution without an authoritative recovery signal",
+      );
+    }
+
     const runtimeSessionId = getResultSessionId(result, context.capabilities);
     if (runtimeSessionId && context.canResume) {
       saveTaskSessionId(taskId, runtimeSessionId);
@@ -654,6 +882,16 @@ export async function executeSubagentQuery(
 
     return { resultText };
   } catch (error) {
+    refreshRuntimeProfileLimitState({
+      runtimeProfileId: runtimeProfileIdForError,
+      runtimeId: runtimeIdForError,
+      providerId: providerIdForError,
+      snapshot: extractRuntimeLimitSnapshotFromError(error) ?? latestLimitSnapshot,
+      clearOnMissing: false,
+      taskId,
+      workflowKind: workflowKindForError,
+      reason: "subagent:error",
+    });
     let reason: string;
     if (adapter?.diagnoseError) {
       reason = await adapter.diagnoseError({

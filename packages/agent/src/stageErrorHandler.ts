@@ -4,16 +4,30 @@
  * Extracted from coordinator.ts for single responsibility.
  */
 
+import type { RuntimeLimitSnapshot } from "@aif/runtime";
 import { logger, type TaskStatus } from "@aif/shared";
 import { logActivity } from "./hooks.js";
-import { isExternalFailure, isFastRetryableFailure, truncateReason } from "./errorClassifier.js";
+import {
+  findRuntimeExecutionError,
+  isExternalFailure,
+  isFastRetryableFailure,
+  truncateReason,
+} from "./errorClassifier.js";
 import { getRandomBackoffMinutes } from "./taskWatchdog.js";
 
 const log = logger("stage-error-handler");
 
+type RetryAfterSource = "resetAt" | "retryAfterSeconds" | "random_backoff";
+
 export type ErrorRecovery =
   | { kind: "fast_retry" }
-  | { kind: "blocked_external"; retryAfter: string; retryCount: number }
+  | {
+      kind: "blocked_external";
+      retryAfter: string;
+      retryAfterSource: RetryAfterSource;
+      retryCount: number;
+      limitSnapshot: RuntimeLimitSnapshot | null;
+    }
   | { kind: "revert" };
 
 interface StageErrorInput {
@@ -22,6 +36,49 @@ interface StageErrorInput {
   sourceStatus: TaskStatus;
   retryCount: number;
   err: unknown;
+}
+
+function resolveRetryAfter(err: unknown): {
+  retryAfter: string;
+  retryAfterSource: RetryAfterSource;
+  backoffMinutes: number | null;
+  limitSnapshot: RuntimeLimitSnapshot | null;
+} {
+  const runtimeError = findRuntimeExecutionError(err);
+  const limitSnapshot = runtimeError?.limitSnapshot ?? null;
+
+  if (runtimeError?.resetAt) {
+    const resetAtMs = Date.parse(runtimeError.resetAt);
+    if (Number.isFinite(resetAtMs)) {
+      return {
+        retryAfter: new Date(Math.max(resetAtMs, Date.now())).toISOString(),
+        retryAfterSource: "resetAt",
+        backoffMinutes: null,
+        limitSnapshot,
+      };
+    }
+  }
+
+  if (
+    typeof runtimeError?.retryAfterSeconds === "number" &&
+    Number.isFinite(runtimeError.retryAfterSeconds) &&
+    runtimeError.retryAfterSeconds >= 0
+  ) {
+    return {
+      retryAfter: new Date(Date.now() + runtimeError.retryAfterSeconds * 1000).toISOString(),
+      retryAfterSource: "retryAfterSeconds",
+      backoffMinutes: null,
+      limitSnapshot,
+    };
+  }
+
+  const backoffMinutes = getRandomBackoffMinutes();
+  return {
+    retryAfter: new Date(Date.now() + backoffMinutes * 60_000).toISOString(),
+    retryAfterSource: "random_backoff",
+    backoffMinutes,
+    limitSnapshot,
+  };
 }
 
 /**
@@ -43,25 +100,54 @@ export function classifyStageError(input: StageErrorInput): ErrorRecovery {
   }
 
   if (isExternalFailure(err)) {
-    const backoffMinutes = getRandomBackoffMinutes();
-    const retryAfter = new Date(Date.now() + backoffMinutes * 60_000).toISOString();
+    const { retryAfter, retryAfterSource, backoffMinutes, limitSnapshot } = resolveRetryAfter(err);
     const reason = err instanceof Error ? err.message : String(err);
+    const runtimeError = findRuntimeExecutionError(err);
+
+    if (retryAfterSource === "random_backoff") {
+      log.warn(
+        {
+          taskId,
+          stage: stageLabel,
+          retryAfter,
+          backoffMinutes,
+          runtimeId: limitSnapshot?.runtimeId ?? null,
+          providerId: limitSnapshot?.providerId ?? null,
+          profileId: limitSnapshot?.profileId ?? null,
+        },
+        "Structured reset metadata missing for external error, falling back to random backoff",
+      );
+    }
 
     logActivity(
       taskId,
       "Agent",
-      `coordinator moved to blocked_external from ${sourceStatus} at ${stageLabel}; retryAfter=${retryAfter}; reason=${truncateReason(reason)}`,
+      `coordinator moved to blocked_external from ${sourceStatus} at ${stageLabel}; retryAfter=${retryAfter}; source=${retryAfterSource}; reason=${truncateReason(reason)}`,
     );
 
     log.error(
-      { taskId, stage: stageLabel, err, retryAfter, backoffMinutes },
+      {
+        taskId,
+        stage: stageLabel,
+        err,
+        retryAfter,
+        retryAfterSource,
+        backoffMinutes,
+        runtimeId: limitSnapshot?.runtimeId ?? null,
+        providerId: limitSnapshot?.providerId ?? null,
+        profileId: limitSnapshot?.profileId ?? null,
+        resetAt: runtimeError?.resetAt ?? null,
+        retryAfterSeconds: runtimeError?.retryAfterSeconds ?? null,
+      },
       "Subagent failed with external error, task blocked with backoff",
     );
 
     return {
       kind: "blocked_external",
       retryAfter,
+      retryAfterSource,
       retryCount: (input.retryCount ?? 0) + 1,
+      limitSnapshot,
     };
   }
 

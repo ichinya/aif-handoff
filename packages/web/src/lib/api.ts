@@ -18,6 +18,7 @@ import type {
   RuntimeProfile,
   CreateRuntimeProfileInput,
   UpdateRuntimeProfileInput,
+  RuntimeLimitSnapshot,
 } from "@aif/shared/browser";
 
 export class ApiError extends Error {
@@ -95,6 +96,14 @@ export interface SettingsResponse {
     openAiBaseUrlConfigured: boolean;
     codexCliPathConfigured: boolean;
   };
+}
+
+export interface SendChatMessageResponse {
+  conversationId: string;
+  sessionId: string | null;
+  assistantMessage?: string | null;
+  attachments?: ChatMessageAttachment[];
+  runtimeLimitSnapshot?: RuntimeLimitSnapshot | null;
 }
 
 async function request<T>(
@@ -379,23 +388,13 @@ export const api = {
     });
   },
 
-  sendChatMessage(input: ChatRequest): Promise<{
-    conversationId: string;
-    sessionId: string | null;
-    assistantMessage?: string | null;
-    attachments?: ChatMessageAttachment[];
-  }> {
+  sendChatMessage(input: ChatRequest): Promise<SendChatMessageResponse> {
     console.debug("[api] POST /chat", {
       projectId: input.projectId,
       explore: input.explore,
       sessionId: input.sessionId,
     });
-    return request<{
-      conversationId: string;
-      sessionId: string | null;
-      assistantMessage?: string | null;
-      attachments?: ChatMessageAttachment[];
-    }>(
+    return request<SendChatMessageResponse>(
       "/chat",
       {
         method: "POST",

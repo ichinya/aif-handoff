@@ -13,6 +13,14 @@ export {
   type RuntimeMcpStatus,
   type RuntimeEvent,
   type RuntimeExecutionIntent,
+  type RuntimeLimitEventPayload,
+  RuntimeLimitPrecision,
+  RuntimeLimitScope,
+  type RuntimeLimitSnapshot,
+  RuntimeLimitSource,
+  RuntimeLimitStatus,
+  type RuntimeLimitWindow,
+  RUNTIME_LIMIT_EVENT_TYPE,
   type RuntimeSubagentStartCallback,
   type RuntimeToolQuestionPayload,
   type RuntimeToolUseCallback,
@@ -60,6 +68,7 @@ export {
   classifyByMessageFallback,
   isExternalFailureCategory,
   isRuntimeErrorCategory,
+  type RuntimeExecutionErrorMetadata,
   type RuntimeErrorCategory,
 } from "./errors.js";
 
