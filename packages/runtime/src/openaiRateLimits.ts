@@ -1,3 +1,4 @@
+import { logger } from "@aif/shared";
 import {
   RuntimeLimitPrecision,
   RuntimeLimitScope,
@@ -8,6 +9,8 @@ import {
 } from "./types.js";
 
 const DEFAULT_WARNING_THRESHOLD = 10;
+const MAX_VALID_DATE_MS = 8_640_000_000_000_000;
+const log = logger("openai-rate-limits");
 
 interface BuildOpenAiCompatibleLimitSnapshotInput {
   providerId: string;
@@ -27,6 +30,40 @@ function readFiniteNumber(value: string | null): number | null {
 function toPercentRemaining(limit: number | null, remaining: number | null): number | null {
   if (limit == null || remaining == null || limit <= 0) return null;
   return Math.max(0, Math.min(100, (remaining / limit) * 100));
+}
+
+function toSafeIsoTimestamp(
+  targetMs: number,
+  context: { raw: string; kind: "reset" | "retry_after"; durationMs: number },
+): string | null {
+  if (!Number.isFinite(targetMs) || Math.abs(targetMs) > MAX_VALID_DATE_MS) {
+    log.warn(
+      {
+        raw: context.raw,
+        kind: context.kind,
+        durationMs: context.durationMs,
+        targetMs,
+      },
+      "[FIX] Dropping invalid OpenAI-compatible reset hint",
+    );
+    return null;
+  }
+
+  const date = new Date(targetMs);
+  if (Number.isNaN(date.getTime())) {
+    log.warn(
+      {
+        raw: context.raw,
+        kind: context.kind,
+        durationMs: context.durationMs,
+        targetMs,
+      },
+      "[FIX] Dropping invalid OpenAI-compatible reset hint",
+    );
+    return null;
+  }
+
+  return date.toISOString();
 }
 
 function parseDurationMs(raw: string | null): number | null {
@@ -88,12 +125,24 @@ function parseDurationMs(raw: string | null): number | null {
 function parseResetAtIso(raw: string | null): string | null {
   const durationMs = parseDurationMs(raw);
   if (durationMs == null) return null;
-  return new Date(Date.now() + durationMs).toISOString();
+  const normalizedRaw = raw ?? "";
+  return toSafeIsoTimestamp(Date.now() + durationMs, {
+    raw: normalizedRaw,
+    kind: "reset",
+    durationMs,
+  });
 }
 
 function parseRetryAfterSeconds(raw: string | null): number | null {
   const durationMs = parseDurationMs(raw);
   if (durationMs == null) return null;
+  const normalizedRaw = raw ?? "";
+  const retryAtIso = toSafeIsoTimestamp(Date.now() + durationMs, {
+    raw: normalizedRaw,
+    kind: "retry_after",
+    durationMs,
+  });
+  if (!retryAtIso) return null;
   return Math.max(0, Math.ceil(durationMs / 1000));
 }
 
@@ -187,6 +236,14 @@ export function buildOpenAiCompatibleLimitSnapshot(
 ): RuntimeLimitSnapshot | null {
   const retryAfterHeader = input.retryAfterHeader ?? headers.get("retry-after");
   const retryAfterSeconds = parseRetryAfterSeconds(retryAfterHeader);
+  const retryAfterResetAt =
+    retryAfterHeader && retryAfterSeconds != null
+      ? toSafeIsoTimestamp(Date.now() + retryAfterSeconds * 1000, {
+          raw: retryAfterHeader,
+          kind: "retry_after",
+          durationMs: retryAfterSeconds * 1000,
+        })
+      : null;
   const requestWindow = buildWindow(
     headers,
     RuntimeLimitScope.REQUESTS,
@@ -211,12 +268,7 @@ export function buildOpenAiCompatibleLimitSnapshot(
   }
 
   const status = resolveStatus(windows, input.statusOverride);
-  const resetAt = pickEarliestIso([
-    ...windows.map((window) => window.resetAt),
-    retryAfterSeconds != null
-      ? new Date(Date.now() + retryAfterSeconds * 1000).toISOString()
-      : null,
-  ]);
+  const resetAt = pickEarliestIso([...windows.map((window) => window.resetAt), retryAfterResetAt]);
 
   return {
     source: RuntimeLimitSource.API_HEADERS,

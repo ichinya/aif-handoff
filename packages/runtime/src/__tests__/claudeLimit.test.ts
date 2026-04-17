@@ -113,4 +113,28 @@ describe("normalizeClaudeLimitSnapshot", () => {
       name: "mystery_window",
     });
   });
+
+  it("drops invalid Claude reset hints instead of throwing", () => {
+    const snapshot = normalizeClaudeLimitSnapshot({
+      info: {
+        status: "rejected",
+        rateLimitType: "five_hour",
+        resetsAt: Number.MAX_SAFE_INTEGER,
+      },
+      runtimeId: "claude",
+      providerId: "anthropic",
+      checkedAt: "2026-04-17T00:00:00.000Z",
+    });
+
+    expect(snapshot).toMatchObject({
+      status: RuntimeLimitStatus.BLOCKED,
+      primaryScope: RuntimeLimitScope.TIME,
+      resetAt: null,
+    });
+    expect(snapshot?.windows[0]).toMatchObject({
+      scope: RuntimeLimitScope.TIME,
+      name: "five_hour",
+      resetAt: null,
+    });
+  });
 });

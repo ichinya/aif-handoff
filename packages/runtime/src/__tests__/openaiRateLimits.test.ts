@@ -131,4 +131,33 @@ describe("buildOpenAiCompatibleLimitSnapshot", () => {
       resetAt: "2026-04-17T00:10:00.000Z",
     });
   });
+
+  it("drops out-of-range reset hints instead of throwing", () => {
+    const snapshot = buildOpenAiCompatibleLimitSnapshot(
+      createHeaders({
+        "x-ratelimit-limit-requests": "100",
+        "x-ratelimit-remaining-requests": "50",
+        "x-ratelimit-reset-requests": String(Number.MAX_SAFE_INTEGER),
+      }),
+      {
+        providerId: "openai",
+        runtimeId: "codex",
+        retryAfterHeader: String(Number.MAX_SAFE_INTEGER),
+      },
+    );
+
+    expect(snapshot).toMatchObject({
+      status: RuntimeLimitStatus.OK,
+      retryAfterSeconds: null,
+      resetAt: null,
+    });
+    expect(snapshot?.windows).toMatchObject([
+      {
+        scope: RuntimeLimitScope.REQUESTS,
+        limit: 100,
+        remaining: 50,
+        resetAt: null,
+      },
+    ]);
+  });
 });

@@ -259,17 +259,39 @@ function classifyChatError(err: unknown): {
   message: string;
 } {
   const rawMessage = err instanceof Error ? err.message : String(err);
-  const message = rawMessage?.trim() ? rawMessage.trim() : "Chat request failed";
+  const normalizedRawMessage = rawMessage?.trim() ? rawMessage.trim() : null;
+
+  const redactForClient = (message: string, code: string, status: 429 | 500) => {
+    if (normalizedRawMessage && normalizedRawMessage !== message) {
+      log.warn(
+        {
+          code,
+          status,
+          rawMessage: normalizedRawMessage,
+        },
+        "[FIX] Redacted raw runtime error before sending chat failure to the client",
+      );
+    }
+    return { status, code, message };
+  };
 
   if (isRuntimeErrorCategory(err, "rate_limit")) {
-    return { status: 429, code: "CHAT_USAGE_LIMIT", message };
+    return redactForClient(
+      "Runtime usage limit reached. Try again later.",
+      "CHAT_USAGE_LIMIT",
+      429,
+    );
   }
 
   if (isRuntimeErrorCategory(err, "auth")) {
-    return { status: 500, code: "CHAT_AUTH_ERROR", message };
+    return redactForClient(
+      "Runtime authentication failed. Check the configured runtime profile.",
+      "CHAT_AUTH_ERROR",
+      500,
+    );
   }
 
-  return { status: 500, code: "CHAT_REQUEST_FAILED", message };
+  return redactForClient("Chat request failed", "CHAT_REQUEST_FAILED", 500);
 }
 
 /** Runtime-aware input sanitization. Uses adapter.sanitizeInput if available, otherwise passthrough. */

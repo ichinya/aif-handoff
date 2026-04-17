@@ -371,6 +371,7 @@ describe("chat API", () => {
     expect(res.status).toBe(429);
     const body = await res.json();
     expect(body.code).toBe("CHAT_USAGE_LIMIT");
+    expect(body.error).toBe("Runtime usage limit reached. Try again later.");
     expect(mockSendToClient).toHaveBeenCalledWith(
       "client-1",
       expect.objectContaining({
@@ -378,13 +379,16 @@ describe("chat API", () => {
         payload: expect.objectContaining({
           conversationId: "conv-limit-1",
           code: "CHAT_USAGE_LIMIT",
+          message: "Runtime usage limit reached. Try again later.",
         }),
       }),
     );
   });
 
-  it("returns 500 with original error message for non-limit failures", async () => {
-    mockAdapterRun.mockRejectedValue(new Error("unexpected failure"));
+  it("returns 500 with a sanitized message for non-limit failures", async () => {
+    mockAdapterRun.mockRejectedValue(
+      new Error('upstream body leaked secret "token=abc123" <script>alert(1)</script>'),
+    );
 
     const res = await app.request("/chat", {
       method: "POST",
@@ -399,9 +403,20 @@ describe("chat API", () => {
 
     expect(res.status).toBe(500);
     expect(await res.json()).toMatchObject({
-      error: "unexpected failure",
+      error: "Chat request failed",
       code: "CHAT_REQUEST_FAILED",
     });
+    expect(mockSendToClient).toHaveBeenCalledWith(
+      "client-1",
+      expect.objectContaining({
+        type: "chat:error",
+        payload: expect.objectContaining({
+          conversationId: "conv-error-1",
+          code: "CHAT_REQUEST_FAILED",
+          message: "Chat request failed",
+        }),
+      }),
+    );
   });
 
   it("falls back to generic message when error has no message", async () => {

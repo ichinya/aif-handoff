@@ -1,3 +1,4 @@
+import { logger } from "@aif/shared";
 import {
   RuntimeLimitPrecision,
   RuntimeLimitScope,
@@ -35,6 +36,9 @@ interface NormalizeClaudeLimitSnapshotInput {
   checkedAt?: string;
 }
 
+const MAX_VALID_DATE_MS = 8_640_000_000_000_000;
+const log = logger("claude-limit");
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -56,7 +60,30 @@ function readNumber(value: unknown): number | null {
 function normalizeTimestamp(value: number | null): string | null {
   if (value == null) return null;
   const ms = value >= 1_000_000_000_000 ? value : value * 1000;
-  return new Date(ms).toISOString();
+  if (!Number.isFinite(ms) || Math.abs(ms) > MAX_VALID_DATE_MS) {
+    log.warn(
+      {
+        rawValue: value,
+        normalizedMs: ms,
+      },
+      "[FIX] Dropping invalid Claude reset hint while normalizing rate-limit metadata",
+    );
+    return null;
+  }
+
+  const date = new Date(ms);
+  if (Number.isNaN(date.getTime())) {
+    log.warn(
+      {
+        rawValue: value,
+        normalizedMs: ms,
+      },
+      "[FIX] Dropping invalid Claude reset hint while normalizing rate-limit metadata",
+    );
+    return null;
+  }
+
+  return date.toISOString();
 }
 
 function normalizeUtilizationPercent(value: number | null): number | null {
