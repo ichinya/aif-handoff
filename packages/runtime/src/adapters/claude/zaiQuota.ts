@@ -26,6 +26,9 @@ interface FetchZaiClaudeQuotaSnapshotInput {
 const WARNING_THRESHOLD = 10;
 const MAX_VALID_DATE_MS = 8_640_000_000_000_000;
 const ZAI_QUOTA_REQUEST_TIMEOUT_MS = 1_500;
+const ZAI_USAGE_WINDOW_HOURS = 24;
+
+type ZaiMonitorFetchKind = "quota" | "model_usage" | "tool_usage";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -39,6 +42,14 @@ function readString(value: unknown): string | null {
 
 function readFiniteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readRecordArray(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value)
+    ? value
+        .map((item) => asRecord(item))
+        .filter((item): item is Record<string, unknown> => item != null)
+    : [];
 }
 
 function normalizeTimestamp(value: unknown): string | null {
@@ -56,6 +67,41 @@ function normalizeTimestamp(value: unknown): string | null {
   }
 
   return date.toISOString();
+}
+
+function normalizeUsageBucketLabel(value: unknown): string | null {
+  return readString(value);
+}
+
+function formatUsageWindowDateTime(date: Date): string {
+  const pad = (target: number): string => String(target).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function buildUsageWindowSearchParams(now: Date = new Date()): URLSearchParams {
+  const startDate = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate() - 1,
+    now.getHours(),
+    0,
+    0,
+    0,
+  );
+  const endDate = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    now.getHours(),
+    59,
+    59,
+    999,
+  );
+
+  return new URLSearchParams({
+    startTime: formatUsageWindowDateTime(startDate),
+    endTime: formatUsageWindowDateTime(endDate),
+  });
 }
 
 function toPercentRemaining(percentUsed: number | null): number | null {
@@ -147,37 +193,51 @@ function resolveSnapshotStatus(windows: RuntimeLimitWindow[]): RuntimeLimitStatu
   return RuntimeLimitStatus.UNKNOWN;
 }
 
-export async function fetchZaiClaudeQuotaSnapshot(
+function buildMonitorHeaders(authToken: string): Record<string, string> {
+  return {
+    Authorization: authToken,
+    "Accept-Language": "en-US,en",
+    "Content-Type": "application/json",
+  };
+}
+
+async function fetchZaiMonitorPayload(
   input: FetchZaiClaudeQuotaSnapshotInput,
-): Promise<RuntimeLimitSnapshot | null> {
-  if (input.identity.providerFamily !== "zai-glm-coding" || !input.identity.baseOrigin) {
+  path: string,
+  kind: ZaiMonitorFetchKind,
+  options?: { includeUsageWindow?: boolean },
+): Promise<Record<string, unknown> | null> {
+  if (!input.identity.baseOrigin) {
     return null;
   }
 
-  const url = new URL("/api/monitor/usage/quota/limit", input.identity.baseOrigin);
+  const url = new URL(path, input.identity.baseOrigin);
+  if (options?.includeUsageWindow) {
+    url.search = buildUsageWindowSearchParams().toString();
+  }
+
   const abortController = new AbortController();
   const timeout = setTimeout(() => abortController.abort(), ZAI_QUOTA_REQUEST_TIMEOUT_MS);
   let response: Response;
   try {
     response = await fetch(url, {
-      headers: {
-        Authorization: input.authToken,
-        "Accept-Language": "en-US,en",
-        "Content-Type": "application/json",
-      },
+      headers: buildMonitorHeaders(input.authToken),
       signal: abortController.signal,
     });
   } catch (error) {
-    input.logger?.warn?.(
+    input.logger?.[kind === "quota" ? "warn" : "debug"]?.(
       {
         runtimeId: input.runtimeId,
         providerId: input.providerId,
         profileId: input.profileId ?? null,
         baseOrigin: input.identity.baseOrigin,
+        endpoint: url.pathname,
         timeoutMs: ZAI_QUOTA_REQUEST_TIMEOUT_MS,
         error: error instanceof Error ? error.message : String(error),
       },
-      "Unable to refresh Z.AI coding quota snapshot from provider monitor endpoint",
+      kind === "quota"
+        ? "Unable to refresh Z.AI coding quota snapshot from provider monitor endpoint"
+        : "Unable to refresh optional Z.AI usage summary from provider monitor endpoint",
     );
     return null;
   } finally {
@@ -185,21 +245,173 @@ export async function fetchZaiClaudeQuotaSnapshot(
   }
 
   if (!response.ok) {
-    input.logger?.warn?.(
+    input.logger?.[kind === "quota" ? "warn" : "debug"]?.(
       {
         runtimeId: input.runtimeId,
         providerId: input.providerId,
         profileId: input.profileId ?? null,
         baseOrigin: input.identity.baseOrigin,
+        endpoint: url.pathname,
         status: response.status,
       },
-      "Unable to refresh Z.AI coding quota snapshot from provider monitor endpoint",
+      kind === "quota"
+        ? "Unable to refresh Z.AI coding quota snapshot from provider monitor endpoint"
+        : "Unable to refresh optional Z.AI usage summary from provider monitor endpoint",
     );
     return null;
   }
 
   const payload = asRecord(await response.json());
-  const data = asRecord(payload?.data) ?? payload;
+  return asRecord(payload?.data) ?? payload;
+}
+
+function normalizeZaiModelUsageSummary(
+  payload: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  if (!payload) {
+    return null;
+  }
+
+  const totalUsage = asRecord(payload.totalUsage);
+  const modelSummaryList = readRecordArray(payload.modelSummaryList ?? totalUsage?.modelSummaryList)
+    .map((entry) => {
+      const modelName = readString(entry.modelName);
+      if (!modelName) {
+        return null;
+      }
+
+      return {
+        modelName,
+        totalTokens: readFiniteNumber(entry.totalTokens),
+        sortOrder: readFiniteNumber(entry.sortOrder),
+      };
+    })
+    .filter(
+      (
+        entry,
+      ): entry is {
+        modelName: string;
+        totalTokens: number | null;
+        sortOrder: number | null;
+      } => entry != null,
+    );
+
+  const sampledAt =
+    normalizeUsageBucketLabel(Array.isArray(payload.x_time) ? payload.x_time.at(-1) : null) ?? null;
+  const granularity = readString(payload.granularity);
+  const totalModelCallCount = readFiniteNumber(totalUsage?.totalModelCallCount);
+  const totalTokensUsage = readFiniteNumber(totalUsage?.totalTokensUsage);
+
+  if (
+    granularity == null &&
+    sampledAt == null &&
+    totalModelCallCount == null &&
+    totalTokensUsage == null &&
+    modelSummaryList.length === 0
+  ) {
+    return null;
+  }
+
+  return {
+    granularity,
+    sampledAt,
+    totalModelCallCount,
+    totalTokensUsage,
+    topModels: modelSummaryList,
+    windowHours: ZAI_USAGE_WINDOW_HOURS,
+  };
+}
+
+function normalizeZaiToolSummaryEntry(
+  entry: Record<string, unknown>,
+): { toolName: string; totalCount: number | null } | null {
+  const toolName =
+    readString(entry.toolName) ??
+    readString(entry.name) ??
+    readString(entry.toolCode) ??
+    readString(entry.modelCode);
+  if (!toolName) {
+    return null;
+  }
+
+  const totalCount =
+    readFiniteNumber(entry.totalCount) ??
+    readFiniteNumber(entry.totalUsage) ??
+    readFiniteNumber(entry.count) ??
+    readFiniteNumber(entry.usage);
+
+  return { toolName, totalCount };
+}
+
+function normalizeZaiToolUsageSummary(
+  payload: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  if (!payload) {
+    return null;
+  }
+
+  const totalUsage = asRecord(payload.totalUsage);
+  const toolSummaryList = readRecordArray(payload.toolSummaryList ?? totalUsage?.toolSummaryList)
+    .map((entry) => normalizeZaiToolSummaryEntry(entry))
+    .filter((entry): entry is { toolName: string; totalCount: number | null } => entry != null);
+
+  const sampledAt =
+    normalizeUsageBucketLabel(Array.isArray(payload.x_time) ? payload.x_time.at(-1) : null) ?? null;
+  const granularity = readString(payload.granularity);
+  const totalNetworkSearchCount =
+    readFiniteNumber(totalUsage?.totalNetworkSearchCount) ??
+    readFiniteNumber(payload.networkSearchCount);
+  const totalWebReadMcpCount =
+    readFiniteNumber(totalUsage?.totalWebReadMcpCount) ?? readFiniteNumber(payload.webReadMcpCount);
+  const totalZreadMcpCount =
+    readFiniteNumber(totalUsage?.totalZreadMcpCount) ?? readFiniteNumber(payload.zreadMcpCount);
+  const totalSearchMcpCount = readFiniteNumber(totalUsage?.totalSearchMcpCount);
+
+  if (
+    granularity == null &&
+    sampledAt == null &&
+    totalNetworkSearchCount == null &&
+    totalWebReadMcpCount == null &&
+    totalZreadMcpCount == null &&
+    totalSearchMcpCount == null &&
+    toolSummaryList.length === 0
+  ) {
+    return null;
+  }
+
+  return {
+    granularity,
+    sampledAt,
+    totalNetworkSearchCount,
+    totalWebReadMcpCount,
+    totalZreadMcpCount,
+    totalSearchMcpCount,
+    tools: toolSummaryList,
+    windowHours: ZAI_USAGE_WINDOW_HOURS,
+  };
+}
+
+export async function fetchZaiClaudeQuotaSnapshot(
+  input: FetchZaiClaudeQuotaSnapshotInput,
+): Promise<RuntimeLimitSnapshot | null> {
+  if (input.identity.providerFamily !== "zai-glm-coding" || !input.identity.baseOrigin) {
+    return null;
+  }
+
+  const [data, modelUsagePayload, toolUsagePayload] = await Promise.all([
+    fetchZaiMonitorPayload(input, "/api/monitor/usage/quota/limit", "quota"),
+    fetchZaiMonitorPayload(input, "/api/monitor/usage/model-usage", "model_usage", {
+      includeUsageWindow: true,
+    }),
+    fetchZaiMonitorPayload(input, "/api/monitor/usage/tool-usage", "tool_usage", {
+      includeUsageWindow: true,
+    }),
+  ]);
+
+  if (!data) {
+    return null;
+  }
+
   const rawLimits = Array.isArray(data?.limits) ? data.limits : [];
   const windows = rawLimits
     .map((limit) => buildWindowFromLimit(asRecord(limit) ?? {}))
@@ -216,6 +428,8 @@ export async function fetchZaiClaudeQuotaSnapshot(
   const usageDetails =
     rawLimits.map((limit) => asRecord(limit)).find((limit) => Array.isArray(limit?.usageDetails))
       ?.usageDetails ?? null;
+  const modelUsageSummary = normalizeZaiModelUsageSummary(modelUsagePayload);
+  const toolUsageSummary = normalizeZaiToolUsageSummary(toolUsagePayload);
 
   const snapshot: RuntimeLimitSnapshot = {
     source: RuntimeLimitSource.PROVIDER_API,
@@ -238,6 +452,8 @@ export async function fetchZaiClaudeQuotaSnapshot(
       accountLabel: input.identity.accountLabel,
       planType: readString(data?.level),
       usageDetails,
+      modelUsageSummary,
+      toolUsageSummary,
     },
   };
 

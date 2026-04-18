@@ -10,31 +10,73 @@ describe("fetchZaiClaudeQuotaSnapshot", () => {
   });
 
   it("normalizes Z.AI quota payloads into exact runtime-limit snapshots", async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        code: 200,
-        success: true,
-        data: {
-          level: "pro",
-          limits: [
-            {
-              type: "TIME_LIMIT",
-              usage: 1000,
-              currentValue: 125,
-              remaining: 875,
-              percentage: 12.5,
-              nextResetTime: 1_800_000_000_000,
-              usageDetails: [{ modelCode: "web-reader", usage: 12 }],
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          code: 200,
+          success: true,
+          data: {
+            level: "pro",
+            limits: [
+              {
+                type: "TIME_LIMIT",
+                usage: 1000,
+                currentValue: 125,
+                remaining: 875,
+                percentage: 12.5,
+                nextResetTime: 1_800_000_000_000,
+                usageDetails: [{ modelCode: "web-reader", usage: 12 }],
+              },
+              {
+                type: "TOKENS_LIMIT",
+                percentage: 4,
+              },
+            ],
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          code: 200,
+          success: true,
+          data: {
+            x_time: ["2026-04-18 09:00", "2026-04-18 10:00"],
+            granularity: "hourly",
+            totalUsage: {
+              totalModelCallCount: 42,
+              totalTokensUsage: 987654,
+              modelSummaryList: [
+                { modelName: "GLM-5.1", totalTokens: 876543, sortOrder: 1 },
+                { modelName: "GLM-5-Turbo", totalTokens: 111111, sortOrder: 2 },
+              ],
             },
-            {
-              type: "TOKENS_LIMIT",
-              percentage: 4,
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          code: 200,
+          success: true,
+          data: {
+            x_time: ["2026-04-18 09:00", "2026-04-18 10:00"],
+            granularity: "hourly",
+            totalUsage: {
+              totalNetworkSearchCount: 3,
+              totalWebReadMcpCount: 7,
+              totalZreadMcpCount: 2,
+              totalSearchMcpCount: 12,
+              toolSummaryList: [
+                { toolName: "web-reader", totalCount: 7 },
+                { toolName: "search-prime", totalCount: 3 },
+              ],
             },
-          ],
-        },
-      }),
-    }) as typeof fetch;
+          },
+        }),
+      }) as typeof fetch;
 
     const snapshot = await fetchZaiClaudeQuotaSnapshot({
       runtimeId: "claude",
@@ -69,6 +111,30 @@ describe("fetchZaiClaudeQuotaSnapshot", () => {
         quotaSource: "zai_monitor",
         accountFingerprint: "glm-account-1",
         planType: "pro",
+        modelUsageSummary: {
+          granularity: "hourly",
+          sampledAt: "2026-04-18 10:00",
+          totalModelCallCount: 42,
+          totalTokensUsage: 987654,
+          windowHours: 24,
+          topModels: [
+            { modelName: "GLM-5.1", totalTokens: 876543, sortOrder: 1 },
+            { modelName: "GLM-5-Turbo", totalTokens: 111111, sortOrder: 2 },
+          ],
+        },
+        toolUsageSummary: {
+          granularity: "hourly",
+          sampledAt: "2026-04-18 10:00",
+          totalNetworkSearchCount: 3,
+          totalWebReadMcpCount: 7,
+          totalZreadMcpCount: 2,
+          totalSearchMcpCount: 12,
+          windowHours: 24,
+          tools: [
+            { toolName: "web-reader", totalCount: 7 },
+            { toolName: "search-prime", totalCount: 3 },
+          ],
+        },
       },
     });
     expect(snapshot?.windows).toEqual([
@@ -89,6 +155,7 @@ describe("fetchZaiClaudeQuotaSnapshot", () => {
         percentRemaining: 96,
       }),
     ]);
+    expect(global.fetch).toHaveBeenCalledTimes(3);
   });
 
   it("returns null for non-Z.AI provider families", async () => {

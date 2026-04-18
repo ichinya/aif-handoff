@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type {
   RuntimeLimitSnapshot,
   RuntimeLimitWindow,
@@ -6,6 +6,7 @@ import type {
   RuntimeProfileUsage,
 } from "@aif/shared/browser";
 import { Badge } from "@/components/ui/badge";
+import { Collapsible } from "@/components/ui/collapsible";
 import {
   Dialog,
   DialogClose,
@@ -37,6 +38,53 @@ interface RuntimeUsageEntry {
 }
 
 const NUMBER_FORMAT = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
+const COMPACT_NUMBER_FORMAT = new Intl.NumberFormat("en-US", {
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
+
+interface ZaiModelUsageItem {
+  modelName: string;
+  totalTokens: number | null;
+}
+
+interface ZaiModelUsageSummary {
+  granularity: string | null;
+  sampledAt: string | null;
+  totalModelCallCount: number | null;
+  totalTokensUsage: number | null;
+  topModels: ZaiModelUsageItem[];
+  windowHours: number | null;
+}
+
+interface ZaiToolUsageItem {
+  toolName: string;
+  totalCount: number | null;
+}
+
+interface ZaiToolUsageSummary {
+  granularity: string | null;
+  sampledAt: string | null;
+  totalNetworkSearchCount: number | null;
+  totalWebReadMcpCount: number | null;
+  totalZreadMcpCount: number | null;
+  totalSearchMcpCount: number | null;
+  tools: ZaiToolUsageItem[];
+  windowHours: number | null;
+}
+
+interface MetricBadgeValue {
+  key: string;
+  text: string;
+}
+
+interface UsageInsightsCardProps {
+  title: string;
+  updatedLabel: string | null;
+  description: string;
+  badges: MetricBadgeValue[];
+  children: React.ReactNode;
+}
 
 function toFiniteNumber(value: number | null | undefined): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -49,6 +97,10 @@ function formatPercent(value: number): string {
 
 function formatQuantity(value: number): string {
   return NUMBER_FORMAT.format(value);
+}
+
+function formatCompactQuantity(value: number): string {
+  return COMPACT_NUMBER_FORMAT.format(value);
 }
 
 function formatPlanLabel(value: string | null): string | null {
@@ -83,6 +135,21 @@ function formatTimestamp(value: string | null | undefined): string | null {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function formatTimestampOrRaw(value: string | null | undefined): string | null {
+  return (
+    formatTimestamp(value) ?? (typeof value === "string" && value.trim().length > 0 ? value : null)
+  );
+}
+
+function formatGranularity(value: string | null | undefined): string | null {
+  if (!value) return null;
+  return value
+    .split(/[_\-\s]+/)
+    .filter((segment) => segment.length > 0)
+    .map((segment) => segment.toUpperCase())
+    .join(" ");
 }
 
 function mapWindowName(name: string | null | undefined): string | null {
@@ -196,6 +263,108 @@ function readProviderMetaString(
   return typeof rawValue === "string" && rawValue.trim().length > 0 ? rawValue.trim() : null;
 }
 
+function readProviderMetaRecord(
+  snapshot: RuntimeLimitSnapshot | null | undefined,
+  key: string,
+): Record<string, unknown> | null {
+  const providerMeta = snapshot?.providerMeta;
+  if (!providerMeta || typeof providerMeta !== "object") {
+    return null;
+  }
+
+  const rawValue = (providerMeta as Record<string, unknown>)[key];
+  return rawValue && typeof rawValue === "object" && !Array.isArray(rawValue)
+    ? (rawValue as Record<string, unknown>)
+    : null;
+}
+
+function readRecordString(record: Record<string, unknown> | null, key: string): string | null {
+  const rawValue = record?.[key];
+  return typeof rawValue === "string" && rawValue.trim().length > 0 ? rawValue.trim() : null;
+}
+
+function readRecordNumber(record: Record<string, unknown> | null, key: string): number | null {
+  const rawValue = record?.[key];
+  return typeof rawValue === "number" && Number.isFinite(rawValue) ? rawValue : null;
+}
+
+function readRecordArray(
+  record: Record<string, unknown> | null,
+  key: string,
+): Record<string, unknown>[] {
+  const rawValue = record?.[key];
+  return Array.isArray(rawValue)
+    ? rawValue.filter(
+        (item): item is Record<string, unknown> =>
+          typeof item === "object" && item !== null && !Array.isArray(item),
+      )
+    : [];
+}
+
+function readZaiModelUsageSummary(
+  snapshot: RuntimeLimitSnapshot | null | undefined,
+): ZaiModelUsageSummary | null {
+  const summary = readProviderMetaRecord(snapshot, "modelUsageSummary");
+  if (!summary) {
+    return null;
+  }
+
+  const topModels = readRecordArray(summary, "topModels")
+    .map((item) => {
+      const modelName = readRecordString(item, "modelName");
+      if (!modelName) {
+        return null;
+      }
+      return {
+        modelName,
+        totalTokens: readRecordNumber(item, "totalTokens"),
+      };
+    })
+    .filter((item): item is ZaiModelUsageItem => item != null);
+
+  return {
+    granularity: readRecordString(summary, "granularity"),
+    sampledAt: readRecordString(summary, "sampledAt"),
+    totalModelCallCount: readRecordNumber(summary, "totalModelCallCount"),
+    totalTokensUsage: readRecordNumber(summary, "totalTokensUsage"),
+    topModels,
+    windowHours: readRecordNumber(summary, "windowHours"),
+  };
+}
+
+function readZaiToolUsageSummary(
+  snapshot: RuntimeLimitSnapshot | null | undefined,
+): ZaiToolUsageSummary | null {
+  const summary = readProviderMetaRecord(snapshot, "toolUsageSummary");
+  if (!summary) {
+    return null;
+  }
+
+  const tools = readRecordArray(summary, "tools")
+    .map((item) => {
+      const toolName = readRecordString(item, "toolName");
+      if (!toolName) {
+        return null;
+      }
+      return {
+        toolName,
+        totalCount: readRecordNumber(item, "totalCount"),
+      };
+    })
+    .filter((item): item is ZaiToolUsageItem => item != null);
+
+  return {
+    granularity: readRecordString(summary, "granularity"),
+    sampledAt: readRecordString(summary, "sampledAt"),
+    totalNetworkSearchCount: readRecordNumber(summary, "totalNetworkSearchCount"),
+    totalWebReadMcpCount: readRecordNumber(summary, "totalWebReadMcpCount"),
+    totalZreadMcpCount: readRecordNumber(summary, "totalZreadMcpCount"),
+    totalSearchMcpCount: readRecordNumber(summary, "totalSearchMcpCount"),
+    tools,
+    windowHours: readRecordNumber(summary, "windowHours"),
+  };
+}
+
 function parseUrlSafe(value: string | null | undefined): URL | null {
   if (!value) return null;
   try {
@@ -306,6 +475,64 @@ function usageDetailRows(usage: RuntimeProfileUsage): Array<{ label: string; val
   return rows;
 }
 
+function usageSummaryBadges(summary: ZaiModelUsageSummary): MetricBadgeValue[] {
+  const badges: MetricBadgeValue[] = [];
+
+  if (summary.totalModelCallCount != null) {
+    badges.push({
+      key: "calls",
+      text: `CALLS ${formatCompactQuantity(summary.totalModelCallCount)}`,
+    });
+  }
+  if (summary.totalTokensUsage != null) {
+    badges.push({
+      key: "tokens",
+      text: `TOKENS ${formatCompactQuantity(summary.totalTokensUsage)}`,
+    });
+  }
+  if (summary.windowHours != null) {
+    badges.push({ key: "window", text: `${summary.windowHours}H WINDOW` });
+  }
+  const granularity = formatGranularity(summary.granularity);
+  if (granularity) {
+    badges.push({ key: "granularity", text: granularity });
+  }
+
+  return badges;
+}
+
+function toolSummaryBadges(summary: ZaiToolUsageSummary): MetricBadgeValue[] {
+  const badges: MetricBadgeValue[] = [];
+
+  if (summary.totalNetworkSearchCount != null) {
+    badges.push({
+      key: "search",
+      text: `SEARCH ${formatCompactQuantity(summary.totalNetworkSearchCount)}`,
+    });
+  }
+  if (summary.totalWebReadMcpCount != null) {
+    badges.push({
+      key: "web-read",
+      text: `WEB READ ${formatCompactQuantity(summary.totalWebReadMcpCount)}`,
+    });
+  }
+  if (summary.totalZreadMcpCount != null) {
+    badges.push({
+      key: "zread",
+      text: `ZREAD ${formatCompactQuantity(summary.totalZreadMcpCount)}`,
+    });
+  }
+  if (summary.windowHours != null) {
+    badges.push({ key: "window", text: `${summary.windowHours}H WINDOW` });
+  }
+  const granularity = formatGranularity(summary.granularity);
+  if (granularity) {
+    badges.push({ key: "granularity", text: granularity });
+  }
+
+  return badges;
+}
+
 function isLocalAccountEntry(entry: RuntimeUsageEntry): boolean {
   return (
     (entry.runtimeId === "codex" || entry.runtimeId === "claude") &&
@@ -350,6 +577,49 @@ function formatEntryHeading(entry: RuntimeUsageEntry): string {
   ].filter((value): value is string => typeof value === "string" && value.length > 0);
 
   return parts.join(" ");
+}
+
+function UsageInsightsCard({
+  title,
+  updatedLabel,
+  description,
+  badges,
+  children,
+}: UsageInsightsCardProps) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="border border-border/70 bg-card/60 p-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</p>
+        <span className="text-[11px] text-muted-foreground">
+          {updatedLabel ? `Sampled ${updatedLabel}` : "No sample time"}
+        </span>
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">{description}</p>
+      <Collapsible
+        open={expanded}
+        onOpenChange={setExpanded}
+        trigger={expanded ? "Hide details" : "Show details"}
+        className="mt-3 space-y-3"
+      >
+        {badges.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {badges.map((badge) => (
+              <Badge
+                key={`${title}:${badge.key}`}
+                size="sm"
+                className="border-border bg-background/60 text-foreground"
+              >
+                {badge.text}
+              </Badge>
+            ))}
+          </div>
+        ) : null}
+        {children}
+      </Collapsible>
+    </div>
+  );
 }
 
 function buildRuntimeUsageEntries(profiles: RuntimeProfile[]): RuntimeUsageEntry[] {
@@ -450,6 +720,14 @@ export function RuntimeUsageDialog({ open, onOpenChange, projectId }: RuntimeUsa
               const windowList = entry.snapshot?.windows ?? [];
               const usageRows = entry.lastUsage ? usageDetailRows(entry.lastUsage) : [];
               const headingLabel = formatEntryHeading(entry);
+              const modelUsageSummary = readZaiModelUsageSummary(entry.snapshot);
+              const toolUsageSummary = readZaiToolUsageSummary(entry.snapshot);
+              const modelUsageBadges = modelUsageSummary
+                ? usageSummaryBadges(modelUsageSummary)
+                : [];
+              const toolUsageBadges = toolUsageSummary ? toolSummaryBadges(toolUsageSummary) : [];
+              const modelUsageUpdatedLabel = formatTimestampOrRaw(modelUsageSummary?.sampledAt);
+              const toolUsageUpdatedLabel = formatTimestampOrRaw(toolUsageSummary?.sampledAt);
 
               return (
                 <div key={entry.key} className="border border-border bg-background/40 p-3">
@@ -543,17 +821,19 @@ export function RuntimeUsageDialog({ open, onOpenChange, projectId }: RuntimeUsa
                       </div>
 
                       {entry.lastUsage ? (
-                        <div className="mt-3 grid gap-1 sm:grid-cols-2">
-                          {usageRows.map((row) => (
-                            <div
-                              key={`${entry.key}:usage:${row.label}`}
-                              className="border border-border/70 bg-background/50 px-2 py-1.5"
-                            >
-                              <p className="text-[11px] text-muted-foreground">{row.label}</p>
-                              <p className="text-sm font-medium">{row.value}</p>
-                            </div>
-                          ))}
-                        </div>
+                        <>
+                          <div className="mt-3 grid gap-1 sm:grid-cols-2">
+                            {usageRows.map((row) => (
+                              <div
+                                key={`${entry.key}:usage:${row.label}`}
+                                className="border border-border/70 bg-background/50 px-2 py-1.5"
+                              >
+                                <p className="text-[11px] text-muted-foreground">{row.label}</p>
+                                <p className="text-sm font-medium">{row.value}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </>
                       ) : (
                         <div className="mt-3 border border-border/70 bg-background/50 px-2 py-1.5 text-[11px] text-muted-foreground">
                           No recorded usage for this runtime profile yet.
@@ -561,6 +841,72 @@ export function RuntimeUsageDialog({ open, onOpenChange, projectId }: RuntimeUsa
                       )}
                     </div>
                   </div>
+
+                  {modelUsageSummary || toolUsageSummary ? (
+                    <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                      {modelUsageSummary ? (
+                        <UsageInsightsCard
+                          title="Recent Model Usage"
+                          updatedLabel={modelUsageUpdatedLabel}
+                          description="Recent GLM model traffic from the provider monitor endpoint."
+                          badges={modelUsageBadges}
+                        >
+                          {modelUsageSummary.topModels.length > 0 ? (
+                            <div className="space-y-1">
+                              {modelUsageSummary.topModels.map((item, index) => (
+                                <div
+                                  key={`${entry.key}:model-summary:${item.modelName}:${index}`}
+                                  className="flex flex-wrap items-start justify-between gap-2 border border-border/70 bg-background/50 px-2 py-1.5"
+                                >
+                                  <p className="text-xs font-medium">{item.modelName}</p>
+                                  <p className="text-[11px] text-muted-foreground">
+                                    {item.totalTokens != null
+                                      ? `${formatQuantity(item.totalTokens)} tokens`
+                                      : "No token total"}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="border border-border/70 bg-background/50 px-2 py-1.5 text-[11px] text-muted-foreground">
+                              No model-level breakdown returned for this usage window.
+                            </div>
+                          )}
+                        </UsageInsightsCard>
+                      ) : null}
+
+                      {toolUsageSummary ? (
+                        <UsageInsightsCard
+                          title="Recent Tool Usage"
+                          updatedLabel={toolUsageUpdatedLabel}
+                          description="Recent GLM MCP and tool activity from the provider monitor endpoint."
+                          badges={toolUsageBadges}
+                        >
+                          {toolUsageSummary.tools.length > 0 ? (
+                            <div className="space-y-1">
+                              {toolUsageSummary.tools.map((item, index) => (
+                                <div
+                                  key={`${entry.key}:tool-summary:${item.toolName}:${index}`}
+                                  className="flex flex-wrap items-start justify-between gap-2 border border-border/70 bg-background/50 px-2 py-1.5"
+                                >
+                                  <p className="text-xs font-medium">{item.toolName}</p>
+                                  <p className="text-[11px] text-muted-foreground">
+                                    {item.totalCount != null
+                                      ? `${formatQuantity(item.totalCount)} calls`
+                                      : "No usage total"}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="border border-border/70 bg-background/50 px-2 py-1.5 text-[11px] text-muted-foreground">
+                              No tool-level breakdown returned for this usage window.
+                            </div>
+                          )}
+                        </UsageInsightsCard>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
               );
             })}

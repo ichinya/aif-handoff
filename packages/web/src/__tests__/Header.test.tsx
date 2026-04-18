@@ -368,6 +368,114 @@ describe("Header", () => {
     expect(screen.getByText("25,951")).toBeDefined();
   });
 
+  it("shows GLM model and tool usage summaries from Z.AI provider metadata", () => {
+    mockRuntimeProfiles = [
+      {
+        id: "profile-claude-glm",
+        projectId: "project-1",
+        name: "Claude",
+        runtimeId: "claude",
+        providerId: "anthropic",
+        transport: "sdk",
+        baseUrl: "https://api.z.ai/api/anthropic",
+        apiKeyEnvVar: "ANTHROPIC_API_KEY",
+        defaultModel: "GLM-5-Turbo",
+        headers: {},
+        options: {},
+        enabled: true,
+        runtimeLimitSnapshot: {
+          source: "provider_api",
+          status: "ok",
+          precision: "exact",
+          checkedAt: "2026-04-18T15:33:00.000Z",
+          providerId: "anthropic",
+          runtimeId: "claude",
+          profileId: "profile-claude-glm",
+          primaryScope: "tokens",
+          resetAt: "2099-04-18T17:00:00.000Z",
+          warningThreshold: 10,
+          windows: [
+            {
+              scope: "tokens",
+              name: "5h",
+              percentRemaining: 99,
+              resetAt: "2099-04-18T17:00:00.000Z",
+            },
+            {
+              scope: "tool_usage",
+              name: "MCP",
+              percentRemaining: 100,
+              resetAt: "2099-05-01T00:00:00.000Z",
+            },
+          ],
+          providerMeta: {
+            providerFamily: "zai-glm-coding",
+            providerLabel: "Z.AI GLM Coding Plan",
+            planType: "pro",
+            modelUsageSummary: {
+              sampledAt: "2026-04-18 15:00",
+              granularity: "hourly",
+              totalModelCallCount: 42,
+              totalTokensUsage: 1200,
+              windowHours: 24,
+              topModels: [
+                { modelName: "GLM-5.1", totalTokens: 900 },
+                { modelName: "GLM-5-Turbo", totalTokens: 300 },
+              ],
+            },
+            toolUsageSummary: {
+              sampledAt: "2026-04-18 15:00",
+              granularity: "hourly",
+              totalNetworkSearchCount: 3,
+              totalWebReadMcpCount: 7,
+              totalZreadMcpCount: 2,
+              totalSearchMcpCount: 12,
+              windowHours: 24,
+              tools: [
+                { toolName: "web-reader", totalCount: 7 },
+                { toolName: "search-prime", totalCount: 3 },
+              ],
+            },
+          },
+        },
+        runtimeLimitUpdatedAt: "2026-04-18T15:33:00.000Z",
+        lastUsage: {
+          inputTokens: 25869,
+          outputTokens: 82,
+          totalTokens: 25951,
+          costUsd: 0.08,
+        },
+        lastUsageAt: "2026-04-18T15:33:00.000Z",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+    ];
+
+    renderHeader();
+
+    fireEvent.click(screen.getByRole("button", { name: "Runtime usage" }));
+
+    expect(screen.getByText("Recent Model Usage")).toBeDefined();
+    expect(screen.getByText("Recent Tool Usage")).toBeDefined();
+    expect(screen.getAllByRole("button", { name: "Show details" })).toHaveLength(2);
+
+    const detailButtons = screen.getAllByRole("button", { name: "Show details" });
+    fireEvent.click(detailButtons[0]);
+    fireEvent.click(detailButtons[1]);
+
+    expect(screen.getByText("CALLS 42")).toBeDefined();
+    expect(screen.getByText("TOKENS 1.2K")).toBeDefined();
+    expect(screen.getAllByText("24H WINDOW").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("HOURLY").length).toBeGreaterThan(0);
+    expect(screen.getByText("GLM-5.1")).toBeDefined();
+    expect(screen.getByText("900 tokens")).toBeDefined();
+    expect(screen.getByText("SEARCH 3")).toBeDefined();
+    expect(screen.getByText("WEB READ 7")).toBeDefined();
+    expect(screen.getByText("ZREAD 2")).toBeDefined();
+    expect(screen.getByText("web-reader")).toBeDefined();
+    expect(screen.getByText("7 calls")).toBeDefined();
+  });
+
   it("merges local Codex profiles that share the same account quota", () => {
     mockRuntimeProfiles = [
       {

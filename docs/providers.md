@@ -84,7 +84,10 @@ Auto-pause semantics follow the precision:
 For Claude-family profiles, the runtime now distinguishes the backend by resolved endpoint identity, not just `runtimeId/providerId/model`:
 
 - Native Anthropic uses SDK `rate_limit_event` (SDK/CLI) or Anthropic headers (API).
-- Z.AI / GLM Coding Plan is detected from Anthropic-compatible endpoints such as `https://api.z.ai/api/anthropic` and refreshes quota from the provider monitor endpoint (`/api/monitor/usage/quota/limit`) when headers are insufficient.
+- Z.AI / GLM Coding Plan is detected from Anthropic-compatible endpoints such as `https://api.z.ai/api/anthropic` and refreshes quota from the provider monitor endpoints when headers are insufficient:
+  - `/api/monitor/usage/quota/limit` for live quota windows
+  - `/api/monitor/usage/model-usage` for recent model/token usage summaries
+  - `/api/monitor/usage/tool-usage` for recent MCP/tool usage summaries
 - Alibaba Coding Plan Anthropic-compatible endpoints are tracked as a separate family, but remain `partial` for quota visibility because no official provider-side polling API is integrated yet.
 - Other Anthropic-compatible endpoints fall back to headers for API transport and SDK events for SDK/CLI transport when available.
 
