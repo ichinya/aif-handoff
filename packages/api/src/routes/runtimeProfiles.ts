@@ -12,7 +12,8 @@ import {
   deleteRuntimeProfile,
   findRuntimeProfileById,
   findTaskById,
-  listRuntimeProfiles,
+  getRuntimeProfileResponseById,
+  listRuntimeProfileResponses,
   resolveEffectiveRuntimeProfile,
   toRuntimeProfileResponse,
   updateRuntimeProfile,
@@ -192,16 +193,15 @@ runtimeProfilesRouter.get("/", async (c) => {
     { projectId, includeGlobal, enabledOnly },
     "DEBUG [runtime-profile-route] List request",
   );
-  const rows = listRuntimeProfiles({ projectId, includeGlobal, enabledOnly });
-  return c.json(rows.map(toRuntimeProfileResponse));
+  return c.json(listRuntimeProfileResponses({ projectId, includeGlobal, enabledOnly }));
 });
 
 // GET /runtime-profiles/:id
 runtimeProfilesRouter.get("/:id", async (c) => {
   const { id } = c.req.param();
-  const row = findRuntimeProfileById(id);
-  if (!row) return c.json({ error: "Runtime profile not found" }, 404);
-  return c.json(toRuntimeProfileResponse(row));
+  const profile = getRuntimeProfileResponseById(id);
+  if (!profile) return c.json({ error: "Runtime profile not found" }, 404);
+  return c.json(profile);
 });
 
 // POST /runtime-profiles

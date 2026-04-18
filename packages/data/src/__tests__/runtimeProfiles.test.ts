@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { projects } from "@aif/shared";
+import { projects, usageEvents } from "@aif/shared";
 import { createTestDb } from "@aif/shared/server";
 
 const testDb = { current: createTestDb() };
@@ -25,6 +25,7 @@ const {
   clearRuntimeProfileLimitSnapshot,
   deleteRuntimeProfile,
   listRuntimeProfiles,
+  getRuntimeProfileResponseById,
   toRuntimeProfileResponse,
   updateProjectRuntimeDefaults,
   updateTaskRuntimeOverride,
@@ -114,6 +115,63 @@ describe("runtime profiles data layer", () => {
     expect(updated!.defaultModel).toBe("gpt-5.4");
     expect(updated!.enabled).toBe(false);
     expect(toRuntimeProfileResponse(updated!).options).toEqual({ mode: "cli" });
+  });
+
+  it("attaches the latest recorded usage for each runtime profile", () => {
+    const profile = createRuntimeProfile({
+      projectId: "proj-1",
+      name: "Codex SDK",
+      runtimeId: "codex",
+      providerId: "openai",
+      transport: "sdk",
+      enabled: true,
+    });
+
+    testDb.current
+      .insert(usageEvents)
+      .values([
+        {
+          id: "usage-old",
+          source: "chat",
+          projectId: "proj-1",
+          profileId: profile!.id,
+          runtimeId: "codex",
+          providerId: "openai",
+          transport: "sdk",
+          usageReporting: "full",
+          inputTokens: 10,
+          outputTokens: 5,
+          totalTokens: 15,
+          costUsd: 0.01,
+          createdAt: "2026-04-18T09:00:00.000Z",
+        },
+        {
+          id: "usage-new",
+          source: "chat",
+          projectId: "proj-1",
+          profileId: profile!.id,
+          runtimeId: "codex",
+          providerId: "openai",
+          transport: "sdk",
+          usageReporting: "full",
+          inputTokens: 40,
+          outputTokens: 12,
+          totalTokens: 52,
+          costUsd: 0.03,
+          createdAt: "2026-04-18T10:00:00.000Z",
+        },
+      ])
+      .run();
+
+    const resolved = getRuntimeProfileResponseById(profile!.id);
+
+    expect(resolved?.lastUsage).toEqual({
+      inputTokens: 40,
+      outputTokens: 12,
+      totalTokens: 52,
+      costUsd: 0.03,
+    });
+    expect(resolved?.lastUsageAt).toBe("2026-04-18T10:00:00.000Z");
   });
 
   it("persists and clears runtime profile limit snapshots", () => {

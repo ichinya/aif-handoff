@@ -40,6 +40,7 @@ export {
   RUNTIME_TRANSPORTS,
   RuntimeTransport,
   type RuntimeDescriptor,
+  type RuntimeProfileUsage,
   type RuntimeProfile,
   type CreateRuntimeProfileInput,
   type UpdateRuntimeProfileInput,

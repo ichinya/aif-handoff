@@ -291,10 +291,12 @@ GET /runtime-profiles?projectId=<uuid>&includeGlobal=true&enabledOnly=false
 
 Notable runtime profile fields in list/detail/effective responses:
 
-| Field                   | Type         | Description                                                               |
-| ----------------------- | ------------ | ------------------------------------------------------------------------- |
-| `runtimeLimitSnapshot`  | object\|null | Latest normalized provider/runtime limit state persisted for this profile |
-| `runtimeLimitUpdatedAt` | string\|null | ISO timestamp when the profile snapshot was last written or cleared       |
+| Field                   | Type         | Description                                                                |
+| ----------------------- | ------------ | -------------------------------------------------------------------------- |
+| `runtimeLimitSnapshot`  | object\|null | Latest normalized provider/runtime limit state persisted for this profile  |
+| `runtimeLimitUpdatedAt` | string\|null | ISO timestamp when the profile snapshot was last written or cleared        |
+| `lastUsage`             | object\|null | Last recorded per-run usage totals for this profile (`input/output/total`) |
+| `lastUsageAt`           | string\|null | ISO timestamp of the latest recorded usage event for this profile          |
 
 ### Effective Runtime Selection
 
@@ -722,7 +724,7 @@ All events are JSON with this structure:
 | `task:scheduled_fired`            | Full task object                                                                                   | Coordinator fires a backlog task whose `scheduledAt` is due                          |
 | `project:auto_queue_mode_changed` | Full project object                                                                                | `PATCH /projects/:id/auto-queue-mode`                                                |
 | `project:auto_queue_advanced`     | `{ id: string }` (task id)                                                                         | Coordinator auto-advances the next backlog task in an auto-queue project             |
-| `project:runtime_limit_updated`   | `{ projectId, runtimeProfileId, taskId? }`                                                         | Persisted runtime-profile limit snapshot changed                                     |
+| `project:runtime_limit_updated`   | `{ projectId, runtimeProfileId, taskId? }`                                                         | Persisted runtime-profile limit state or last usage changed                          |
 
 ### Connection
 

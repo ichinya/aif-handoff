@@ -86,11 +86,13 @@ describe("ProjectRuntimeSettings", () => {
 
     render(<ProjectRuntimeSettings project={project} open hideTrigger />);
 
-    expect(screen.getByText("BLOCKED")).toBeDefined();
+    expect(screen.getByText("Recent Limit Signals")).toBeDefined();
+    expect(screen.getAllByText("Claude Team").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("BLOCKED").length).toBeGreaterThan(0);
     expect(
-      screen.getByText("Request quota crossed the 10% safety threshold (5% remaining)."),
-    ).toBeDefined();
-    expect(screen.getByText(/Resets/)).toBeDefined();
-    expect(screen.getByText(/Checked/)).toBeDefined();
+      screen.getAllByText("Request quota crossed the 10% safety threshold (5% remaining).").length,
+    ).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Resets/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Checked/).length).toBeGreaterThan(0);
   });
 });

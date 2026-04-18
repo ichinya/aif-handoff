@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 import { createTestDb } from "@aif/shared/server";
-import { projects, runtimeProfiles, tasks } from "@aif/shared";
+import { projects, runtimeProfiles, tasks, usageEvents } from "@aif/shared";
 
 const testDb = { current: createTestDb() };
 
@@ -221,6 +221,54 @@ describe("runtimeProfiles API", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toHaveLength(2);
+  });
+
+  it("includes last recorded usage on runtime profile responses", async () => {
+    const db = testDb.current;
+    db.insert(runtimeProfiles)
+      .values({
+        id: "profile-usage",
+        projectId: "project-1",
+        name: "Codex SDK",
+        runtimeId: "codex",
+        providerId: "openai",
+        transport: "sdk",
+        enabled: true,
+      })
+      .run();
+    db.insert(usageEvents)
+      .values({
+        id: "usage-1",
+        source: "chat",
+        projectId: "project-1",
+        profileId: "profile-usage",
+        runtimeId: "codex",
+        providerId: "openai",
+        transport: "sdk",
+        usageReporting: "full",
+        inputTokens: 120,
+        outputTokens: 45,
+        totalTokens: 165,
+        costUsd: 0.08,
+        createdAt: "2026-04-18T10:00:00.000Z",
+      })
+      .run();
+
+    const res = await app.request("/runtime-profiles?projectId=project-1&includeGlobal=true");
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body[0]).toEqual(
+      expect.objectContaining({
+        id: "profile-usage",
+        lastUsage: {
+          inputTokens: 120,
+          outputTokens: 45,
+          totalTokens: 165,
+          costUsd: 0.08,
+        },
+        lastUsageAt: "2026-04-18T10:00:00.000Z",
+      }),
+    );
   });
 
   it("applies boolean query sanitization for includeGlobal/enabledOnly flags", async () => {

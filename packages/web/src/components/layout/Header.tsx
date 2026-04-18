@@ -1,11 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { Bell, Moon, Sun, Command, ChartColumn, Cpu, Map, Settings } from "lucide-react";
+import { Bell, Moon, Sun, Command, ChartColumn, Cpu, Map, Settings, Activity } from "lucide-react";
 import { useTheme } from "@/hooks/useTheme";
 import { useEffectiveChatRuntime } from "@/hooks/useRuntimeProfiles";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
-import { getRuntimeLimitDisplay, runtimeLimitBadgeClassName } from "@/lib/runtimeLimits";
 import { ProjectSelector } from "@/components/project/ProjectSelector";
 import type { Project } from "@aif/shared/browser";
 import type { TaskMetricsSummary } from "@/lib/taskMetrics";
@@ -13,6 +11,7 @@ import { NotificationsDialog } from "./NotificationsDialog";
 import { MetricsDialog, type AggregateProjectTotals } from "./MetricsDialog";
 import { RoadmapDialog } from "./RoadmapDialog";
 import { GlobalSettingsDialog } from "./GlobalSettingsDialog";
+import { RuntimeUsageDialog } from "./RuntimeUsageDialog";
 
 export interface RoadmapImportResult {
   roadmapAlias: string;
@@ -68,21 +67,26 @@ export function Header({
   const [metricsOpen, setMetricsOpen] = useState(false);
   const [roadmapOpen, setRoadmapOpen] = useState(false);
   const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
+  const [runtimeUsageOpen, setRuntimeUsageOpen] = useState(false);
   const isCompact = density === "compact";
-  const runtimeLimitDisplay = getRuntimeLimitDisplay(
-    effectiveChatRuntime?.profile?.runtimeLimitSnapshot,
-    { checkedAt: effectiveChatRuntime?.profile?.runtimeLimitUpdatedAt ?? null },
-  );
-  const currentRuntimeLabel = !selectedProject
+  const currentRuntimeProfileLabel = !selectedProject
     ? "No project"
     : effectiveRuntimeFetching
       ? "Loading..."
       : (effectiveChatRuntime?.profile?.name ?? "Default");
+  const currentRuntimeEngine = effectiveChatRuntime?.profile
+    ? `${effectiveChatRuntime.profile.runtimeId}/${effectiveChatRuntime.profile.providerId}`
+    : effectiveChatRuntime?.resolved
+      ? `${effectiveChatRuntime.resolved.runtimeId}/${effectiveChatRuntime.resolved.providerId}`
+      : "n/a";
+  const currentRuntimeModel =
+    effectiveChatRuntime?.profile?.defaultModel ?? effectiveChatRuntime?.resolved?.model ?? "auto";
   const runtimeButtonTitle = !selectedProject
     ? "Select project first"
-    : runtimeLimitDisplay
-      ? `Current runtime profile: ${currentRuntimeLabel}. ${runtimeLimitDisplay.summary} ${runtimeLimitDisplay.resetText ?? ""}`.trim()
-      : `Current runtime profile: ${currentRuntimeLabel}`;
+    : `Current runtime profile: ${currentRuntimeProfileLabel} (${currentRuntimeEngine}, model ${currentRuntimeModel}).`;
+  const runtimeUsageButtonTitle = !selectedProject
+    ? "Select project first"
+    : "Open usage snapshots for all configured runtimes";
 
   return (
     <header ref={headerRef} className="sticky top-0 z-60 border-b border-border bg-background">
@@ -198,16 +202,22 @@ export function Header({
           <Button
             variant="outline"
             size="sm"
+            onClick={() => setRuntimeUsageOpen(true)}
+            disabled={!selectedProject}
+            className="gap-1 font-mono text-3xs"
+            aria-label="Runtime usage"
+            title={runtimeUsageButtonTitle}
+          >
+            <Activity className="h-3.5 w-3.5" />
+            <span className="hidden md:inline">USAGE</span>
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={onToggleRuntimeProfiles}
             disabled={!selectedProject}
             className={cn(
               "gap-1 font-mono text-3xs",
-              runtimeLimitDisplay?.tone === "warning" &&
-                "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300",
-              runtimeLimitDisplay?.tone === "error" &&
-                "border-destructive/40 bg-destructive/10 text-destructive",
-              runtimeLimitDisplay?.tone === "success" &&
-                "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
               runtimeProfilesOpen && "border-primary/70 bg-primary/10",
             )}
             aria-label="Runtime profiles"
@@ -215,17 +225,6 @@ export function Header({
           >
             <Cpu className="h-3.5 w-3.5" />
             <span>RUNTIME</span>
-            {runtimeLimitDisplay && (
-              <Badge
-                size="sm"
-                className={cn(
-                  "hidden md:inline-flex",
-                  runtimeLimitBadgeClassName(runtimeLimitDisplay.tone),
-                )}
-              >
-                {runtimeLimitDisplay.shortLabel}
-              </Badge>
-            )}
           </Button>
           <Button
             variant="outline"
@@ -276,6 +275,13 @@ export function Header({
         onOpenChange={setGlobalSettingsOpen}
         projectId={selectedProject?.id ?? null}
       />
+      {selectedProject && (
+        <RuntimeUsageDialog
+          open={runtimeUsageOpen}
+          onOpenChange={setRuntimeUsageOpen}
+          projectId={selectedProject.id}
+        />
+      )}
     </header>
   );
 }

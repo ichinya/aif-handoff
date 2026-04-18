@@ -1,4 +1,20 @@
-import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, like, lte, min, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  like,
+  lte,
+  max,
+  min,
+  or,
+  sql,
+} from "drizzle-orm";
 import {
   AUTO_REVIEW_FINDING_SOURCES,
   AUTO_REVIEW_STRATEGIES,
@@ -18,6 +34,7 @@ import {
   type CreateRuntimeProfileInput,
   type EffectiveRuntimeProfileSelection,
   type RuntimeProfile,
+  type RuntimeProfileUsage,
   type RuntimeLimitSnapshot,
   type RuntimeLimitWindow,
   type UpdateRuntimeProfileInput,
@@ -133,6 +150,25 @@ function parseRuntimeObject(raw: string | null | undefined): Record<string, unkn
   } catch {
     return null;
   }
+}
+
+interface RuntimeProfileUsageState {
+  lastUsage: RuntimeProfileUsage;
+  lastUsageAt: string;
+}
+
+function toRuntimeProfileUsage(row: {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  costUsd: number | null;
+}): RuntimeProfileUsage {
+  return {
+    inputTokens: row.inputTokens,
+    outputTokens: row.outputTokens,
+    totalTokens: row.totalTokens,
+    costUsd: row.costUsd,
+  };
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
@@ -1388,6 +1424,10 @@ export interface DbUsageSink {
   record(event: DbUsageEvent): void;
 }
 
+export interface CreateDbUsageSinkOptions {
+  onRecorded?: (event: DbUsageEvent) => void;
+}
+
 /**
  * Insert a `usage_events` row and roll the usage delta into whichever
  * per-entity aggregate counters the event has scope for (task, project,
@@ -1474,11 +1514,23 @@ export function recordUsageEvent(event: DbUsageEvent): void {
  * `recordUsageEvent`. Sink methods are non-throwing: any DB error is logged
  * and swallowed so a broken sink never breaks the caller mid-run.
  */
-export function createDbUsageSink(): DbUsageSink {
+export function createDbUsageSink(options: CreateDbUsageSinkOptions = {}): DbUsageSink {
   return {
     record(event) {
       try {
         recordUsageEvent(event);
+        try {
+          options.onRecorded?.(event);
+        } catch (callbackError) {
+          log.warn(
+            {
+              err: callbackError,
+              runtimeId: event.runtimeId,
+              source: event.context.source,
+            },
+            "Usage sink onRecorded callback failed",
+          );
+        }
       } catch (err) {
         log.error(
           {
@@ -1541,7 +1593,61 @@ export function findTasksByRoadmapAlias(projectId: string, alias: string): TaskR
 
 // ── Runtime Profiles ──────────────────────────────────────────
 
-export function toRuntimeProfileResponse(row: RuntimeProfileRow): RuntimeProfile {
+function findLatestRuntimeProfileUsageByIds(
+  profileIds: string[],
+): Map<string, RuntimeProfileUsageState> {
+  const uniqueProfileIds = Array.from(new Set(profileIds.filter((value) => value.length > 0)));
+  if (uniqueProfileIds.length === 0) {
+    return new Map();
+  }
+
+  const db = getDb();
+  const latestUsageByProfile = db
+    .select({
+      profileId: usageEvents.profileId,
+      latestCreatedAt: max(usageEvents.createdAt).as("latest_created_at"),
+    })
+    .from(usageEvents)
+    .where(and(isNotNull(usageEvents.profileId), inArray(usageEvents.profileId, uniqueProfileIds)))
+    .groupBy(usageEvents.profileId)
+    .as("latest_usage_by_profile");
+
+  const rows = db
+    .select({
+      profileId: usageEvents.profileId,
+      inputTokens: usageEvents.inputTokens,
+      outputTokens: usageEvents.outputTokens,
+      totalTokens: usageEvents.totalTokens,
+      costUsd: usageEvents.costUsd,
+      createdAt: usageEvents.createdAt,
+    })
+    .from(usageEvents)
+    .innerJoin(
+      latestUsageByProfile,
+      and(
+        eq(usageEvents.profileId, latestUsageByProfile.profileId),
+        eq(usageEvents.createdAt, latestUsageByProfile.latestCreatedAt),
+      ),
+    )
+    .all();
+
+  const usageByProfileId = new Map<string, RuntimeProfileUsageState>();
+  for (const row of rows) {
+    if (!row.profileId) continue;
+    if (usageByProfileId.has(row.profileId)) continue;
+    usageByProfileId.set(row.profileId, {
+      lastUsage: toRuntimeProfileUsage(row),
+      lastUsageAt: row.createdAt,
+    });
+  }
+
+  return usageByProfileId;
+}
+
+export function toRuntimeProfileResponse(
+  row: RuntimeProfileRow,
+  usageState: RuntimeProfileUsageState | null = null,
+): RuntimeProfile {
   return {
     id: row.id,
     projectId: row.projectId,
@@ -1561,6 +1667,8 @@ export function toRuntimeProfileResponse(row: RuntimeProfileRow): RuntimeProfile
       row.id,
     ),
     runtimeLimitUpdatedAt: row.runtimeLimitUpdatedAt ?? null,
+    lastUsage: usageState?.lastUsage ?? null,
+    lastUsageAt: usageState?.lastUsageAt ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -1568,6 +1676,13 @@ export function toRuntimeProfileResponse(row: RuntimeProfileRow): RuntimeProfile
 
 export function findRuntimeProfileById(id: string): RuntimeProfileRow | undefined {
   return getDb().select().from(runtimeProfiles).where(eq(runtimeProfiles.id, id)).get();
+}
+
+export function getRuntimeProfileResponseById(id: string): RuntimeProfile | undefined {
+  const row = findRuntimeProfileById(id);
+  if (!row) return undefined;
+  const usageState = findLatestRuntimeProfileUsageByIds([id]).get(id) ?? null;
+  return toRuntimeProfileResponse(row, usageState);
 }
 
 export function listRuntimeProfiles(input: {
@@ -1602,6 +1717,16 @@ export function listRuntimeProfiles(input: {
     .where(where)
     .orderBy(asc(runtimeProfiles.createdAt))
     .all();
+}
+
+export function listRuntimeProfileResponses(input: {
+  projectId?: string;
+  includeGlobal?: boolean;
+  enabledOnly?: boolean;
+} = {}): RuntimeProfile[] {
+  const rows = listRuntimeProfiles(input);
+  const usageByProfileId = findLatestRuntimeProfileUsageByIds(rows.map((row) => row.id));
+  return rows.map((row) => toRuntimeProfileResponse(row, usageByProfileId.get(row.id) ?? null));
 }
 
 export function createRuntimeProfile(input: CreateRuntimeProfileInput): RuntimeProfileRow | undefined {
@@ -1954,7 +2079,10 @@ export function resolveEffectiveRuntimeProfile(input: {
 
     return {
       source: candidate.source,
-      profile: toRuntimeProfileResponse(profile),
+      profile: toRuntimeProfileResponse(
+        profile,
+        findLatestRuntimeProfileUsageByIds([profile.id]).get(profile.id) ?? null,
+      ),
       taskRuntimeProfileId,
       projectRuntimeProfileId,
       systemRuntimeProfileId,

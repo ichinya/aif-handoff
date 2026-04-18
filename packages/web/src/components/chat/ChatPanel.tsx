@@ -208,6 +208,35 @@ export function ChatPanel({
         displayProfile?.runtimeLimitUpdatedAt ?? chatRuntimeLimitSnapshot?.checkedAt ?? null,
     },
   );
+  const chatRuntimeLimitTone = chatRuntimeLimitDisplay?.tone ?? "warning";
+  const chatRuntimeLimitContainerClassName = cn(
+    "mt-2 border px-2.5 py-2",
+    chatRuntimeLimitTone === "warning" &&
+      "border-amber-500/50 bg-amber-500/15 text-amber-700 dark:text-amber-200/90",
+    chatRuntimeLimitTone === "error" && "border-destructive/40 bg-destructive/10 text-destructive",
+    chatRuntimeLimitTone === "success" &&
+      "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+    chatRuntimeLimitTone === "info" && "border-border bg-card/60 text-foreground",
+  );
+  const chatRuntimeLimitLabel = chatRuntimeLimitDisplay
+    ? chatRuntimeLimitDisplay.state === "expired"
+      ? "Limit Window Expired"
+      : chatRuntimeLimitDisplay.state === "stale"
+        ? "Limit Signal Inactive"
+        : chatRuntimeLimitDisplay.label === "Blocked"
+          ? "Runtime Blocked"
+          : chatRuntimeLimitDisplay.label === "Healthy"
+            ? "Runtime Healthy"
+            : "Runtime Near Limit"
+    : "Usage Limit Reached";
+  const chatRuntimeLimitSummary =
+    chatRuntimeLimitDisplay?.summary ??
+    "Runtime usage limit is currently exhausted. Wait for reset time and send again.";
+  const chatRuntimeLimitMeta =
+    chatRuntimeLimitDisplay &&
+    [chatRuntimeLimitDisplay.resetText, chatRuntimeLimitDisplay.checkedText]
+      .filter(Boolean)
+      .join(" ");
 
   const content = (
     <div
@@ -301,6 +330,26 @@ export function ChatPanel({
             {activeRuntimeModel}
           </Badge>
         </div>
+        {chatRuntimeLimitDisplay && (
+          <div className={chatRuntimeLimitContainerClassName}>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Badge
+                variant="outline"
+                className={cn(
+                  "border-current/40",
+                  chatRuntimeLimitTone === "info" && "text-foreground",
+                )}
+              >
+                {chatRuntimeLimitLabel}
+              </Badge>
+              <span className="text-[11px] opacity-80">{activeRuntimeProfileName}</span>
+            </div>
+            <p className="mt-1 text-xs">{chatRuntimeLimitSummary}</p>
+            {chatRuntimeLimitMeta && (
+              <p className="mt-1 text-[11px] opacity-80">{chatRuntimeLimitMeta}</p>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Content area: sessions sidebar + messages */}
@@ -344,30 +393,18 @@ export function ChatPanel({
               </div>
             </div>
           )}
-          {chatErrorCode === "CHAT_USAGE_LIMIT" && (
+          {chatErrorCode === "CHAT_USAGE_LIMIT" && !chatRuntimeLimitDisplay && (
             <div className="px-3 pb-2">
               <div className="rounded border border-amber-500/50 bg-amber-500/15 p-2">
                 <Badge
                   variant="outline"
                   className="border-amber-600/60 text-amber-700 dark:border-amber-400/50 dark:text-amber-300"
                 >
-                  {chatRuntimeLimitDisplay?.state === "expired"
-                    ? "Limit Window Expired"
-                    : chatRuntimeLimitDisplay?.state === "stale"
-                      ? "Limit Signal Inactive"
-                      : chatRuntimeLimitDisplay?.label === "Blocked"
-                        ? "Runtime Blocked"
-                        : "Usage Limit Reached"}
+                  Usage Limit Reached
                 </Badge>
                 <p className="mt-1 text-xs text-amber-700/90 dark:text-amber-200/90">
-                  {chatRuntimeLimitDisplay?.summary ??
-                    "Runtime usage limit is currently exhausted. Wait for reset time and send again."}
+                  Runtime usage limit is currently exhausted. Wait for reset time and send again.
                 </p>
-                {chatRuntimeLimitDisplay?.resetText && (
-                  <p className="mt-1 text-xs text-amber-700/90 dark:text-amber-200/90">
-                    {chatRuntimeLimitDisplay.resetText}
-                  </p>
-                )}
               </div>
             </div>
           )}

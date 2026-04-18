@@ -254,6 +254,45 @@ describe("ChatPanel", () => {
     expect(screen.getByText(/Resets/)).toBeDefined();
   });
 
+  it("shows a persistent runtime limit banner from the active profile even without a chat error", () => {
+    mockEffectiveChatRuntime = {
+      source: "project_default",
+      profile: {
+        name: "Claude Team",
+        runtimeId: "claude",
+        providerId: "anthropic",
+        defaultModel: "claude-sonnet",
+        runtimeLimitSnapshot: {
+          source: "api_headers",
+          status: "warning",
+          precision: "exact",
+          checkedAt: "2026-04-17T00:00:00.000Z",
+          providerId: "anthropic",
+          runtimeId: "claude",
+          profileId: "profile-1",
+          primaryScope: "requests",
+          resetAt: "2099-04-17T01:00:00.000Z",
+          warningThreshold: 10,
+          windows: [{ scope: "requests", percentRemaining: 8, warningThreshold: 10 }],
+          providerMeta: null,
+        },
+        runtimeLimitUpdatedAt: "2026-04-17T00:00:00.000Z",
+      },
+      resolved: {
+        runtimeId: "claude",
+        providerId: "anthropic",
+        model: "claude-sonnet",
+      },
+    };
+
+    renderPanel();
+
+    expect(screen.getByText("Runtime Near Limit")).toBeDefined();
+    expect(screen.getAllByText("Claude Team").length).toBeGreaterThan(0);
+    expect(screen.getByText("Request quota is at 8% remaining (threshold 10%).")).toBeDefined();
+    expect(screen.getByText(/Resets/)).toBeDefined();
+  });
+
   it("shows a neutral banner when the runtime limit signal has no active reset hint", () => {
     mockChatErrorCode = "CHAT_USAGE_LIMIT";
     mockChatRuntimeLimitSnapshot = {

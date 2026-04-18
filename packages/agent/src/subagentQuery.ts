@@ -51,6 +51,19 @@ const FIRST_ACTIVITY_TIMEOUT_ERROR = "first_activity_timeout";
 const FIRST_ACTIVITY_MAX_RETRIES = 2;
 const runtimeLimitStateCache = createRuntimeMemoryCache<string>({ defaultTtlMs: 30_000 });
 
+function notifyRuntimeUsageRefresh(input: {
+  projectId?: string | null;
+  runtimeProfileId?: string | null;
+  taskId?: string | null;
+}): void {
+  if (!input.projectId || !input.runtimeProfileId) {
+    return;
+  }
+  void notifyProjectRuntimeLimitBroadcast(input.projectId, input.runtimeProfileId, {
+    taskId: input.taskId ?? null,
+  });
+}
+
 function extractRuntimeLimitSnapshotFromEvent(event: RuntimeEvent): RuntimeLimitSnapshot | null {
   if (event.type !== RUNTIME_LIMIT_EVENT_TYPE) return null;
 
@@ -358,7 +371,15 @@ async function getRuntimeRegistry(): Promise<RuntimeRegistry> {
   runtimeRegistryPromise = bootstrapRuntimeRegistry({
     logger: createRuntimeRegistryLogger(),
     runtimeModules: getEnv().AIF_RUNTIME_MODULES,
-    usageSink: createDbUsageSink(),
+    usageSink: createDbUsageSink({
+      onRecorded: (event) => {
+        notifyRuntimeUsageRefresh({
+          projectId: event.context.projectId ?? null,
+          runtimeProfileId: event.profileId ?? null,
+          taskId: event.context.taskId ?? null,
+        });
+      },
+    }),
   }).catch((error) => {
     runtimeRegistryPromise = null;
     throw error;

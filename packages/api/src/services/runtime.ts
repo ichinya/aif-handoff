@@ -26,6 +26,7 @@ import { getEnv, logger } from "@aif/shared";
 import {
   clearRuntimeProfileLimitSnapshot,
   createDbUsageSink,
+  type DbUsageEvent,
   findProjectById,
   findRuntimeProfileById,
   findTaskById,
@@ -61,7 +62,9 @@ export async function getApiRuntimeRegistry(): Promise<RuntimeRegistry> {
       // DB-backed sink persists every successful run through the registry
       // wrapper. Structurally matches @aif/runtime's RuntimeUsageSink —
       // no cross-package type import needed.
-      usageSink: createDbUsageSink(),
+      usageSink: createDbUsageSink({
+        onRecorded: broadcastRuntimeUsageRefresh,
+      }),
     }).catch((error) => {
       runtimeRegistryPromise = null;
       throw error;
@@ -224,6 +227,21 @@ function broadcastRuntimeLimitUpdate(input: {
     },
   });
   runtimeLimitBroadcastCache.set(broadcastCacheKey, input.signature);
+}
+
+function broadcastRuntimeUsageRefresh(event: DbUsageEvent): void {
+  const projectId = event.context.projectId ?? null;
+  const runtimeProfileId = event.profileId ?? null;
+  if (!projectId || !runtimeProfileId) {
+    return;
+  }
+
+  broadcastRuntimeLimitUpdate({
+    projectId,
+    taskId: event.context.taskId ?? null,
+    runtimeProfileId,
+    signature: `usage:${event.recordedAt.toISOString()}:${event.context.source}:${event.usage.totalTokens}:${event.usage.inputTokens}:${event.usage.outputTokens}:${event.usage.costUsd ?? ""}`,
+  });
 }
 
 export function refreshRuntimeProfileLimitState(input: {

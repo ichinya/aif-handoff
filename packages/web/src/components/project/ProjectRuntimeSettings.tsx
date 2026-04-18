@@ -69,6 +69,16 @@ export function ProjectRuntimeSettings({
       label: `${profile.name} (${profile.runtimeId}/${profile.providerId})`,
     }));
   }, [profiles]);
+  const recentLimitSignals = useMemo(
+    () =>
+      profiles.flatMap((profile) => {
+        const limitDisplay = getRuntimeLimitDisplay(profile.runtimeLimitSnapshot, {
+          checkedAt: profile.runtimeLimitUpdatedAt ?? null,
+        });
+        return limitDisplay ? [{ profile, limitDisplay }] : [];
+      }),
+    [profiles],
+  );
 
   const handleSaveDefaults = async () => {
     setStatusMessage(null);
@@ -228,6 +238,40 @@ export function ProjectRuntimeSettings({
         <Button size="sm" onClick={handleSaveDefaults} disabled={updateProject.isPending}>
           {updateProject.isPending ? "Saving..." : "Save Project Defaults"}
         </Button>
+      </div>
+
+      <div className="space-y-2 border-t border-border pt-3">
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Recent Limit Signals
+        </p>
+        {recentLimitSignals.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No recent runtime limit signals.</p>
+        ) : (
+          <div className="space-y-1">
+            {recentLimitSignals.map(({ profile, limitDisplay }) => (
+              <div
+                key={`limit-${profile.id}`}
+                className="border border-border bg-background/40 px-2 py-1.5"
+              >
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-xs font-medium">{profile.name}</span>
+                  <Badge size="sm" className={runtimeLimitBadgeClassName(limitDisplay.tone)}>
+                    {limitDisplay.label.toUpperCase()}
+                  </Badge>
+                  <span className="text-[11px] text-muted-foreground">
+                    {profile.runtimeId}/{profile.providerId}
+                  </span>
+                </div>
+                <p className="mt-1 text-[11px] text-muted-foreground">{limitDisplay.summary}</p>
+                {(limitDisplay.resetText || limitDisplay.checkedText) && (
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    {[limitDisplay.resetText, limitDisplay.checkedText].filter(Boolean).join(" ")}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="space-y-2 border-t border-border pt-3">

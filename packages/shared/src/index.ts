@@ -60,6 +60,7 @@ export {
   isRuntimeTransport,
   RUNTIME_TRANSPORTS,
   RuntimeTransport,
+  type RuntimeProfileUsage,
   type RuntimeProfile,
   type CreateRuntimeProfileInput,
   type UpdateRuntimeProfileInput,

@@ -349,6 +349,13 @@ export interface RuntimeDescriptor {
   supportedTransports?: string[];
 }
 
+export interface RuntimeProfileUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  costUsd?: number | null;
+}
+
 export interface RuntimeProfile {
   id: string;
   projectId: string | null;
@@ -364,6 +371,8 @@ export interface RuntimeProfile {
   enabled: boolean;
   runtimeLimitSnapshot?: RuntimeLimitSnapshot | null;
   runtimeLimitUpdatedAt?: string | null;
+  lastUsage?: RuntimeProfileUsage | null;
+  lastUsageAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
