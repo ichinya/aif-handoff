@@ -3,11 +3,19 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type {
+  RuntimeLimitSnapshot,
+  RuntimeLimitStatus,
   RuntimeEvent,
   RuntimeSession,
   RuntimeSessionEventsInput,
   RuntimeSessionGetInput,
   RuntimeSessionListInput,
+} from "../../types.js";
+import {
+  RuntimeLimitPrecision,
+  RuntimeLimitScope,
+  RuntimeLimitSource,
+  RuntimeLimitStatus as RuntimeLimitStatusEnum,
 } from "../../types.js";
 
 /**
@@ -29,6 +37,30 @@ interface CodexSessionMeta {
   filePath?: string;
 }
 
+interface CodexSessionRateLimitWindow {
+  used_percent?: unknown;
+  window_minutes?: unknown;
+  resets_at?: unknown;
+}
+
+interface CodexSessionCredits {
+  has_credits?: unknown;
+  unlimited?: unknown;
+  balance?: unknown;
+}
+
+interface CodexSessionRateLimits {
+  limit_id?: unknown;
+  limit_name?: unknown;
+  primary?: unknown;
+  secondary?: unknown;
+  credits?: unknown;
+  plan_type?: unknown;
+}
+
+const DEFAULT_WARNING_THRESHOLD = 10;
+const MAX_VALID_DATE_MS = 8_640_000_000_000_000;
+
 function toIso(value: string | number | undefined): string {
   try {
     if (typeof value === "string" || typeof value === "number") {
@@ -47,6 +79,14 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function readString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function readFiniteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readBoolean(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
 }
 
 function parseJsonLine(line: string): Record<string, unknown> | null {
@@ -68,6 +108,142 @@ function normalizePath(value: string | undefined): string | null {
     .replace(/[\\/]+/g, "/")
     .replace(/\/$/, "")
     .toLowerCase();
+}
+
+function normalizeSessionResetAt(value: unknown): string | null {
+  const raw = readFiniteNumber(value);
+  if (raw == null) return null;
+
+  const targetMs = raw >= 1_000_000_000_000 ? raw : raw * 1000;
+  if (!Number.isFinite(targetMs) || Math.abs(targetMs) > MAX_VALID_DATE_MS) {
+    return null;
+  }
+
+  const date = new Date(targetMs);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return date.toISOString();
+}
+
+function toPercentRemaining(percentUsed: number | null): number | null {
+  if (percentUsed == null) return null;
+  return Math.max(0, Math.min(100, 100 - percentUsed));
+}
+
+function formatWindowName(windowMinutes: number | null): string | null {
+  if (windowMinutes == null) return null;
+  if (windowMinutes === 300) return "5h";
+  if (windowMinutes === 10080) return "7d";
+  if (windowMinutes % 1440 === 0) return `${windowMinutes / 1440}d`;
+  if (windowMinutes % 60 === 0) return `${windowMinutes / 60}h`;
+  return `${windowMinutes}m`;
+}
+
+function buildRateLimitWindow(rawWindow: unknown) {
+  const window = asRecord(rawWindow) as CodexSessionRateLimitWindow;
+  const percentUsed = readFiniteNumber(window.used_percent);
+  const percentRemaining = toPercentRemaining(percentUsed);
+  const windowMinutes = readFiniteNumber(window.window_minutes);
+  const resetAt = normalizeSessionResetAt(window.resets_at);
+
+  if (percentUsed == null && percentRemaining == null && windowMinutes == null && resetAt == null) {
+    return null;
+  }
+
+  return {
+    scope: RuntimeLimitScope.TIME,
+    name: formatWindowName(windowMinutes),
+    unit: windowMinutes != null ? "minutes" : null,
+    percentUsed,
+    percentRemaining,
+    resetAt,
+    warningThreshold: DEFAULT_WARNING_THRESHOLD,
+  };
+}
+
+function resolveSnapshotStatus(
+  windows: Array<{ percentRemaining?: number | null }>,
+): RuntimeLimitStatus {
+  if (
+    windows.some(
+      (window) =>
+        typeof window.percentRemaining === "number" &&
+        Number.isFinite(window.percentRemaining) &&
+        window.percentRemaining <= 0,
+    )
+  ) {
+    return RuntimeLimitStatusEnum.BLOCKED;
+  }
+
+  if (
+    windows.some(
+      (window) =>
+        typeof window.percentRemaining === "number" &&
+        Number.isFinite(window.percentRemaining) &&
+        window.percentRemaining <= DEFAULT_WARNING_THRESHOLD,
+    )
+  ) {
+    return RuntimeLimitStatusEnum.WARNING;
+  }
+
+  if (windows.length > 0) {
+    return RuntimeLimitStatusEnum.OK;
+  }
+
+  return RuntimeLimitStatusEnum.UNKNOWN;
+}
+
+function buildCodexLimitSnapshot(
+  rateLimitsRaw: unknown,
+  input: {
+    runtimeId: string;
+    providerId: string;
+    profileId?: string | null;
+    checkedAt: string;
+  },
+): RuntimeLimitSnapshot | null {
+  const rateLimits = asRecord(rateLimitsRaw) as CodexSessionRateLimits;
+  const windows = [
+    buildRateLimitWindow(rateLimits.primary),
+    buildRateLimitWindow(rateLimits.secondary),
+  ].filter((window) => window != null);
+
+  if (windows.length === 0) {
+    return null;
+  }
+
+  const status = resolveSnapshotStatus(windows);
+  const resetAt = windows
+    .map((window) => window.resetAt)
+    .find((value): value is string => typeof value === "string" && value.length > 0);
+  const credits = asRecord(rateLimits.credits) as CodexSessionCredits | null;
+
+  return {
+    source: RuntimeLimitSource.SDK_EVENT,
+    status,
+    precision: RuntimeLimitPrecision.EXACT,
+    checkedAt: input.checkedAt,
+    providerId: input.providerId,
+    runtimeId: input.runtimeId,
+    profileId: input.profileId ?? null,
+    primaryScope: RuntimeLimitScope.TIME,
+    resetAt: resetAt ?? null,
+    retryAfterSeconds: null,
+    warningThreshold: DEFAULT_WARNING_THRESHOLD,
+    windows,
+    providerMeta: {
+      limitId: readString(rateLimits.limit_id) ?? null,
+      limitName: readString(rateLimits.limit_name) ?? null,
+      planType: readString(rateLimits.plan_type) ?? null,
+      credits: {
+        hasCredits: readBoolean(credits?.has_credits),
+        unlimited: readBoolean(credits?.unlimited),
+        balance: readFiniteNumber(credits?.balance),
+      },
+    },
+  };
 }
 
 function mapToRuntimeSession(
@@ -252,4 +428,45 @@ export async function listCodexSdkSessionEvents(
   }
 
   return input.limit ? events.slice(-input.limit) : events;
+}
+
+export async function getCodexSessionLimitSnapshot(input: {
+  sessionId: string;
+  runtimeId: string;
+  providerId: string;
+  profileId?: string | null;
+}): Promise<RuntimeLimitSnapshot | null> {
+  const session = (await readSessionMetas()).find((meta) => meta.id === input.sessionId);
+  if (!session?.filePath) {
+    return null;
+  }
+
+  let lines: string[];
+  try {
+    const raw = await readFile(session.filePath, "utf-8");
+    lines = raw.split("\n").filter((line) => line.trim().length > 0);
+  } catch {
+    return null;
+  }
+
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const entry = parseJsonLine(lines[index]!);
+    if (!entry || readString(entry.type) !== "event_msg") continue;
+
+    const payload = asRecord(entry.payload);
+    if (!payload) continue;
+    if (readString(payload.type) !== "token_count") continue;
+
+    const snapshot = buildCodexLimitSnapshot(payload.rate_limits, {
+      runtimeId: input.runtimeId,
+      providerId: input.providerId,
+      profileId: input.profileId ?? null,
+      checkedAt: toIso(entry.timestamp as string | number | undefined),
+    });
+    if (snapshot) {
+      return snapshot;
+    }
+  }
+
+  return null;
 }

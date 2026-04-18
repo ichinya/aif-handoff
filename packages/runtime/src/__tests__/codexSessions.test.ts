@@ -128,6 +128,38 @@ describe("Codex SDK session store parsing", () => {
             },
           }),
           JSON.stringify({
+            timestamp: "2026-04-08T17:39:09.000Z",
+            type: "event_msg",
+            payload: {
+              type: "token_count",
+              info: {
+                total_token_usage: {
+                  input_tokens: 35580,
+                  cached_input_tokens: 5504,
+                  output_tokens: 1029,
+                  reasoning_output_tokens: 720,
+                  total_tokens: 36609,
+                },
+              },
+              rate_limits: {
+                limit_id: "codex",
+                limit_name: null,
+                primary: {
+                  used_percent: 92,
+                  window_minutes: 300,
+                  resets_at: 4080085200,
+                },
+                secondary: {
+                  used_percent: 45,
+                  window_minutes: 10080,
+                  resets_at: 4080690000,
+                },
+                credits: null,
+                plan_type: "pro",
+              },
+            },
+          }),
+          JSON.stringify({
             timestamp: "2026-04-08T17:39:05.000Z",
             type: "event_msg",
             payload: {
@@ -223,5 +255,58 @@ describe("Codex SDK session store parsing", () => {
         data: expect.objectContaining({ role: "assistant" }),
       }),
     ]);
+  });
+
+  it("parses the latest Codex token_count rate limits into a runtime limit snapshot", async () => {
+    const snapshot = await sessionsModule.getCodexSessionLimitSnapshot({
+      sessionId: newerSessionId,
+      runtimeId: "codex",
+      providerId: "openai",
+      profileId: "profile-1",
+    });
+
+    expect(snapshot).toEqual({
+      source: "sdk_event",
+      status: "warning",
+      precision: "exact",
+      checkedAt: "2026-04-08T17:39:09.000Z",
+      providerId: "openai",
+      runtimeId: "codex",
+      profileId: "profile-1",
+      primaryScope: "time",
+      resetAt: "2099-04-17T05:00:00.000Z",
+      retryAfterSeconds: null,
+      warningThreshold: 10,
+      windows: [
+        {
+          scope: "time",
+          name: "5h",
+          unit: "minutes",
+          percentUsed: 92,
+          percentRemaining: 8,
+          resetAt: "2099-04-17T05:00:00.000Z",
+          warningThreshold: 10,
+        },
+        {
+          scope: "time",
+          name: "7d",
+          unit: "minutes",
+          percentUsed: 45,
+          percentRemaining: 55,
+          resetAt: "2099-04-24T05:00:00.000Z",
+          warningThreshold: 10,
+        },
+      ],
+      providerMeta: {
+        limitId: "codex",
+        limitName: null,
+        planType: "pro",
+        credits: {
+          hasCredits: null,
+          unlimited: null,
+          balance: null,
+        },
+      },
+    });
   });
 });

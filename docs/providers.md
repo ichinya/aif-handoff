@@ -66,14 +66,14 @@ Capabilities are **transport-aware**: the same adapter may expose different capa
 
 Runtime-limit auto-pause depends on what each provider/transport can actually surface. The runtime layer normalizes these inputs into the shared `runtimeLimitSnapshot` contract and marks each snapshot as either `exact` or `heuristic`.
 
-| Runtime / transport | Limit source                                | Precision   | Notes                                                                                                                                    |
-| ------------------- | ------------------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| Claude SDK / CLI    | Claude `rate_limit_event`                   | `heuristic` | Structured qualitative status with reset timestamps (`status`, `resetsAt`, `overageStatus`, `isUsingOverage`, ...)                       |
-| Claude API          | Anthropic rate-limit headers                | `exact`     | Exact request/token limits and reset times from `anthropic-ratelimit-*` + `retry-after`                                                  |
-| Codex API           | OpenAI-compatible rate-limit headers        | `exact`     | Exact request/token limits and reset times from `x-ratelimit-*` + `retry-after`                                                          |
-| Codex SDK / CLI     | turn usage only + structured error metadata | mixed       | Can preserve `resetAt`/`retryAfterSeconds` on failures, but does not expose a proactive quota snapshot equivalent to `usage/quota/limit` |
-| OpenRouter API      | OpenAI-compatible rate-limit headers        | `exact`     | Uses `x-ratelimit-*` / `retry-after` when the upstream provides them                                                                     |
-| OpenCode API        | structured error metadata                   | `heuristic` | Preserves `resetAt` / retry hints on rate-limit errors, but no proactive normalized snapshot is emitted today                            |
+| Runtime / transport | Limit source                            | Precision   | Notes                                                                                                                                          |
+| ------------------- | --------------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude SDK / CLI    | Claude `rate_limit_event`               | `heuristic` | Structured qualitative status with reset timestamps (`status`, `resetsAt`, `overageStatus`, `isUsingOverage`, ...)                             |
+| Claude API          | Anthropic rate-limit headers            | `exact`     | Exact request/token limits and reset times from `anthropic-ratelimit-*` + `retry-after`                                                        |
+| Codex API           | OpenAI-compatible rate-limit headers    | `exact`     | Exact request/token limits and reset times from `x-ratelimit-*` + `retry-after`                                                                |
+| Codex SDK / CLI     | Codex session `token_count.rate_limits` | `exact`     | Reads the persisted Codex session log (`~/.codex/sessions/...jsonl`) and normalizes the latest `5h` / `7d` percentage windows plus reset times |
+| OpenRouter API      | OpenAI-compatible rate-limit headers    | `exact`     | Uses `x-ratelimit-*` / `retry-after` when the upstream provides them                                                                           |
+| OpenCode API        | structured error metadata               | `heuristic` | Preserves `resetAt` / retry hints on rate-limit errors, but no proactive normalized snapshot is emitted today                                  |
 
 Auto-pause semantics follow the precision:
 
