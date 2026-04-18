@@ -351,6 +351,19 @@ function parseRuntimeOptions(raw: string | null | undefined): Record<string, unk
   }
 }
 
+// Reasoning-effort key per runtime: claude/openrouter use `effort`,
+// codex uses `modelReasoningEffort`, opencode uses `reasoningEffort`.
+// Mirrors MANAGED_OPTION_KEYS in packages/web/src/components/settings/RuntimeProfileForm.tsx.
+const EFFORT_OPTION_KEYS = ["effort", "modelReasoningEffort", "reasoningEffort"] as const;
+
+function pickEffort(options: Record<string, unknown>): string | null {
+  for (const key of EFFORT_OPTION_KEYS) {
+    const value = options[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+}
+
 function createRuntimeRegistryLogger(): RuntimeRegistryLogger {
   return {
     debug(context, message) {
@@ -435,6 +448,7 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
   transport: RuntimeTransport;
   capabilities: RuntimeCapabilities;
   model: string | null;
+  effort: string | null;
   headers: Record<string, string>;
   options: Record<string, unknown>;
   prompt: string;
@@ -567,6 +581,7 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
     transport: resolved.transport,
     capabilities,
     model: resolved.model,
+    effort: pickEffort(resolved.options),
     headers: resolved.headers,
     options: {
       ...resolved.options,
@@ -655,10 +670,11 @@ export async function executeSubagentQuery(
     providerIdForError = context.providerId;
     runtimeProfileIdForError = context.profileId;
     workflowKindForError = context.workflow.workflowKind;
+    const effortSuffix = context.effort ? `, effort=${context.effort}` : "";
     logActivity(
       taskId,
       "Agent",
-      `${agentName} started (runtime=${context.runtimeId}, transport=${context.transport}, model=${context.model ?? "default"})`,
+      `${agentName} started (runtime=${context.runtimeId}, transport=${context.transport}, model=${context.model ?? "default"}${effortSuffix})`,
     );
     const existingSessionId = context.canResume ? getTaskSessionId(taskId) : null;
     const shouldResume = Boolean(existingSessionId && context.canResume);
@@ -898,7 +914,7 @@ export async function executeSubagentQuery(
     logActivity(
       taskId,
       "Agent",
-      `${agentName} complete (runtime=${context.runtimeId}, transport=${context.transport}, model=${context.model ?? "default"})`,
+      `${agentName} complete (runtime=${context.runtimeId}, transport=${context.transport}, model=${context.model ?? "default"}${effortSuffix})`,
     );
 
     return { resultText };
