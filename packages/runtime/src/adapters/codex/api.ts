@@ -10,6 +10,7 @@ import type {
   RuntimeRunResult,
   RuntimeUsage,
 } from "../../types.js";
+import { redactProviderText } from "@aif/shared";
 import { RuntimeExecutionError, type RuntimeExecutionErrorMetadata } from "../../errors.js";
 import { buildRuntimeLimitEvent } from "../../limitEvents.js";
 import { buildOpenAiCompatibleLimitSnapshot } from "../../openaiRateLimits.js";
@@ -49,6 +50,11 @@ function stripSensitiveOptions(
     }
   }
   return cleaned;
+}
+
+function safeProviderErrorMessage(rawText: string, fallbackMessage: string): string {
+  const trimmed = rawText.trim();
+  return trimmed.length > 0 ? redactProviderText(trimmed) : fallbackMessage;
 }
 
 function resolveApiKeyEnvVar(input: CodexApiInput): string {
@@ -419,7 +425,7 @@ export async function runCodexAgentApi(
     if (!response.ok) {
       return Promise.reject(
         classifyCodexRuntimeError(
-          new Error(rawText || "Codex API request failed"),
+          new Error(safeProviderErrorMessage(rawText, "Codex API request failed")),
           response.status,
           buildLimitErrorMetadata(limitSnapshot, response.status),
         ),
@@ -505,7 +511,7 @@ async function runCodexStreamingAttempt(
   if (!response.ok) {
     const rawText = await response.text();
     throw classifyCodexRuntimeError(
-      new Error(rawText || "Codex API streaming request failed"),
+      new Error(safeProviderErrorMessage(rawText, "Codex API streaming request failed")),
       response.status,
       buildLimitErrorMetadata(limitSnapshot, response.status),
     );
@@ -590,7 +596,7 @@ async function runCodexStreamingAttempt(
           }
         } catch {
           logger?.debug?.(
-            { runtimeId: input.runtimeId, rawLine: trimmed },
+            { runtimeId: input.runtimeId, rawLine: redactProviderText(trimmed) },
             "Failed to parse SSE chunk, skipping",
           );
         }
@@ -719,7 +725,7 @@ export async function listCodexAgentApiModels(
       const rawText = await response.text();
       return Promise.reject(
         classifyCodexRuntimeError(
-          new Error(rawText || "Codex API model listing failed"),
+          new Error(safeProviderErrorMessage(rawText, "Codex API model listing failed")),
           response.status,
         ),
       );

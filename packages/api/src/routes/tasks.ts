@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { jsonValidator } from "../middleware/zodValidator.js";
+import { internalBroadcastAuth } from "../middleware/internalBroadcastAuth.js";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { logger, parseAttachments, getProjectConfig, defaultsForMode } from "@aif/shared";
 import {
@@ -65,16 +66,21 @@ function toTaskRouteResponse(task: TaskRow) {
 }
 
 // POST /tasks/:id/broadcast — emit WS update for a task (used by agent process)
-tasksRouter.post("/:id/broadcast", jsonValidator(broadcastTaskSchema), async (c) => {
-  const { id } = c.req.param();
-  const { type } = c.req.valid("json");
-  const task = findTaskById(id);
-  if (!task) return c.json({ error: "Task not found" }, 404);
+tasksRouter.post(
+  "/:id/broadcast",
+  internalBroadcastAuth,
+  jsonValidator(broadcastTaskSchema),
+  async (c) => {
+    const { id } = c.req.param();
+    const { type } = c.req.valid("json");
+    const task = findTaskById(id);
+    if (!task) return c.json({ error: "Task not found" }, 404);
 
-  broadcast({ type, payload: toTaskResponse(task) });
-  log.debug({ taskId: id, type }, "Task WS broadcast triggered");
-  return c.json({ success: true });
-});
+    broadcast({ type, payload: toTaskResponse(task) });
+    log.debug({ taskId: id, type }, "Task WS broadcast triggered");
+    return c.json({ success: true });
+  },
+);
 
 // GET /tasks?projectId=xxx — list by project, sorted by status order + position
 tasksRouter.get("/", (c) => {

@@ -172,6 +172,13 @@ interface VirtualRuntimeSessionRef {
   sessionId: string;
 }
 
+function redactTaskContextForRuntimePrompt(text: string): string {
+  return text
+    .split(/\r?\n/)
+    .map((line) => redactProviderText(line))
+    .join("\n");
+}
+
 function buildContextAppend(
   projectName: string,
   task: Task | null,
@@ -192,7 +199,11 @@ function buildContextAppend(
     if (task.plan) lines.push(`  Plan:\n${task.plan}`);
     if (task.implementationLog) lines.push(`  Implementation log:\n${task.implementationLog}`);
     if (task.reviewComments) lines.push(`  Review comments:\n${task.reviewComments}`);
-    if (task.agentActivityLog) lines.push(`  Agent activity log:\n${task.agentActivityLog}`);
+    if (task.agentActivityLog) {
+      lines.push(
+        `  Agent activity log:\n${redactTaskContextForRuntimePrompt(task.agentActivityLog)}`,
+      );
+    }
     parts.push(lines.join("\n"));
   } else {
     parts.push("No task is currently open.");

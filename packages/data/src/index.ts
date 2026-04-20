@@ -306,7 +306,7 @@ function parseRuntimeLimitSnapshot(
           : undefined
       : undefined;
 
-    return {
+    return normalizeRuntimeLimitSnapshot({
       source: parsed.source as RuntimeLimitSnapshot["source"],
       status: parsed.status as RuntimeLimitSnapshot["status"],
       precision: parsed.precision as RuntimeLimitSnapshot["precision"],
@@ -322,7 +322,7 @@ function parseRuntimeLimitSnapshot(
       ...(warningThreshold !== undefined ? { warningThreshold } : {}),
       windows,
       ...(providerMeta !== undefined ? { providerMeta } : {}),
-    };
+    });
   } catch (error) {
     warnMalformed("json_parse_failed", {
       error: error instanceof Error ? error.message : String(error),

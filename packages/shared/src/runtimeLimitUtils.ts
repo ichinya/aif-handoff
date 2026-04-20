@@ -416,7 +416,15 @@ export function resolveRuntimeLimitFutureHint(
       : [...snapshotCandidates, ...windowCandidates]
   ).filter((candidate): candidate is HintCandidate => candidate != null);
 
-  const selected = ordered[0];
+  const normalizedCandidates = ordered.map((candidate) => ({
+    ...candidate,
+    resetAtMs: parseTimestampMs(candidate.resetAt),
+  }));
+
+  const selected =
+    normalizedCandidates.find(
+      (candidate) => candidate.resetAtMs != null && candidate.resetAtMs > nowMs,
+    ) ?? normalizedCandidates.find((candidate) => candidate.resetAtMs != null);
   if (!selected) {
     return {
       source: "none",
@@ -428,13 +436,12 @@ export function resolveRuntimeLimitFutureHint(
     };
   }
 
-  const resetAtMs = parseTimestampMs(selected.resetAt);
   return {
     source: selected.source,
     resetAt: selected.resetAt,
     retryAfterSeconds: selected.retryAfterSeconds,
-    resetAtMs,
-    isFuture: resetAtMs != null && resetAtMs > nowMs,
+    resetAtMs: selected.resetAtMs,
+    isFuture: selected.resetAtMs != null && selected.resetAtMs > nowMs,
     windowScope: selected.windowScope,
   };
 }

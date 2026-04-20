@@ -9,6 +9,20 @@ import { createTestDb } from "@aif/shared/server";
 
 // Mock the shared db module to use test db
 const testDb = { current: createTestDb() };
+const mockInternalBroadcastToken = { value: "" };
+
+vi.mock("@aif/shared", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@aif/shared")>();
+  const resolvedEnv = actual.getEnv();
+  return {
+    ...actual,
+    getEnv: () => ({
+      ...resolvedEnv,
+      INTERNAL_BROADCAST_TOKEN: mockInternalBroadcastToken.value,
+    }),
+  };
+});
+
 vi.mock("@aif/shared/server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@aif/shared/server")>();
   return {
@@ -76,6 +90,7 @@ describe("tasks API", () => {
   beforeEach(() => {
     testDb.current = createTestDb();
     app = createApp();
+    mockInternalBroadcastToken.value = "";
     mockRunApiRuntimeOneShot.mockReset();
     mockRunApiRuntimeOneShot.mockResolvedValue({
       result: {
@@ -514,6 +529,82 @@ describe("tasks API", () => {
     it("should return 404 for non-existent task", async () => {
       const res = await app.request("/tasks/non-existent");
       expect(res.status).toBe(404);
+    });
+  });
+
+  describe("POST /tasks/:id/broadcast", () => {
+    it("returns 401 without the internal broadcast token when auth is configured", async () => {
+      const db = testDb.current;
+      mockInternalBroadcastToken.value = "internal-token";
+      db.insert(tasks)
+        .values({ id: "broadcast-auth-task", projectId: "test-project", title: "Broadcast me" })
+        .run();
+
+      const res = await app.request("/tasks/broadcast-auth-task/broadcast", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "task:updated" }),
+      });
+
+      expect(res.status).toBe(401);
+    });
+
+    it("returns 401 for an invalid internal broadcast token", async () => {
+      const db = testDb.current;
+      mockInternalBroadcastToken.value = "internal-token";
+      db.insert(tasks)
+        .values({ id: "broadcast-invalid-token", projectId: "test-project", title: "Broadcast me" })
+        .run();
+
+      const res = await app.request("/tasks/broadcast-invalid-token/broadcast", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer wrong-token",
+        },
+        body: JSON.stringify({ type: "task:updated" }),
+      });
+
+      expect(res.status).toBe(401);
+    });
+
+    it("returns 200 with a valid internal broadcast token", async () => {
+      const db = testDb.current;
+      mockInternalBroadcastToken.value = "internal-token";
+      db.insert(tasks)
+        .values({ id: "broadcast-valid-token", projectId: "test-project", title: "Broadcast me" })
+        .run();
+
+      const res = await app.request("/tasks/broadcast-valid-token/broadcast", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Internal-Broadcast-Token": "internal-token",
+        },
+        body: JSON.stringify({ type: "task:updated" }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ success: true });
+    });
+
+    it("rejects event types outside the task broadcast allowlist", async () => {
+      const db = testDb.current;
+      mockInternalBroadcastToken.value = "internal-token";
+      db.insert(tasks)
+        .values({ id: "broadcast-invalid-type", projectId: "test-project", title: "Broadcast me" })
+        .run();
+
+      const res = await app.request("/tasks/broadcast-invalid-type/broadcast", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Internal-Broadcast-Token": "internal-token",
+        },
+        body: JSON.stringify({ type: "project:created" }),
+      });
+
+      expect(res.status).toBe(400);
     });
   });
 

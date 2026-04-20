@@ -266,10 +266,11 @@ Used by API/agent services to trigger project-scoped WebSocket broadcasts withou
 
 - Intended for trusted internal callers (API/agent/mcp services).
 - If `INTERNAL_BROADCAST_TOKEN` is configured, callers must provide the same token via `Authorization: Bearer <token>` or `X-Internal-Broadcast-Token`.
-- If no token is configured, development fallback only trusts loopback callers (`localhost`, `127.0.0.1`, `::1`).
+- If no token is configured, only `NODE_ENV=development` enables the fallback path, and it only accepts loopback caller headers (`127.0.0.1`, `::1`, `localhost`).
 - Unauthorized callers receive `401`.
 - Relation validation is enforced before broadcasting:
   - `project:auto_queue_advanced` returns `400` when `taskId` does not belong to the target project.
+  - `project:runtime_limit_updated` returns `400` when `runtimeProfileId` is omitted.
   - `project:runtime_limit_updated` returns `400` when `runtimeProfileId` does not belong to the target project and is not global.
 
 **Body:**
@@ -277,7 +278,7 @@ Used by API/agent services to trigger project-scoped WebSocket broadcasts withou
 |-------|------|----------|-------------|
 | `type` | string | yes | One of `project:auto_queue_mode_changed`, `project:auto_queue_advanced`, `project:runtime_limit_updated` |
 | `taskId` | string | no | Optional related task id for runtime-limit updates |
-| `runtimeProfileId` | string\|null | no | Runtime profile whose persisted limit snapshot changed |
+| `runtimeProfileId` | string\|null | conditional | Required for `project:runtime_limit_updated`; runtime profile whose persisted limit snapshot changed |
 
 **Response:** `200 OK`
 
@@ -542,10 +543,16 @@ POST /tasks/:id/broadcast
 
 Used by the agent process to trigger WebSocket broadcasts after updating a task.
 
+**Security contract:**
+
+- Intended for trusted internal callers (agent/API services only).
+- Uses the same internal auth rules as `POST /projects/:id/broadcast`.
+- Unauthorized callers receive `401`.
+
 **Body:**
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `type` | string | `task:updated` | Event type: `task:updated` or `task:moved` |
+| `type` | string | `task:updated` | Event type: `task:updated`, `task:moved`, `task:activity`, or `task:scheduled_fired` |
 
 **Response:** `200 OK`
 
@@ -612,7 +619,7 @@ POST /chat
 | `clientId` | string | yes | | WebSocket client ID for streaming tokens back |
 | `conversationId` | string | no | auto-generated | Pass the previous `conversationId` to continue a multi-turn conversation |
 | `explore` | boolean | no | `false` | When `true`, the message is prefixed with `/aif-explore` for codebase exploration mode |
-| `taskId` | string | no | | Task UUID — injects the task's full context (status, plan, implementation log, review comments, activity log) into the chat session for task-aware discussion |
+| `taskId` | string | no | | Task UUID — injects the task's full context (status, plan, implementation log, review comments, and redacted activity log) into the chat session for task-aware discussion |
 
 **Response:** `200 OK`
 
@@ -744,7 +751,7 @@ The WebSocket endpoint is a broadcast channel with no topic subscriptions; conne
 
 Runtime-limit invalidation is project-scoped:
 
-- `project:runtime_limit_updated` payload is `{ projectId, runtimeProfileId, taskId? }`.
+- `project:runtime_limit_updated` payload is `{ projectId, runtimeProfileId, taskId? }`, and `runtimeProfileId` is required at emission time.
 - API/agent callers emit this via `POST /projects/:id/broadcast` after runtime snapshot/usage updates.
 
 ## MCP Sync Integration

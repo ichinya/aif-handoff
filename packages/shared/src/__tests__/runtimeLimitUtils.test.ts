@@ -132,6 +132,56 @@ describe("runtimeLimitUtils", () => {
     expect(hint.isFuture).toBe(true);
   });
 
+  it("prefers a future snapshot retry-after over an expired preferred window reset", () => {
+    const nowMs = Date.parse("2026-04-19T09:00:00.000Z");
+    const snapshot = makeSnapshot({
+      resetAt: null,
+      retryAfterSeconds: 600,
+      windows: [
+        makeWindow({
+          scope: "requests",
+          resetAt: "2026-04-19T08:30:00.000Z",
+          retryAfterSeconds: null,
+        }),
+      ],
+    });
+
+    const hint = resolveRuntimeLimitFutureHint(snapshot, {
+      nowMs,
+      preferredWindow: snapshot.windows[0],
+      windowFirst: true,
+    });
+
+    expect(hint.source).toBe("snapshot_retry_after");
+    expect(hint.retryAfterSeconds).toBe(600);
+    expect(hint.isFuture).toBe(true);
+  });
+
+  it("ignores invalid preferred window resetAt values when a valid snapshot retry-after exists", () => {
+    const nowMs = Date.parse("2026-04-19T09:00:00.000Z");
+    const snapshot = makeSnapshot({
+      resetAt: null,
+      retryAfterSeconds: 60,
+      windows: [
+        makeWindow({
+          scope: "requests",
+          resetAt: "not-a-date",
+          retryAfterSeconds: null,
+        }),
+      ],
+    });
+
+    const hint = resolveRuntimeLimitFutureHint(snapshot, {
+      nowMs,
+      preferredWindow: snapshot.windows[0],
+      windowFirst: true,
+    });
+
+    expect(hint.source).toBe("snapshot_retry_after");
+    expect(hint.retryAfterSeconds).toBe(60);
+    expect(hint.isFuture).toBe(true);
+  });
+
   it("sanitizes provider meta via allowlist, key filtering, and token redaction", () => {
     const meta = sanitizeProviderMeta("anthropic", {
       providerLabel: "Anthropic",

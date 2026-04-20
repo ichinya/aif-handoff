@@ -1,9 +1,9 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { Hono } from "hono";
-import type { Context } from "hono";
 import { jsonValidator } from "../middleware/zodValidator.js";
-import { getEnv, logger, getProjectConfig } from "@aif/shared";
+import { internalBroadcastAuth } from "../middleware/internalBroadcastAuth.js";
+import { logger, getProjectConfig } from "@aif/shared";
 import { findRuntimeProfileById, findTaskById } from "@aif/data";
 import {
   createProjectSchema,
@@ -33,46 +33,6 @@ import {
 const log = logger("projects-route");
 
 export const projectsRouter = new Hono();
-
-function extractBearerToken(value: string | null | undefined): string | null {
-  if (!value) return null;
-  const trimmed = value.trim();
-  if (!trimmed.toLowerCase().startsWith("bearer ")) return null;
-  const token = trimmed.slice(7).trim();
-  return token.length > 0 ? token : null;
-}
-
-function isLoopbackHost(value: string | null | undefined): boolean {
-  if (!value) return false;
-  const host = value.split(":")[0]?.trim().toLowerCase() ?? "";
-  return host === "localhost" || host === "127.0.0.1" || host === "::1";
-}
-
-function isLoopbackAddress(value: string | null | undefined): boolean {
-  if (!value) return false;
-  const first = value.split(",")[0]?.trim().toLowerCase() ?? "";
-  return first === "127.0.0.1" || first === "::1" || first === "localhost";
-}
-
-function isTrustedBroadcastCaller(c: Context): boolean {
-  const configuredToken = getEnv().INTERNAL_BROADCAST_TOKEN?.trim() ?? "";
-  const headerToken =
-    c.req.header("x-internal-broadcast-token") ?? extractBearerToken(c.req.header("authorization"));
-
-  if (configuredToken) {
-    return headerToken === configuredToken;
-  }
-
-  if (process.env.NODE_ENV === "test") {
-    return true;
-  }
-
-  return (
-    isLoopbackAddress(c.req.header("x-forwarded-for")) ||
-    isLoopbackAddress(c.req.header("x-real-ip")) ||
-    isLoopbackHost(c.req.header("host"))
-  );
-}
 
 // GET /projects
 projectsRouter.get("/", (c) => {
@@ -261,61 +221,63 @@ projectsRouter.patch("/:id/auto-queue-mode", jsonValidator(autoQueueModeSchema),
 });
 
 // POST /projects/:id/broadcast — emit project-scoped WS event (used by agent coordinator)
-projectsRouter.post("/:id/broadcast", jsonValidator(broadcastProjectSchema), async (c) => {
-  if (!isTrustedBroadcastCaller(c)) {
-    log.warn(
-      {
-        projectId: c.req.param("id"),
-        remoteAddress: c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? null,
-      },
-      "Rejected unauthorized project broadcast request",
-    );
-    return c.json({ error: "Unauthorized broadcast caller" }, 401);
-  }
+projectsRouter.post(
+  "/:id/broadcast",
+  internalBroadcastAuth,
+  jsonValidator(broadcastProjectSchema),
+  async (c) => {
+    const { id } = c.req.param();
+    const { type, taskId, runtimeProfileId } = c.req.valid("json");
+    const project = findProjectById(id);
+    if (!project) return c.json({ error: "Project not found" }, 404);
 
-  const { id } = c.req.param();
-  const { type, taskId, runtimeProfileId } = c.req.valid("json");
-  const project = findProjectById(id);
-  if (!project) return c.json({ error: "Project not found" }, 404);
-
-  if (type === "project:auto_queue_advanced" && taskId) {
-    const task = findTaskById(taskId);
-    if (!task || task.projectId !== id) {
-      return c.json({ error: "taskId does not belong to the target project" }, 400);
+    if (type === "project:auto_queue_advanced" && taskId) {
+      const task = findTaskById(taskId);
+      if (!task || task.projectId !== id) {
+        return c.json({ error: "taskId does not belong to the target project" }, 400);
+      }
     }
-  }
 
-  if (type === "project:runtime_limit_updated" && runtimeProfileId) {
-    const runtimeProfile = findRuntimeProfileById(runtimeProfileId);
-    const belongsToProject = runtimeProfile?.projectId === id || runtimeProfile?.projectId == null;
-    if (!runtimeProfile || !belongsToProject) {
+    if (type === "project:runtime_limit_updated" && !runtimeProfileId) {
       return c.json(
-        { error: "runtimeProfileId must belong to the target project or be global" },
+        { error: "runtimeProfileId is required for project:runtime_limit_updated" },
         400,
       );
     }
-  }
 
-  if (type === "project:auto_queue_advanced" && taskId) {
-    broadcast({ type, payload: { id: taskId } });
-  } else if (type === "project:runtime_limit_updated") {
-    broadcast({
-      type,
-      payload: {
-        projectId: id,
-        runtimeProfileId: runtimeProfileId ?? null,
-        taskId: taskId ?? null,
-      },
-    });
-  } else {
-    broadcast({ type, payload: project });
-  }
-  log.debug(
-    { projectId: id, type, taskId: taskId ?? null, runtimeProfileId: runtimeProfileId ?? null },
-    "Project WS broadcast triggered",
-  );
-  return c.json({ success: true });
-});
+    if (type === "project:runtime_limit_updated" && runtimeProfileId) {
+      const runtimeProfile = findRuntimeProfileById(runtimeProfileId);
+      const belongsToProject =
+        runtimeProfile?.projectId === id || runtimeProfile?.projectId == null;
+      if (!runtimeProfile || !belongsToProject) {
+        return c.json(
+          { error: "runtimeProfileId must belong to the target project or be global" },
+          400,
+        );
+      }
+    }
+
+    if (type === "project:auto_queue_advanced" && taskId) {
+      broadcast({ type, payload: { id: taskId } });
+    } else if (type === "project:runtime_limit_updated") {
+      broadcast({
+        type,
+        payload: {
+          projectId: id,
+          runtimeProfileId: runtimeProfileId ?? null,
+          taskId: taskId ?? null,
+        },
+      });
+    } else {
+      broadcast({ type, payload: project });
+    }
+    log.debug(
+      { projectId: id, type, taskId: taskId ?? null, runtimeProfileId: runtimeProfileId ?? null },
+      "Project WS broadcast triggered",
+    );
+    return c.json({ success: true });
+  },
+);
 
 // DELETE /projects/:id
 projectsRouter.delete("/:id", (c) => {

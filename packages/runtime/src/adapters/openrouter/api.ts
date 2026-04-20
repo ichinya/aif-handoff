@@ -53,6 +53,11 @@ function stripSensitiveOptions(
   return cleaned;
 }
 
+function safeProviderErrorMessage(rawText: string, fallbackMessage: string): string {
+  const trimmed = rawText.trim();
+  return trimmed.length > 0 ? redactProviderText(trimmed) : fallbackMessage;
+}
+
 // ---------------------------------------------------------------------------
 // URL / Auth / Header resolution
 // ---------------------------------------------------------------------------
@@ -406,7 +411,7 @@ export async function runOpenRouterApi(
     if (!response.ok) {
       return Promise.reject(
         classifyOpenRouterRuntimeError(
-          new Error(rawText || "OpenRouter request failed"),
+          new Error(safeProviderErrorMessage(rawText, "OpenRouter request failed")),
           response.status,
           buildLimitErrorMetadata(limitSnapshot, response.status),
         ),
@@ -480,7 +485,7 @@ async function runOpenRouterStreamingAttempt(
   if (!response.ok) {
     const rawText = await response.text();
     throw classifyOpenRouterRuntimeError(
-      new Error(rawText || "OpenRouter streaming request failed"),
+      new Error(safeProviderErrorMessage(rawText, "OpenRouter streaming request failed")),
       response.status,
       buildLimitErrorMetadata(limitSnapshot, response.status),
     );
@@ -565,7 +570,7 @@ async function runOpenRouterStreamingAttempt(
           }
         } catch {
           logger?.debug?.(
-            { runtimeId: input.runtimeId, rawLine: trimmed },
+            { runtimeId: input.runtimeId, rawLine: redactProviderText(trimmed) },
             "Failed to parse SSE chunk, skipping",
           );
         }
@@ -694,7 +699,7 @@ export async function listOpenRouterApiModels(
       const rawText = await response.text();
       return Promise.reject(
         classifyOpenRouterRuntimeError(
-          new Error(rawText || "OpenRouter model listing failed"),
+          new Error(safeProviderErrorMessage(rawText, "OpenRouter model listing failed")),
           response.status,
         ),
       );

@@ -614,6 +614,39 @@ describe("chat API", () => {
     expect(resolveCall.workflow.promptInput.systemPromptAppend).toContain("implementing");
   });
 
+  it("redacts legacy agent activity log secrets before injecting task-aware chat context", async () => {
+    mockFindTaskById.mockReturnValue({ id: "task-1", title: "Fix bug", status: "implementing" });
+    mockToTaskResponse.mockReturnValue({
+      id: "task-1",
+      title: "Fix bug",
+      status: "implementing",
+      description: "Bug details",
+      plan: null,
+      implementationLog: null,
+      reviewComments: null,
+      agentActivityLog: "[2026-01-01] Agent: bearer SECRET\n[2026-01-01] Agent: sk-SECRET",
+    });
+
+    const res = await app.request("/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: "project-1",
+        message: "what leaked before?",
+        clientId: "client-1",
+        taskId: "task-1",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const resolveCall = mockResolveApiRuntimeContext.mock.calls[0][0] as {
+      workflow: { promptInput: { systemPromptAppend?: string } };
+    };
+    expect(resolveCall.workflow.promptInput.systemPromptAppend).toContain("[REDACTED]");
+    expect(resolveCall.workflow.promptInput.systemPromptAppend).not.toContain("SECRET");
+    expect(resolveCall.workflow.promptInput.systemPromptAppend).not.toContain("sk-SECRET");
+  });
+
   it("returns persisted DB messages when linked runtime history is empty", async () => {
     mockFindChatSessionById.mockReturnValue({
       id: "session-1",

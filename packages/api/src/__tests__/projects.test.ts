@@ -79,6 +79,7 @@ describe("projects API", () => {
     app = createApp();
     mockBroadcast.mockReset();
     mockInternalBroadcastToken.value = "";
+    vi.stubEnv("NODE_ENV", "test");
   });
 
   it("returns projects list", async () => {
@@ -415,6 +416,41 @@ describe("projects API", () => {
     expect(mockBroadcast).not.toHaveBeenCalled();
   });
 
+  it("rejects spoofed loopback headers in production when no internal token is configured", async () => {
+    const db = testDb.current;
+    vi.stubEnv("NODE_ENV", "production");
+    db.insert(projects)
+      .values({ id: "proj-broadcast-prod", name: "Broadcast Prod", rootPath: "/tmp/bp" })
+      .run();
+    db.insert(runtimeProfiles)
+      .values({
+        id: "profile-1",
+        projectId: "proj-broadcast-prod",
+        name: "Broadcast Prod Profile",
+        runtimeId: "claude",
+        providerId: "anthropic",
+        enabled: true,
+      })
+      .run();
+
+    const res = await app.request("/projects/proj-broadcast-prod/broadcast", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Host: "localhost:3009",
+        "X-Forwarded-For": "127.0.0.1",
+        "X-Real-IP": "127.0.0.1",
+      },
+      body: JSON.stringify({
+        type: "project:runtime_limit_updated",
+        runtimeProfileId: "profile-1",
+      }),
+    });
+
+    expect(res.status).toBe(401);
+    expect(mockBroadcast).not.toHaveBeenCalled();
+  });
+
   it("accepts authorized broadcast request with internal token header", async () => {
     const db = testDb.current;
     mockInternalBroadcastToken.value = "internal-token";
@@ -532,6 +568,27 @@ describe("projects API", () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({
       error: "runtimeProfileId must belong to the target project or be global",
+    });
+    expect(mockBroadcast).not.toHaveBeenCalled();
+  });
+
+  it("rejects runtime-limit broadcasts without a runtimeProfileId", async () => {
+    const db = testDb.current;
+    db.insert(projects)
+      .values({ id: "proj-runtime-missing", name: "Project Missing", rootPath: "/tmp/missing" })
+      .run();
+
+    const res = await app.request("/projects/proj-runtime-missing/broadcast", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "project:runtime_limit_updated",
+      }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: "runtimeProfileId is required for project:runtime_limit_updated",
     });
     expect(mockBroadcast).not.toHaveBeenCalled();
   });

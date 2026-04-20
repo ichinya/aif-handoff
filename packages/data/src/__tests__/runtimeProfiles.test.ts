@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { projects, usageEvents } from "@aif/shared";
+import { eq } from "drizzle-orm";
+import { projects, runtimeProfiles, tasks, usageEvents } from "@aif/shared";
 import { createTestDb } from "@aif/shared/server";
 
 const testDb = { current: createTestDb() };
@@ -202,6 +203,38 @@ describe("runtime profiles data layer", () => {
     expect(clearedMapped.runtimeLimitSnapshot).toBeNull();
     expect(clearedMapped.runtimeLimitUpdatedAt).toBe("2026-04-17T11:00:00.000Z");
     expect(cleared!.updatedAt).toBe(profile!.updatedAt);
+  });
+
+  it("sanitizes legacy runtime profile providerMeta on read", () => {
+    const profile = createRuntimeProfile({
+      projectId: "proj-1",
+      name: "Legacy Profile",
+      runtimeId: "claude",
+      providerId: "anthropic",
+    });
+
+    testDb.current
+      .update(runtimeProfiles)
+      .set({
+        runtimeLimitSnapshotJson: JSON.stringify({
+          ...makeLimitSnapshot(),
+          profileId: profile!.id,
+          providerMeta: {
+            headers: { authorization: "Bearer SECRET" },
+            raw: { body: "sk-SECRET" },
+            accountLabel: "shared-account",
+          },
+        }),
+      })
+      .where(eq(runtimeProfiles.id, profile!.id))
+      .run();
+
+    const resolved = getRuntimeProfileResponseById(profile!.id);
+
+    expect(resolved?.runtimeLimitSnapshot?.providerMeta).toEqual({
+      accountLabel: "shared-account",
+    });
+    expect(JSON.stringify(resolved)).not.toContain("SECRET");
   });
 
   it("does not proactively gate provider-blocked snapshots without reset hints", () => {
@@ -454,6 +487,32 @@ describe("runtime profiles data layer", () => {
     expect(clearedMapped.runtimeLimitSnapshot).toBeNull();
     expect(clearedMapped.runtimeLimitUpdatedAt).toBe("2026-04-17T11:00:00.000Z");
     expect(cleared!.updatedAt).toBe(task!.updatedAt);
+  });
+
+  it("sanitizes legacy task providerMeta on read", () => {
+    const task = createTask({ projectId: "proj-1", title: "Legacy task", description: "D" });
+
+    testDb.current
+      .update(tasks)
+      .set({
+        runtimeLimitSnapshotJson: JSON.stringify({
+          ...makeLimitSnapshot(),
+          providerMeta: {
+            headers: { authorization: "Bearer SECRET" },
+            raw: { body: "sk-SECRET" },
+            accountLabel: "shared-account",
+          },
+        }),
+      })
+      .where(eq(tasks.id, task!.id))
+      .run();
+
+    const resolved = toTaskResponse(findTaskById(task!.id)!);
+
+    expect(resolved.runtimeLimitSnapshot?.providerMeta).toEqual({
+      accountLabel: "shared-account",
+    });
+    expect(JSON.stringify(resolved)).not.toContain("SECRET");
   });
 
   it("applies proactive runtime gate block only when the CAS guard matches", () => {

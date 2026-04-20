@@ -666,6 +666,35 @@ describe("executeSubagentQuery error redaction", () => {
     expect(combined).not.toContain("secret_token");
     expect(combined).not.toContain("sk-SECRET");
   });
+
+  it("rethrows a sanitized runtime error without preserving the raw cause chain", async () => {
+    queryMock.mockImplementation(async function* () {
+      throw new RuntimeExecutionError(
+        '429 {"error":"secret_token=abc sk-SECRET"}',
+        undefined,
+        "rate_limit",
+      );
+    });
+
+    let captured: unknown;
+    try {
+      await executeSubagentQuery({
+        taskId: "task-redaction",
+        projectRoot: "/tmp/project",
+        agentName: "implement-coordinator",
+        prompt: "run",
+        workflowKind: "implementer",
+      });
+    } catch (error) {
+      captured = error;
+    }
+
+    expect(captured).toBeInstanceOf(RuntimeExecutionError);
+    expect((captured as RuntimeExecutionError).message).toBe("Runtime usage limit reached.");
+    expect((captured as RuntimeExecutionError).category).toBe("rate_limit");
+    expect((captured as Error & { cause?: unknown }).cause).toBeUndefined();
+    expect(JSON.stringify(captured)).not.toContain("SECRET");
+  });
 });
 
 describe("executeSubagentQuery model fallback policy", () => {

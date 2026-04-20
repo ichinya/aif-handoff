@@ -21,6 +21,8 @@ function internalBroadcastHeaders(): Record<string, string> {
   if (token) {
     headers.Authorization = `Bearer ${token}`;
     headers["X-Internal-Broadcast-Token"] = token;
+  } else if ((process.env.NODE_ENV ?? "").trim().toLowerCase() === "development") {
+    headers["X-Real-IP"] = "127.0.0.1";
   }
   return headers;
 }
@@ -103,7 +105,7 @@ export async function notifyTaskBroadcast(
   try {
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: internalBroadcastHeaders(),
       body: JSON.stringify({ type }),
     });
 

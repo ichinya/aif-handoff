@@ -17,6 +17,7 @@ import {
   createRuntimeWorkflowSpec,
   mapSafeRuntimeErrorReason,
   normalizeRuntimeLimitSnapshot,
+  sanitizeProviderMeta,
   getResultSessionId,
   redactResolvedRuntimeProfile,
   resolveAdapterCapabilities,
@@ -129,6 +130,46 @@ function extractRuntimeLimitSnapshotFromError(error: unknown): RuntimeLimitSnaps
     return extractRuntimeLimitSnapshotFromError(error.cause);
   }
   return null;
+}
+
+function findRuntimeExecutionError(error: unknown): RuntimeExecutionError | null {
+  if (error instanceof RuntimeExecutionError) {
+    return error;
+  }
+  if (error instanceof Error && "cause" in error && error.cause) {
+    return findRuntimeExecutionError(error.cause);
+  }
+  return null;
+}
+
+function buildSanitizedSubagentError(
+  error: unknown,
+  safeReason: ReturnType<typeof mapSafeRuntimeErrorReason>,
+  providerId?: string | null,
+): Error {
+  const runtimeError = findRuntimeExecutionError(error);
+  if (!runtimeError) {
+    return new Error(safeReason.reason);
+  }
+
+  const normalizedSnapshot = runtimeError.limitSnapshot
+    ? normalizeRuntimeLimitSnapshot(runtimeError.limitSnapshot)
+    : null;
+
+  return new RuntimeExecutionError(safeReason.reason, undefined, runtimeError.category, {
+    adapterCode: runtimeError.adapterCode,
+    httpStatus: runtimeError.httpStatus,
+    resetAt: normalizedSnapshot?.resetAt ?? runtimeError.resetAt,
+    retryAfterMs: runtimeError.retryAfterMs,
+    retryAfterSeconds: runtimeError.retryAfterSeconds,
+    limitSnapshot: normalizedSnapshot,
+    providerMeta:
+      normalizedSnapshot?.providerMeta ??
+      sanitizeProviderMeta(
+        normalizedSnapshot?.providerId ?? runtimeError.limitSnapshot?.providerId ?? providerId,
+        runtimeError.providerMeta ?? null,
+      ),
+  });
 }
 
 function buildRuntimeLimitCacheSignature(
@@ -1023,7 +1064,7 @@ export async function executeSubagentQuery(
       },
       `${agentName} execution failed`,
     );
-    throw new Error(safeReason.reason, { cause: error });
+    throw buildSanitizedSubagentError(error, safeReason, providerIdForError);
   } finally {
     try {
       watchdog?.clear();
