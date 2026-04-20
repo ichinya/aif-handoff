@@ -61,11 +61,57 @@ Returns frontend-visible defaults and runtime readiness metadata.
 {
   "useSubagents": false,
   "maxReviewIterations": 3,
-  "autoReviewStrategy": "full_re_review"
+  "autoReviewStrategy": "full_re_review",
+  "runtimeReadiness": {
+    "availableRuntimeCount": 3,
+    "runtimeProfileCount": 6,
+    "enabledRuntimeProfileCount": 5
+  },
+  "runtimeDefaults": {
+    "modules": [],
+    "openAiBaseUrlConfigured": false,
+    "codexCliPathConfigured": true,
+    "app": {
+      "defaultTaskRuntimeProfileId": "uuid-or-null",
+      "defaultPlanRuntimeProfileId": null,
+      "defaultReviewRuntimeProfileId": null,
+      "defaultChatRuntimeProfileId": "uuid-or-null",
+      "resolvedDefaultTaskRuntimeProfileId": "uuid-or-null",
+      "resolvedDefaultPlanRuntimeProfileId": "uuid-or-null",
+      "resolvedDefaultReviewRuntimeProfileId": "uuid-or-null",
+      "resolvedDefaultChatRuntimeProfileId": "uuid-or-null"
+    }
+  }
 }
 ```
 
 `autoReviewStrategy` is the resolved global auto-review mode (`full_re_review` or `closure_first`).
+
+### App Runtime Defaults
+
+```
+GET /settings/runtime-defaults
+PUT /settings/runtime-defaults
+```
+
+Reads or updates the app-wide runtime defaults used after project defaults and before environment fallback.
+
+**PUT body:**
+
+```json
+{
+  "defaultTaskRuntimeProfileId": "uuid-or-null",
+  "defaultPlanRuntimeProfileId": "uuid-or-null",
+  "defaultReviewRuntimeProfileId": "uuid-or-null",
+  "defaultChatRuntimeProfileId": "uuid-or-null"
+}
+```
+
+Rules:
+
+- values must be `null` or enabled global runtime profiles
+- `plan` / `review` fall back to the app task default when unset
+- invalid scope combinations fail with `400` and `fieldErrors`
 
 ## Projects
 
@@ -108,6 +154,10 @@ POST /projects
 | `planCheckerMaxBudgetUsd` | number | no | Budget for plan-checker agent. If omitted, unlimited |
 | `implementerMaxBudgetUsd` | number | no | Budget for implementer agent. If omitted, unlimited |
 | `reviewSidecarMaxBudgetUsd` | number | no | Per-sidecar budget for review/security sidecars. If omitted, unlimited |
+| `defaultTaskRuntimeProfileId` | string\|null | no | Project-level task/implementation runtime default |
+| `defaultPlanRuntimeProfileId` | string\|null | no | Project-level planning runtime default |
+| `defaultReviewRuntimeProfileId` | string\|null | no | Project-level review runtime default |
+| `defaultChatRuntimeProfileId` | string\|null | no | Project-level chat runtime default |
 
 **Response:** `201 Created` — the created project object.
 
@@ -289,6 +339,7 @@ POST /tasks
 | `skipReview` | boolean | no | `false` | Skip the review stage — task moves directly from implementing to done |
 | `paused` | boolean | no | `false` | Pause agent processing — coordinator skips this task until resumed |
 | `useSubagents` | boolean | no | `false` | Run via custom subagents (`plan-coordinator`, `implement-coordinator`, sidecars). `false` uses `aif-*` skills directly |
+| `runtimeProfileId` | string \| null | no | `null` | Task-specific runtime override. When absent, resolution falls back to project default, then app default, then environment fallback |
 | `roadmapAlias` | string | no | `null` | Roadmap alias for grouping (e.g., `v1.0`) |
 | `tags` | string[] | no | `[]` | Tags for filtering/categorization (max 50, each max 100 chars) |
 | `scheduledAt` | string \| null | no | `null` | ISO-8601 UTC timestamp. If set, the coordinator fires the task into planning at that time. Must be in the future; `null` clears it. Accepted on both create and update. |
@@ -363,6 +414,7 @@ PUT /tasks/:id
 | `priority` | integer | Priority (0-5) |
 | `autoMode` | boolean | Auto-advance mode (includes automatic post-review rework loop when enabled) |
 | `paused` | boolean | Pause/resume agent processing for this task |
+| `runtimeProfileId` | string\|null | Task-specific runtime override |
 | `isFix` | boolean | Marks task as fix-flow |
 | `plan` | string\|null | Generated plan (markdown) |
 | `implementationLog` | string\|null | Implementation output |
@@ -507,9 +559,46 @@ POST /tasks/:id/comments
 
 ---
 
+## Runtime Profiles
+
+### List Runtime Profiles
+
+```
+GET /runtime-profiles
+```
+
+**Query params:**
+
+| Param           | Type                | Required | Description                                                   |
+| --------------- | ------------------- | -------- | ------------------------------------------------------------- |
+| `projectId`     | string              | no       | Project id for project-scoped queries and mixed listings      |
+| `includeGlobal` | boolean             | no       | Include global profiles alongside project profiles            |
+| `enabledOnly`   | boolean             | no       | Return only enabled profiles                                  |
+| `scope`         | `global`\|`project` | no       | Restrict results to only global or only same-project profiles |
+
+`scope=project` requires `projectId`. `scope=global` returns only reusable profiles (`projectId = null`).
+
+### Effective Runtime Resolution
+
+```
+GET /runtime-profiles/effective/task/:taskId
+GET /runtime-profiles/effective/chat/:projectId
+```
+
+These endpoints return the effective runtime profile plus the resolution source. The runtime chain is:
+
+1. task override
+2. project default
+3. app default
+4. environment fallback
+
+Planning and review follow the same pattern but use their dedicated defaults before inheriting from the task default at the same scope.
+
+---
+
 ## AI Chat
 
-Interactive AI chat powered by the runtime adapter system. Messages are sent via REST, responses stream back through WebSocket as tokens. The runtime used depends on the project's active runtime profile.
+Interactive AI chat powered by the runtime adapter system. Messages are sent via REST, responses stream back through WebSocket as tokens. The runtime used depends on the effective chat runtime for the project: project chat default, then app chat default, then environment fallback.
 
 ### Send Message
 
@@ -560,6 +649,19 @@ Chat responses stream via WebSocket events to the `clientId` specified in the re
 To continue a conversation, pass the `conversationId` returned from the first message in subsequent requests. The server tracks runtime session IDs internally and uses `resume` to maintain context (for runtimes that support it).
 
 Calling `clearMessages` on the client (or omitting `conversationId`) starts a fresh conversation.
+
+### Chat Sessions
+
+```
+GET /chat/sessions?projectId=<uuid>
+POST /chat/sessions
+PUT /chat/sessions/:id
+DELETE /chat/sessions/:id
+```
+
+Chat sessions persist the runtime profile chosen when the session starts. This keeps older conversations tied to the runtime they were created with even if the project's current default changes later.
+
+`POST` and `PUT` accept `runtimeProfileId` as an optional field. The value must be either a global profile or one owned by the same project.
 
 ### Permissions
 

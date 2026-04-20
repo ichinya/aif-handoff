@@ -11,6 +11,7 @@ import { useKeyboardShortcut } from "@/hooks/useKeyboardShortcut";
 import { useProjects } from "@/hooks/useProjects";
 import { useSettings, useProjectDefaults } from "@/hooks/useSettings";
 import { useRuntimeProfiles, useRuntimes } from "@/hooks/useRuntimeProfiles";
+import { formatRuntimeProfileOptionLabel } from "@/lib/runtimeProfiles";
 import { generatePlanPath, defaultsForMode } from "@aif/shared/browser";
 import { PlannerSettings } from "./PlannerSettings";
 
@@ -53,6 +54,13 @@ export function AddTaskForm({ projectId }: Props) {
   const currentProject = projectsList?.find((p) => p.id === projectId);
   const isParallel = currentProject?.parallelEnabled ?? false;
   const projectTaskRuntimeDefaultId = currentProject?.defaultTaskRuntimeProfileId ?? "";
+  const appTaskRuntimeDefaultId =
+    settings?.runtimeDefaults?.app?.resolvedDefaultTaskRuntimeProfileId ?? "";
+  const runtimeDefaultDescription = projectTaskRuntimeDefaultId
+    ? "the project default runtime profile"
+    : appTaskRuntimeDefaultId
+      ? "the app default runtime profile"
+      : "the environment fallback runtime";
   const selectedRuntimeProfile =
     runtimeProfiles.find((profile) => profile.id === runtimeProfileId) ?? null;
   const selectedRuntimeDescriptor = selectedRuntimeProfile
@@ -374,10 +382,15 @@ export function AddTaskForm({ projectId }: Props) {
                 </option>
                 {runtimeProfiles.map((profile) => (
                   <option key={profile.id} value={profile.id}>
-                    {profile.name} ({profile.runtimeId}/{profile.providerId})
+                    {formatRuntimeProfileOptionLabel(profile)}
                   </option>
                 ))}
               </select>
+              {!runtimeProfileId && (
+                <p className="text-[10px] text-muted-foreground">
+                  No override uses {runtimeDefaultDescription}.
+                </p>
+              )}
             </div>
             <div className="space-y-1">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">

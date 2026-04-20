@@ -6,7 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Radio } from "@/components/ui/radio";
 import { Select } from "@/components/ui/select";
 import { useProjects } from "@/hooks/useProjects";
-import { useRuntimeProfiles, useRuntimes } from "@/hooks/useRuntimeProfiles";
+import { useAppRuntimeDefaults, useRuntimeProfiles, useRuntimes } from "@/hooks/useRuntimeProfiles";
+import { formatRuntimeProfileOptionLabel } from "@/lib/runtimeProfiles";
 import { defaultsForMode, type Task, type UpdateTaskInput } from "@aif/shared/browser";
 
 interface Props {
@@ -16,9 +17,16 @@ interface Props {
 
 export function TaskSettings({ task, onSave }: Props) {
   const { data: projectsList } = useProjects();
+  const { data: appRuntimeDefaults } = useAppRuntimeDefaults();
   const { data: runtimeProfiles = [] } = useRuntimeProfiles(task.projectId, true);
   const { data: runtimes = [] } = useRuntimes();
-  const isParallel = projectsList?.find((p) => p.id === task.projectId)?.parallelEnabled ?? false;
+  const project = projectsList?.find((p) => p.id === task.projectId);
+  const isParallel = project?.parallelEnabled ?? false;
+  const runtimeDefaultLabel = project?.defaultTaskRuntimeProfileId
+    ? "(project default)"
+    : appRuntimeDefaults?.resolvedDefaultTaskRuntimeProfileId
+      ? "(app default)"
+      : "(env fallback)";
   const [open, setOpen] = useState(false);
   const [autoMode, setAutoMode] = useState(task.autoMode);
   const [skipReview, setSkipReview] = useState(task.skipReview);
@@ -306,10 +314,10 @@ export function TaskSettings({ task, onSave }: Props) {
                 value={runtimeProfileId}
                 onChange={(e) => setRuntimeProfileId(e.target.value)}
               >
-                <option value="">(project default)</option>
+                <option value="">{runtimeDefaultLabel}</option>
                 {runtimeProfiles.map((profile) => (
                   <option key={profile.id} value={profile.id}>
-                    {profile.name} ({profile.runtimeId}/{profile.providerId})
+                    {formatRuntimeProfileOptionLabel(profile)}
                   </option>
                 ))}
               </select>

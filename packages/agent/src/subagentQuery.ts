@@ -1,6 +1,7 @@
 import {
   createDbUsageSink,
   findTaskById,
+  getAppDefaultRuntimeProfileId,
   getTaskSessionId,
   renewTaskClaim,
   resolveEffectiveRuntimeProfile,
@@ -187,11 +188,12 @@ export async function resolveAdapterForTask(
   mode: "task" | "plan" | "review" = "task",
 ): Promise<RuntimeAdapter> {
   const task = findTaskById(taskId);
+  const systemDefaultRuntimeProfileId = getAppDefaultRuntimeProfileId(mode);
   const effective = resolveEffectiveRuntimeProfile({
     taskId,
     projectId: task?.projectId,
     mode,
-    systemDefaultRuntimeProfileId: null,
+    systemDefaultRuntimeProfileId,
   });
   const resolved = resolveRuntimeProfile({
     source: effective.source,
@@ -233,11 +235,13 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
   canResume: boolean;
 }> {
   const task = findTaskById(options.taskId);
+  const profileMode = options.profileMode ?? "task";
+  const systemDefaultRuntimeProfileId = getAppDefaultRuntimeProfileId(profileMode);
   const effective = resolveEffectiveRuntimeProfile({
     taskId: options.taskId,
     projectId: task?.projectId,
-    mode: options.profileMode ?? "task",
-    systemDefaultRuntimeProfileId: null,
+    mode: profileMode,
+    systemDefaultRuntimeProfileId,
   });
   const workflow = buildWorkflowSpec(options);
   const runtimeOptionsOverride = parseRuntimeOptions(task?.runtimeOptionsJson);

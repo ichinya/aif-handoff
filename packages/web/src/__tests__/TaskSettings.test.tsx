@@ -2,11 +2,23 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import type { Task } from "@aif/shared/browser";
 
+const mockProjectsData = {
+  data: [{ id: "test-project", parallelEnabled: false }] as Array<Record<string, unknown>>,
+};
+const mockAppRuntimeDefaultsData = {
+  data: undefined as
+    | {
+        resolvedDefaultTaskRuntimeProfileId: string | null;
+      }
+    | undefined,
+};
+
 vi.mock("@/hooks/useProjects", () => ({
-  useProjects: () => ({ data: [{ id: "test-project", parallelEnabled: false }] }),
+  useProjects: () => ({ data: mockProjectsData.data }),
 }));
 
 vi.mock("@/hooks/useRuntimeProfiles", () => ({
+  useAppRuntimeDefaults: () => ({ data: mockAppRuntimeDefaultsData.data }),
   useRuntimeProfiles: () => ({ data: [] }),
   useRuntimes: () => ({ data: [] }),
 }));
@@ -59,6 +71,8 @@ describe("TaskSettings", () => {
 
   beforeEach(() => {
     onSave = vi.fn();
+    mockProjectsData.data = [{ id: "test-project", parallelEnabled: false }];
+    mockAppRuntimeDefaultsData.data = undefined;
   });
 
   it("renders Settings button when collapsed", () => {
@@ -245,6 +259,18 @@ describe("TaskSettings", () => {
 
     // Panel should already be open
     expect(screen.getByText("Runtime profile")).toBeDefined();
+  });
+
+  it("shows app-default copy when project has no runtime default", () => {
+    mockAppRuntimeDefaultsData.data = {
+      resolvedDefaultTaskRuntimeProfileId: "global-runtime",
+    };
+
+    render(<TaskSettings task={mockTask} onSave={onSave} />);
+    fireEvent.click(screen.getByText("Settings"));
+    fireEvent.click(screen.getByRole("button", { name: "Runtime override" }));
+
+    expect(screen.getByText("(app default)")).toBeDefined();
   });
 
   it("does not include planner fields in save for fix tasks", () => {

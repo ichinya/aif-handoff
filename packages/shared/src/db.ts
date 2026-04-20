@@ -59,6 +59,17 @@ function ensureTables(sqlite: Database.Database): void {
     )
   `);
   sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      id INTEGER PRIMARY KEY NOT NULL DEFAULT 1,
+      default_task_runtime_profile_id TEXT,
+      default_plan_runtime_profile_id TEXT,
+      default_review_runtime_profile_id TEXT,
+      default_chat_runtime_profile_id TEXT,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    )
+  `);
+  sqlite.exec(`
     CREATE TABLE IF NOT EXISTS tasks (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,
@@ -401,6 +412,63 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE projects ADD COLUMN auto_queue_mode INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    version: 13,
+    description: "Add app_settings singleton table and extend runtime-profile cleanup coverage",
+    sql: `
+      CREATE TABLE IF NOT EXISTS app_settings (
+        id INTEGER PRIMARY KEY NOT NULL DEFAULT 1,
+        default_task_runtime_profile_id TEXT,
+        default_plan_runtime_profile_id TEXT,
+        default_review_runtime_profile_id TEXT,
+        default_chat_runtime_profile_id TEXT,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      );
+      INSERT OR IGNORE INTO app_settings (id) VALUES (1);
+      DROP TRIGGER IF EXISTS trg_runtime_profiles_delete;
+    `,
+    triggers: [
+      `CREATE TRIGGER IF NOT EXISTS trg_runtime_profiles_delete
+       AFTER DELETE ON runtime_profiles
+       FOR EACH ROW
+       BEGIN
+         UPDATE tasks SET runtime_profile_id = NULL WHERE runtime_profile_id = OLD.id;
+         UPDATE projects SET default_task_runtime_profile_id = NULL WHERE default_task_runtime_profile_id = OLD.id;
+         UPDATE projects SET default_plan_runtime_profile_id = NULL WHERE default_plan_runtime_profile_id = OLD.id;
+         UPDATE projects SET default_review_runtime_profile_id = NULL WHERE default_review_runtime_profile_id = OLD.id;
+         UPDATE projects SET default_chat_runtime_profile_id = NULL WHERE default_chat_runtime_profile_id = OLD.id;
+         UPDATE chat_sessions SET runtime_profile_id = NULL WHERE runtime_profile_id = OLD.id;
+         UPDATE app_settings
+         SET
+           default_task_runtime_profile_id = CASE
+             WHEN default_task_runtime_profile_id = OLD.id THEN NULL
+             ELSE default_task_runtime_profile_id
+           END,
+           default_plan_runtime_profile_id = CASE
+             WHEN default_plan_runtime_profile_id = OLD.id THEN NULL
+             ELSE default_plan_runtime_profile_id
+           END,
+           default_review_runtime_profile_id = CASE
+             WHEN default_review_runtime_profile_id = OLD.id THEN NULL
+             ELSE default_review_runtime_profile_id
+           END,
+           default_chat_runtime_profile_id = CASE
+             WHEN default_chat_runtime_profile_id = OLD.id THEN NULL
+             ELSE default_chat_runtime_profile_id
+           END,
+           updated_at = CASE
+             WHEN default_task_runtime_profile_id = OLD.id
+               OR default_plan_runtime_profile_id = OLD.id
+               OR default_review_runtime_profile_id = OLD.id
+               OR default_chat_runtime_profile_id = OLD.id
+             THEN (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+             ELSE updated_at
+           END
+         WHERE id = 1;
+       END`,
+    ],
+  },
 ];
 
 function splitSqlStatements(sqlText: string): string[] {
@@ -478,6 +546,21 @@ function hasColumn(sqlite: Database.Database, tableName: string, columnName: str
 }
 
 function runRuntimeBackfills(sqlite: Database.Database): void {
+  if (hasColumn(sqlite, "app_settings", "id")) {
+    const appSettingsBackfill = sqlite
+      .prepare(
+        `
+        INSERT OR IGNORE INTO app_settings (id)
+        VALUES (1)
+      `,
+      )
+      .run();
+    log.info(
+      { backfilledRows: appSettingsBackfill.changes },
+      "Backfilled singleton app_settings row",
+    );
+  }
+
   if (hasColumn(sqlite, "chat_sessions", "runtime_session_id")) {
     const sessionBackfill = sqlite
       .prepare(

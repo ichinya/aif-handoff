@@ -55,6 +55,7 @@ import {
   getApiRuntimeRegistry,
   resolveApiRuntimeContext,
 } from "../services/runtime.js";
+import { validateProjectScopedRuntimeProfileSelections } from "../services/runtimeProfileScope.js";
 
 const PROJECT_SCOPE_SYSTEM_APPEND =
   "Project scope rule: work strictly inside the current working directory (project root). " +
@@ -620,7 +621,20 @@ chatRouter.get("/sessions", async (c) => {
 chatRouter.post("/sessions", jsonValidator(createChatSessionSchema), async (c) => {
   const body = c.req.valid("json") as CreateChatSessionPayload;
   log.debug("POST /chat/sessions projectId=%s title=%s", body.projectId, body.title);
-  const row = createChatSession({ projectId: body.projectId, title: body.title });
+  const runtimeValidation = validateProjectScopedRuntimeProfileSelections({
+    projectId: body.projectId,
+    selections: { runtimeProfileId: body.runtimeProfileId },
+  });
+  if (runtimeValidation) {
+    return c.json(runtimeValidation, 400);
+  }
+
+  const row = createChatSession({
+    projectId: body.projectId,
+    title: body.title,
+    runtimeProfileId: body.runtimeProfileId,
+    runtimeSessionId: body.runtimeSessionId,
+  });
   if (!row) {
     return c.json({ error: "Failed to create chat session" }, 500);
   }
@@ -843,7 +857,20 @@ chatRouter.put("/sessions/:id", jsonValidator(updateChatSessionSchema), async (c
   if (!existing) {
     return c.json({ error: "Chat session not found" }, 404);
   }
-  const row = updateChatSession(id, { title: body.title });
+
+  const runtimeValidation = validateProjectScopedRuntimeProfileSelections({
+    projectId: existing.projectId,
+    selections: { runtimeProfileId: body.runtimeProfileId },
+  });
+  if (runtimeValidation) {
+    return c.json(runtimeValidation, 400);
+  }
+
+  const row = updateChatSession(id, {
+    title: body.title,
+    runtimeProfileId: body.runtimeProfileId,
+    runtimeSessionId: body.runtimeSessionId,
+  });
   return c.json(row ? toChatSessionResponse(row) : null);
 });
 

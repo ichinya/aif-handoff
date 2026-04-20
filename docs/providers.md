@@ -39,9 +39,16 @@ Task mode fallback order:
 
 1. `tasks.runtime_profile_id`
 2. `projects.default_task_runtime_profile_id`
-3. optional system default
+3. `app_settings.default_task_runtime_profile_id`
+4. environment fallback
 
-Chat mode uses `default_chat_runtime_profile_id` for step 2.
+Planning and review use the same chain, but `default_plan_runtime_profile_id` / `default_review_runtime_profile_id` fall back to the task default at the same scope when unset. Chat uses `default_chat_runtime_profile_id` for the project/app steps.
+
+Scope rules:
+
+- app defaults may point only to enabled global profiles (`runtime_profiles.project_id = null`)
+- project defaults and task/chat overrides may point to either a same-project profile or a global profile
+- project-owned profiles from another project are rejected at the API layer
 
 The API exposes effective selection endpoints:
 

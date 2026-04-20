@@ -21,6 +21,7 @@ let mockEffectiveChatRuntime: {
   source: string;
   profile: {
     name: string;
+    projectId?: string | null;
     runtimeId: string;
     providerId: string;
     defaultModel: string | null;
@@ -113,6 +114,7 @@ describe("ChatPanel", () => {
       source: "project_default",
       profile: {
         name: "GLM Claude",
+        projectId: "p-1",
         runtimeId: "claude",
         providerId: "anthropic",
         defaultModel: "glm-5",
@@ -127,11 +129,28 @@ describe("ChatPanel", () => {
     renderPanel();
 
     expect(screen.getByText("Profile:")).toBeDefined();
-    expect(screen.getByText("GLM Claude")).toBeDefined();
+    expect(screen.getByText("GLM Claude [Project]")).toBeDefined();
     expect(screen.getByText("Runtime:")).toBeDefined();
     expect(screen.getByText("claude/anthropic")).toBeDefined();
     expect(screen.getByText("Model:")).toBeDefined();
     expect(screen.getByText("glm-5")).toBeDefined();
+  });
+
+  it("shows app-default label when chat resolves through the global fallback chain", () => {
+    mockEffectiveChatRuntime = {
+      source: "system_default",
+      profile: null,
+      resolved: {
+        runtimeId: "codex",
+        providerId: "openai",
+        model: "gpt-5.4",
+      },
+    };
+
+    renderPanel();
+
+    expect(screen.getByText("App default")).toBeDefined();
+    expect(screen.getByText("codex/openai")).toBeDefined();
   });
 
   it("shows the current project scope in the header", () => {

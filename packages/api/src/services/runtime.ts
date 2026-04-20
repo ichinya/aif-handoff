@@ -23,6 +23,7 @@ import {
   findProjectById,
   findRuntimeProfileById,
   findTaskById,
+  getAppDefaultRuntimeProfileId,
   resolveEffectiveRuntimeProfile,
   toRuntimeProfileResponse,
   type ProjectRow,
@@ -125,11 +126,12 @@ export async function resolveApiRuntimeContext(input: {
     throw new Error(`Project ${projectId} not found`);
   }
 
+  const systemDefaultRuntimeProfileId = getAppDefaultRuntimeProfileId(input.mode);
   const selection = resolveEffectiveRuntimeProfile({
     taskId: task?.id,
     projectId,
     mode: input.mode,
-    systemDefaultRuntimeProfileId: null,
+    systemDefaultRuntimeProfileId,
   });
 
   const profileRow = selection.profile?.id
@@ -218,11 +220,12 @@ export async function resolveApiLightModel(
   projectId: string,
   taskId?: string | null,
 ): Promise<string | null> {
+  const systemDefaultRuntimeProfileId = getAppDefaultRuntimeProfileId("task");
   const selection = resolveEffectiveRuntimeProfile({
     taskId: taskId ?? undefined,
     projectId,
     mode: "task",
-    systemDefaultRuntimeProfileId: null,
+    systemDefaultRuntimeProfileId,
   });
   const resolved = resolveRuntimeProfile({
     source: selection.source,

@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { tasks, taskComments, projects } from "@aif/shared";
+import { appSettings, projects, runtimeProfiles, taskComments, tasks } from "@aif/shared";
 import { createTestDb } from "@aif/shared/server";
 
 // Mock the shared db module to use test db
@@ -224,6 +224,36 @@ describe("tasks API", () => {
       expect(body.autoMode).toBe(true);
       expect(body.isFix).toBe(false);
       expect(body.status).toBe("backlog");
+    });
+
+    it("should reject runtime profiles owned by a different project on create", async () => {
+      const db = testDb.current;
+      insertTestProject(db);
+      db.insert(runtimeProfiles)
+        .values({
+          id: "foreign-runtime-profile",
+          projectId: "other-project",
+          name: "Foreign Runtime",
+          runtimeId: "claude",
+          providerId: "anthropic",
+          enabled: true,
+        })
+        .run();
+
+      const res = await app.request("/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "Scoped task",
+          projectId: "test-project",
+          runtimeProfileId: "foreign-runtime-profile",
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toBeTruthy();
+      expect(body.fieldErrors.runtimeProfileId).toBeDefined();
     });
 
     it("should persist planner settings from create payload", async () => {
@@ -471,6 +501,43 @@ describe("tasks API", () => {
       expect(body.title).toBe("Find me");
     });
 
+    it("should expose app-level effective runtime when project defaults are missing", async () => {
+      const db = testDb.current;
+      db.insert(projects)
+        .values({ id: "test-project", name: "Test Project", rootPath: "/tmp/test-project" })
+        .run();
+      db.update(appSettings)
+        .set({
+          defaultTaskRuntimeProfileId: "app-task-default",
+        })
+        .where(eq(appSettings.id, 1))
+        .run();
+      db.insert(runtimeProfiles)
+        .values({
+          id: "app-task-default",
+          projectId: null,
+          name: "App Task Default",
+          runtimeId: "claude",
+          providerId: "anthropic",
+          enabled: true,
+        })
+        .run();
+      db.insert(tasks)
+        .values({ id: "task-app-default", projectId: "test-project", title: "Find me" })
+        .run();
+
+      const res = await app.request("/tasks/task-app-default");
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.effectiveRuntime).toEqual({
+        source: "system_default",
+        profileId: "app-task-default",
+        runtimeId: "claude",
+        providerId: "anthropic",
+        profileName: "App Task Default",
+      });
+    });
+
     it("should expose manualReviewRequired and autoReviewState in task payload", async () => {
       const db = testDb.current;
       db.insert(tasks)
@@ -649,6 +716,34 @@ describe("tasks API", () => {
       expect(body.planPath).toBe(".ai-factory/custom.md");
       expect(body.planDocs).toBe(true);
       expect(body.planTests).toBe(true);
+    });
+
+    it("should reject runtime profiles owned by a different project on update", async () => {
+      const db = testDb.current;
+      db.insert(tasks)
+        .values({ id: "upd-runtime-scope", projectId: "test-project", title: "Scoped task" })
+        .run();
+      db.insert(runtimeProfiles)
+        .values({
+          id: "foreign-runtime-profile",
+          projectId: "other-project",
+          name: "Foreign Runtime",
+          runtimeId: "claude",
+          providerId: "anthropic",
+          enabled: true,
+        })
+        .run();
+
+      const res = await app.request("/tasks/upd-runtime-scope", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runtimeProfileId: "foreign-runtime-profile" }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toBeTruthy();
+      expect(body.fieldErrors.runtimeProfileId).toBeDefined();
     });
 
     it("should apply full-mode flag defaults when PUT sends only plannerMode=full", async () => {

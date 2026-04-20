@@ -74,6 +74,17 @@ export interface AifConfig {
   };
 }
 
+export interface AppRuntimeDefaultsResponse {
+  defaultTaskRuntimeProfileId: string | null;
+  defaultPlanRuntimeProfileId: string | null;
+  defaultReviewRuntimeProfileId: string | null;
+  defaultChatRuntimeProfileId: string | null;
+  resolvedDefaultTaskRuntimeProfileId: string | null;
+  resolvedDefaultPlanRuntimeProfileId: string | null;
+  resolvedDefaultReviewRuntimeProfileId: string | null;
+  resolvedDefaultChatRuntimeProfileId: string | null;
+}
+
 const API_PREFIX = import.meta.env.DEV ? "" : "/api";
 const API_BASE = "/tasks";
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -94,6 +105,7 @@ export interface SettingsResponse {
     modules: string[];
     openAiBaseUrlConfigured: boolean;
     codexCliPathConfigured: boolean;
+    app: AppRuntimeDefaultsResponse;
   };
 }
 
@@ -159,6 +171,24 @@ export const api = {
   getSettings(): Promise<SettingsResponse> {
     console.debug("[api] GET /settings");
     return request("/settings");
+  },
+
+  getAppRuntimeDefaults(): Promise<AppRuntimeDefaultsResponse> {
+    console.debug("[api] GET /settings/runtime-defaults");
+    return request("/settings/runtime-defaults");
+  },
+
+  updateAppRuntimeDefaults(input: {
+    defaultTaskRuntimeProfileId?: string | null;
+    defaultPlanRuntimeProfileId?: string | null;
+    defaultReviewRuntimeProfileId?: string | null;
+    defaultChatRuntimeProfileId?: string | null;
+  }): Promise<AppRuntimeDefaultsResponse> {
+    console.debug("[api] PUT /settings/runtime-defaults", input);
+    return request("/settings/runtime-defaults", {
+      method: "PUT",
+      body: JSON.stringify(input),
+    });
   },
 
   // Projects
@@ -455,11 +485,13 @@ export const api = {
     projectId?: string;
     includeGlobal?: boolean;
     enabledOnly?: boolean;
+    scope?: "global" | "project";
   }): Promise<RuntimeProfile[]> {
     const qs = new URLSearchParams();
     if (params?.projectId) qs.set("projectId", params.projectId);
     if (params?.includeGlobal !== undefined) qs.set("includeGlobal", String(params.includeGlobal));
     if (params?.enabledOnly !== undefined) qs.set("enabledOnly", String(params.enabledOnly));
+    if (params?.scope) qs.set("scope", params.scope);
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
     return request<RuntimeProfile[]>(`/runtime-profiles${suffix}`);
   },

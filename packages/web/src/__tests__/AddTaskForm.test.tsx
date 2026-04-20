@@ -5,7 +5,15 @@ const mutateCreateTask = vi.fn();
 
 const mockSettingsData = {
   data: { useSubagents: false, maxReviewIterations: 3 } as
-    | { useSubagents: boolean; maxReviewIterations: number }
+    | {
+        useSubagents: boolean;
+        maxReviewIterations: number;
+        runtimeDefaults?: {
+          app?: {
+            resolvedDefaultTaskRuntimeProfileId?: string | null;
+          };
+        };
+      }
     | undefined,
 };
 
@@ -283,6 +291,25 @@ describe("AddTaskForm", () => {
     fireEvent.click(screen.getByRole("button", { name: "Runtime override" }));
 
     expect(screen.getByText("(project default)")).toBeDefined();
+  });
+
+  it("shows app-default runtime hint when only the app default is configured", () => {
+    mockSettingsData.data = {
+      useSubagents: false,
+      maxReviewIterations: 3,
+      runtimeDefaults: {
+        app: {
+          resolvedDefaultTaskRuntimeProfileId: "global-task",
+        },
+      },
+    };
+
+    render(<AddTaskForm projectId="p-1" />);
+
+    fireEvent.click(screen.getByText("Add task"));
+    fireEvent.click(screen.getByRole("button", { name: "Runtime override" }));
+
+    expect(screen.getByText("No override uses the app default runtime profile.")).toBeDefined();
   });
 
   it("submits selected runtime profile and trimmed model override", () => {

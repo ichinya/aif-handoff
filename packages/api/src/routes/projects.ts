@@ -28,6 +28,7 @@ import {
   importGeneratedTasks,
   RoadmapGenerationError,
 } from "../services/roadmapGeneration.js";
+import { validateProjectScopedRuntimeProfileSelections } from "../services/runtimeProfileScope.js";
 
 const log = logger("projects-route");
 
@@ -43,6 +44,19 @@ projectsRouter.get("/", (c) => {
 // POST /projects
 projectsRouter.post("/", jsonValidator(createProjectSchema), async (c) => {
   const body = c.req.valid("json");
+  const runtimeValidation = validateProjectScopedRuntimeProfileSelections({
+    projectId: null,
+    selections: {
+      defaultTaskRuntimeProfileId: body.defaultTaskRuntimeProfileId,
+      defaultPlanRuntimeProfileId: body.defaultPlanRuntimeProfileId,
+      defaultReviewRuntimeProfileId: body.defaultReviewRuntimeProfileId,
+      defaultChatRuntimeProfileId: body.defaultChatRuntimeProfileId,
+    },
+  });
+  if (runtimeValidation) {
+    log.warn({ fieldErrors: runtimeValidation.fieldErrors }, "Rejected invalid project defaults");
+    return c.json(runtimeValidation, 400);
+  }
   const { project: created, pathError, initError } = await createProject(body);
   if (pathError) return c.json({ error: pathError }, 400);
   if (initError) return c.json({ error: initError }, 500);
@@ -61,6 +75,23 @@ projectsRouter.put("/:id", jsonValidator(createProjectSchema), async (c) => {
   const existing = findProjectById(id);
   if (!existing) {
     return c.json({ error: "Project not found" }, 404);
+  }
+
+  const runtimeValidation = validateProjectScopedRuntimeProfileSelections({
+    projectId: id,
+    selections: {
+      defaultTaskRuntimeProfileId: body.defaultTaskRuntimeProfileId,
+      defaultPlanRuntimeProfileId: body.defaultPlanRuntimeProfileId,
+      defaultReviewRuntimeProfileId: body.defaultReviewRuntimeProfileId,
+      defaultChatRuntimeProfileId: body.defaultChatRuntimeProfileId,
+    },
+  });
+  if (runtimeValidation) {
+    log.warn(
+      { projectId: id, fieldErrors: runtimeValidation.fieldErrors },
+      "Rejected invalid project defaults",
+    );
+    return c.json(runtimeValidation, 400);
   }
 
   const { project: updated, pathError } = updateProject(id, body);

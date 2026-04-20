@@ -7,6 +7,16 @@ import { eq } from "drizzle-orm";
 import { chatSessions } from "../schema.js";
 import { closeDb, createTestDb, getDb } from "../db.js";
 
+function removeSqliteArtifacts(dbPath: string): void {
+  for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+    try {
+      rmSync(path, { force: true });
+    } catch {
+      // Windows can hold SQLite sidecars briefly after close; ignore cleanup noise in tests.
+    }
+  }
+}
+
 describe("db", () => {
   it("createTestDb returns a working database with indexes", () => {
     const db = createTestDb();
@@ -19,6 +29,51 @@ describe("db", () => {
     const db2 = createTestDb();
     expect(db1).toBeDefined();
     expect(db2).toBeDefined();
+  });
+
+  it("creates and seeds a singleton app_settings row", () => {
+    closeDb();
+    const dbPath = join(tmpdir(), `aif-shared-app-settings-${Date.now()}-${Math.random()}.sqlite`);
+
+    try {
+      getDb(dbPath);
+      closeDb();
+
+      const sqlite = new Database(dbPath, { readonly: true });
+      const rows = sqlite
+        .prepare(
+          `
+          SELECT
+            id,
+            default_task_runtime_profile_id,
+            default_plan_runtime_profile_id,
+            default_review_runtime_profile_id,
+            default_chat_runtime_profile_id
+          FROM app_settings
+        `,
+        )
+        .all() as Array<{
+        id: number;
+        default_task_runtime_profile_id: string | null;
+        default_plan_runtime_profile_id: string | null;
+        default_review_runtime_profile_id: string | null;
+        default_chat_runtime_profile_id: string | null;
+      }>;
+      sqlite.close();
+
+      expect(rows).toEqual([
+        {
+          id: 1,
+          default_task_runtime_profile_id: null,
+          default_plan_runtime_profile_id: null,
+          default_review_runtime_profile_id: null,
+          default_chat_runtime_profile_id: null,
+        },
+      ]);
+    } finally {
+      closeDb();
+      removeSqliteArtifacts(dbPath);
+    }
   });
 
   it("migrates pre-v6 schema and backfills runtime_session_id from agent_session_id", () => {
@@ -131,7 +186,7 @@ describe("db", () => {
       expect(migrated?.runtimeSessionId).toBe("legacy-agent-session");
     } finally {
       closeDb();
-      rmSync(dbPath, { force: true });
+      removeSqliteArtifacts(dbPath);
     }
   });
 
@@ -282,10 +337,10 @@ describe("db", () => {
       expect(taskColumns.map((column) => column.name)).toEqual(
         expect.arrayContaining(["manual_review_required", "auto_review_state_json"]),
       );
-      expect(userVersion).toBe(12);
+      expect(userVersion).toBe(13);
     } finally {
       closeDb();
-      rmSync(dbPath, { force: true });
+      removeSqliteArtifacts(dbPath);
     }
   });
 });

@@ -149,7 +149,9 @@ describe("chat session API", () => {
     mockListSessions.mockResolvedValue([]);
     mockGetSession.mockResolvedValue(null);
     mockListSessionEvents.mockResolvedValue([]);
-    mockFindRuntimeProfileById.mockReturnValue(null);
+    mockFindRuntimeProfileById.mockImplementation((id: string) =>
+      id === "profile-1" ? { id, projectId: "proj-1" } : null,
+    );
   });
 
   describe("GET /chat/sessions", () => {
@@ -216,13 +218,46 @@ describe("chat session API", () => {
       const res = await app.request("/chat/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId: "proj-1", title: "New Chat" }),
+        body: JSON.stringify({
+          projectId: "proj-1",
+          title: "New Chat",
+          runtimeProfileId: "profile-1",
+          runtimeSessionId: "runtime-session-1",
+        }),
       });
 
       expect(res.status).toBe(201);
+      expect(mockCreateChatSession).toHaveBeenCalledWith({
+        projectId: "proj-1",
+        title: "New Chat",
+        runtimeProfileId: "profile-1",
+        runtimeSessionId: "runtime-session-1",
+      });
       expect(mockBroadcast).toHaveBeenCalledWith(
         expect.objectContaining({ type: "chat:session_created" }),
       );
+    });
+
+    it("rejects runtime profiles owned by a different project", async () => {
+      mockFindRuntimeProfileById.mockReturnValue({
+        id: "foreign-profile",
+        projectId: "other-project",
+      });
+
+      const res = await app.request("/chat/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: "proj-1",
+          title: "New Chat",
+          runtimeProfileId: "foreign-profile",
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toBeTruthy();
+      expect(body.fieldErrors.runtimeProfileId).toBeDefined();
     });
   });
 
@@ -454,18 +489,51 @@ describe("chat session API", () => {
   });
 
   describe("PUT /chat/sessions/:id", () => {
-    it("updates title", async () => {
+    it("updates title and runtime profile fields", async () => {
       mockFindChatSessionById.mockReturnValue(SESSION_ROW);
-      mockUpdateChatSession.mockReturnValue({ ...SESSION_ROW, title: "Renamed" });
+      mockUpdateChatSession.mockReturnValue({
+        ...SESSION_ROW,
+        title: "Renamed",
+        runtimeProfileId: "profile-1",
+        runtimeSessionId: "runtime-session-2",
+      });
 
       const res = await app.request("/chat/sessions/session-1", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: "Renamed" }),
+        body: JSON.stringify({
+          title: "Renamed",
+          runtimeProfileId: "profile-1",
+          runtimeSessionId: "runtime-session-2",
+        }),
       });
       expect(res.status).toBe(200);
+      expect(mockUpdateChatSession).toHaveBeenCalledWith("session-1", {
+        title: "Renamed",
+        runtimeProfileId: "profile-1",
+        runtimeSessionId: "runtime-session-2",
+      });
       const body = await res.json();
       expect(body.title).toBe("Renamed");
+    });
+
+    it("rejects runtime profiles owned by a different project on update", async () => {
+      mockFindChatSessionById.mockReturnValue(SESSION_ROW);
+      mockFindRuntimeProfileById.mockReturnValue({
+        id: "foreign-profile",
+        projectId: "other-project",
+      });
+
+      const res = await app.request("/chat/sessions/session-1", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runtimeProfileId: "foreign-profile" }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toBeTruthy();
+      expect(body.fieldErrors.runtimeProfileId).toBeDefined();
     });
   });
 

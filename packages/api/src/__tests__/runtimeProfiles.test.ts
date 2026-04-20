@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
+import { eq } from "drizzle-orm";
 import { createTestDb } from "@aif/shared/server";
-import { projects, runtimeProfiles, tasks } from "@aif/shared";
+import { appSettings, projects, runtimeProfiles, tasks } from "@aif/shared";
 
 const testDb = { current: createTestDb() };
 
@@ -223,6 +224,41 @@ describe("runtimeProfiles API", () => {
     expect(body).toHaveLength(2);
   });
 
+  it("lists only global profiles when scope=global", async () => {
+    const db = testDb.current;
+    db.insert(runtimeProfiles)
+      .values([
+        {
+          id: "global-only-profile",
+          projectId: null,
+          name: "Global Claude",
+          runtimeId: "claude",
+          providerId: "anthropic",
+          enabled: true,
+        },
+        {
+          id: "project-only-profile",
+          projectId: "project-1",
+          name: "Project Claude",
+          runtimeId: "claude",
+          providerId: "anthropic",
+          enabled: true,
+        },
+      ])
+      .run();
+
+    const res = await app.request("/runtime-profiles?scope=global&enabledOnly=true");
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toHaveLength(1);
+    expect(body[0].id).toBe("global-only-profile");
+  });
+
+  it("requires projectId when scope=project", async () => {
+    const res = await app.request("/runtime-profiles?scope=project");
+    expect(res.status).toBe(400);
+  });
+
   it("applies boolean query sanitization for includeGlobal/enabledOnly flags", async () => {
     const db = testDb.current;
     db.insert(runtimeProfiles)
@@ -366,6 +402,65 @@ describe("runtimeProfiles API", () => {
     const chatBody = await chatRes.json();
     expect(chatBody.source).toBe("project_default");
     expect(chatBody.profile.id).toBe("profile-chat-default");
+  });
+
+  it("falls back to app-level runtime defaults for task and chat effective endpoints", async () => {
+    const db = testDb.current;
+    db.insert(projects)
+      .values({
+        id: "project-global-default",
+        name: "Global Default Project",
+        rootPath: "/tmp/project-global-default",
+      })
+      .run();
+    db.update(appSettings)
+      .set({
+        defaultTaskRuntimeProfileId: "profile-app-task-default",
+        defaultChatRuntimeProfileId: "profile-app-chat-default",
+      })
+      .where(eq(appSettings.id, 1))
+      .run();
+    db.insert(runtimeProfiles)
+      .values([
+        {
+          id: "profile-app-task-default",
+          projectId: null,
+          name: "App Task Default",
+          runtimeId: "claude",
+          providerId: "anthropic",
+          enabled: true,
+        },
+        {
+          id: "profile-app-chat-default",
+          projectId: null,
+          name: "App Chat Default",
+          runtimeId: "codex",
+          providerId: "openai",
+          enabled: true,
+        },
+      ])
+      .run();
+    db.insert(tasks)
+      .values({
+        id: "task-app-default",
+        projectId: "project-global-default",
+        title: "Task",
+      })
+      .run();
+
+    const taskRes = await app.request("/runtime-profiles/effective/task/task-app-default");
+    expect(taskRes.status).toBe(200);
+    const taskBody = await taskRes.json();
+    expect(taskBody.source).toBe("system_default");
+    expect(taskBody.profile.id).toBe("profile-app-task-default");
+    expect(taskBody.systemRuntimeProfileId).toBe("profile-app-task-default");
+
+    const chatRes = await app.request("/runtime-profiles/effective/chat/project-global-default");
+    expect(chatRes.status).toBe(200);
+    const chatBody = await chatRes.json();
+    expect(chatBody.source).toBe("system_default");
+    expect(chatBody.profile.id).toBe("profile-app-chat-default");
+    expect(chatBody.systemRuntimeProfileId).toBe("profile-app-chat-default");
   });
 
   it("returns 404 for missing runtime profile/task resources", async () => {

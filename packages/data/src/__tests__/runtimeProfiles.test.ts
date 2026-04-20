@@ -11,6 +11,8 @@ vi.mock("@aif/shared/server", async (importOriginal) => {
   };
 });
 
+const dataModule = await import("../index.js");
+
 const {
   createProject,
   findProjectById,
@@ -28,7 +30,35 @@ const {
   updateTaskRuntimeOverride,
   updateChatSessionRuntime,
   resolveEffectiveRuntimeProfile,
-} = await import("../index.js");
+} = dataModule;
+
+const dataModuleWithAppSettings = dataModule as unknown as {
+  getAppSettings?: () => {
+    id: number;
+    defaultTaskRuntimeProfileId: string | null;
+    defaultPlanRuntimeProfileId: string | null;
+    defaultReviewRuntimeProfileId: string | null;
+    defaultChatRuntimeProfileId: string | null;
+  };
+  updateAppSettings?: (input: {
+    defaultTaskRuntimeProfileId?: string | null;
+    defaultPlanRuntimeProfileId?: string | null;
+    defaultReviewRuntimeProfileId?: string | null;
+    defaultChatRuntimeProfileId?: string | null;
+  }) => {
+    id: number;
+    defaultTaskRuntimeProfileId: string | null;
+    defaultPlanRuntimeProfileId: string | null;
+    defaultReviewRuntimeProfileId: string | null;
+    defaultChatRuntimeProfileId: string | null;
+  } | undefined;
+  isRuntimeProfileVisibleToProject?: (input: {
+    projectId: string;
+    runtimeProfileId: string | null;
+  }) => boolean;
+  isRuntimeProfileEligibleForAppDefaults?: (runtimeProfileId: string | null) => boolean;
+  getAppDefaultRuntimeProfileId?: (mode: "task" | "plan" | "review" | "chat") => string | null;
+};
 
 function seedProject(id = "proj-1") {
   testDb.current
@@ -137,6 +167,203 @@ describe("runtime profiles data layer", () => {
     const chatAfter = findChatSessionById(chat!.id);
     expect(chatAfter?.runtimeProfileId).toBe(profile!.id);
     expect(chatAfter?.runtimeSessionId).toBe("runtime-session-1");
+  });
+
+  it("persists singleton app-wide runtime defaults", () => {
+    const globalProfile = createRuntimeProfile({
+      projectId: null,
+      name: "Global Default",
+      runtimeId: "codex",
+      providerId: "openai",
+      enabled: true,
+    });
+
+    const getAppSettings = dataModuleWithAppSettings.getAppSettings;
+    const updateAppSettings = dataModuleWithAppSettings.updateAppSettings;
+
+    expect(getAppSettings).toBeTypeOf("function");
+    expect(updateAppSettings).toBeTypeOf("function");
+    if (!getAppSettings || !updateAppSettings) return;
+
+    expect(getAppSettings()).toMatchObject({
+      id: 1,
+      defaultTaskRuntimeProfileId: null,
+      defaultPlanRuntimeProfileId: null,
+      defaultReviewRuntimeProfileId: null,
+      defaultChatRuntimeProfileId: null,
+    });
+
+    const updated = updateAppSettings({
+      defaultTaskRuntimeProfileId: globalProfile!.id,
+      defaultPlanRuntimeProfileId: globalProfile!.id,
+      defaultReviewRuntimeProfileId: globalProfile!.id,
+      defaultChatRuntimeProfileId: globalProfile!.id,
+    });
+
+    expect(updated).toMatchObject({
+      id: 1,
+      defaultTaskRuntimeProfileId: globalProfile!.id,
+      defaultPlanRuntimeProfileId: globalProfile!.id,
+      defaultReviewRuntimeProfileId: globalProfile!.id,
+      defaultChatRuntimeProfileId: globalProfile!.id,
+    });
+    expect(getAppSettings()).toMatchObject({
+      id: 1,
+      defaultTaskRuntimeProfileId: globalProfile!.id,
+      defaultPlanRuntimeProfileId: globalProfile!.id,
+      defaultReviewRuntimeProfileId: globalProfile!.id,
+      defaultChatRuntimeProfileId: globalProfile!.id,
+    });
+  });
+
+  it("validates runtime profile scope for project visibility and app-default eligibility", () => {
+    seedProject("proj-2");
+    const globalProfile = createRuntimeProfile({
+      projectId: null,
+      name: "Global",
+      runtimeId: "codex",
+      providerId: "openai",
+      enabled: true,
+    });
+    const projectProfile = createRuntimeProfile({
+      projectId: "proj-1",
+      name: "Project",
+      runtimeId: "claude",
+      providerId: "anthropic",
+      enabled: true,
+    });
+    const foreignProjectProfile = createRuntimeProfile({
+      projectId: "proj-2",
+      name: "Foreign",
+      runtimeId: "claude",
+      providerId: "anthropic",
+      enabled: true,
+    });
+    const disabledGlobalProfile = createRuntimeProfile({
+      projectId: null,
+      name: "Disabled Global",
+      runtimeId: "codex",
+      providerId: "openai",
+      enabled: false,
+    });
+
+    const isRuntimeProfileVisibleToProject =
+      dataModuleWithAppSettings.isRuntimeProfileVisibleToProject;
+    const isRuntimeProfileEligibleForAppDefaults =
+      dataModuleWithAppSettings.isRuntimeProfileEligibleForAppDefaults;
+
+    expect(isRuntimeProfileVisibleToProject).toBeTypeOf("function");
+    expect(isRuntimeProfileEligibleForAppDefaults).toBeTypeOf("function");
+    if (!isRuntimeProfileVisibleToProject || !isRuntimeProfileEligibleForAppDefaults) return;
+
+    expect(
+      isRuntimeProfileVisibleToProject({
+        projectId: "proj-1",
+        runtimeProfileId: globalProfile!.id,
+      }),
+    ).toBe(true);
+    expect(
+      isRuntimeProfileVisibleToProject({
+        projectId: "proj-1",
+        runtimeProfileId: projectProfile!.id,
+      }),
+    ).toBe(true);
+    expect(
+      isRuntimeProfileVisibleToProject({
+        projectId: "proj-1",
+        runtimeProfileId: foreignProjectProfile!.id,
+      }),
+    ).toBe(false);
+
+    expect(isRuntimeProfileEligibleForAppDefaults(globalProfile!.id)).toBe(true);
+    expect(isRuntimeProfileEligibleForAppDefaults(projectProfile!.id)).toBe(false);
+    expect(isRuntimeProfileEligibleForAppDefaults(disabledGlobalProfile!.id)).toBe(false);
+  });
+
+  it("resolves app default runtime ids with plan and review fallback to task", () => {
+    const globalTaskProfile = createRuntimeProfile({
+      projectId: null,
+      name: "Global Task",
+      runtimeId: "claude",
+      providerId: "anthropic",
+      enabled: true,
+    });
+    const globalChatProfile = createRuntimeProfile({
+      projectId: null,
+      name: "Global Chat",
+      runtimeId: "codex",
+      providerId: "openai",
+      enabled: true,
+    });
+
+    const updateAppSettings = dataModuleWithAppSettings.updateAppSettings;
+    const getAppDefaultRuntimeProfileId = dataModuleWithAppSettings.getAppDefaultRuntimeProfileId;
+
+    expect(updateAppSettings).toBeTypeOf("function");
+    expect(getAppDefaultRuntimeProfileId).toBeTypeOf("function");
+    if (!updateAppSettings || !getAppDefaultRuntimeProfileId) return;
+
+    updateAppSettings({
+      defaultTaskRuntimeProfileId: globalTaskProfile!.id,
+      defaultPlanRuntimeProfileId: null,
+      defaultReviewRuntimeProfileId: null,
+      defaultChatRuntimeProfileId: globalChatProfile!.id,
+    });
+
+    expect(getAppDefaultRuntimeProfileId("task")).toBe(globalTaskProfile!.id);
+    expect(getAppDefaultRuntimeProfileId("plan")).toBe(globalTaskProfile!.id);
+    expect(getAppDefaultRuntimeProfileId("review")).toBe(globalTaskProfile!.id);
+    expect(getAppDefaultRuntimeProfileId("chat")).toBe(globalChatProfile!.id);
+  });
+
+  it("skips unavailable app defaults and keeps task fallback for plan/review", () => {
+    const globalTaskProfile = createRuntimeProfile({
+      projectId: null,
+      name: "Global Task",
+      runtimeId: "claude",
+      providerId: "anthropic",
+      enabled: true,
+    });
+    const disabledPlanProfile = createRuntimeProfile({
+      projectId: null,
+      name: "Disabled Plan",
+      runtimeId: "codex",
+      providerId: "openai",
+      enabled: false,
+    });
+    const disabledReviewProfile = createRuntimeProfile({
+      projectId: null,
+      name: "Disabled Review",
+      runtimeId: "codex",
+      providerId: "openai",
+      enabled: false,
+    });
+    const disabledChatProfile = createRuntimeProfile({
+      projectId: null,
+      name: "Disabled Chat",
+      runtimeId: "codex",
+      providerId: "openai",
+      enabled: false,
+    });
+
+    const updateAppSettings = dataModuleWithAppSettings.updateAppSettings;
+    const getAppDefaultRuntimeProfileId = dataModuleWithAppSettings.getAppDefaultRuntimeProfileId;
+
+    expect(updateAppSettings).toBeTypeOf("function");
+    expect(getAppDefaultRuntimeProfileId).toBeTypeOf("function");
+    if (!updateAppSettings || !getAppDefaultRuntimeProfileId) return;
+
+    updateAppSettings({
+      defaultTaskRuntimeProfileId: globalTaskProfile!.id,
+      defaultPlanRuntimeProfileId: disabledPlanProfile!.id,
+      defaultReviewRuntimeProfileId: disabledReviewProfile!.id,
+      defaultChatRuntimeProfileId: disabledChatProfile!.id,
+    });
+
+    expect(getAppDefaultRuntimeProfileId("task")).toBe(globalTaskProfile!.id);
+    expect(getAppDefaultRuntimeProfileId("plan")).toBe(globalTaskProfile!.id);
+    expect(getAppDefaultRuntimeProfileId("review")).toBe(globalTaskProfile!.id);
+    expect(getAppDefaultRuntimeProfileId("chat")).toBeNull();
   });
 
   it("resolves task override first", () => {
@@ -266,10 +493,17 @@ describe("runtime profiles data layer", () => {
       rootPath: "/tmp/with-defaults",
       defaultTaskRuntimeProfileId: profile!.id,
       defaultChatRuntimeProfileId: profile!.id,
+      defaultPlanRuntimeProfileId: profile!.id,
+      defaultReviewRuntimeProfileId: profile!.id,
+    } as Parameters<typeof createProject>[0] & {
+      defaultPlanRuntimeProfileId: string;
+      defaultReviewRuntimeProfileId: string;
     });
 
     const found = findProjectById(project!.id);
     expect(found?.defaultTaskRuntimeProfileId).toBe(profile!.id);
+    expect(found?.defaultPlanRuntimeProfileId).toBe(profile!.id);
+    expect(found?.defaultReviewRuntimeProfileId).toBe(profile!.id);
     expect(found?.defaultChatRuntimeProfileId).toBe(profile!.id);
   });
 });

@@ -32,6 +32,7 @@ import { useChatSessions } from "@/hooks/useChatSessions";
 import { useTask } from "@/hooks/useTasks";
 import { useEffectiveChatRuntime, useRuntimeProfiles } from "@/hooks/useRuntimeProfiles";
 import { toAttachmentPayload } from "@/components/task/useTaskDetailActions";
+import { formatRuntimeProfileName } from "@/lib/runtimeProfiles";
 import { SessionList } from "./SessionList";
 import { MessageBubble } from "./MessageBubble";
 import { TypingIndicator } from "./TypingIndicator";
@@ -190,8 +191,14 @@ export function ChatPanel({
     : null;
   const displayProfile = sessionProfile ?? effectiveChatRuntime?.profile ?? null;
   const activeRuntimeProfileName =
-    displayProfile?.name ??
-    (effectiveChatRuntime?.source === "none" ? "Default runtime" : "Unnamed profile");
+    (displayProfile ? formatRuntimeProfileName(displayProfile) : null) ??
+    (effectiveChatRuntime?.source === "system_default"
+      ? "App default"
+      : effectiveChatRuntime?.source === "project_default"
+        ? "Project default"
+        : effectiveChatRuntime?.source === "none"
+          ? "Env fallback"
+          : "Unnamed profile");
   const activeRuntimeEngine = displayProfile
     ? `${displayProfile.runtimeId}/${displayProfile.providerId}`
     : effectiveChatRuntime?.resolved

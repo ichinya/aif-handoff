@@ -5,6 +5,9 @@ const logActivityMock = vi.fn();
 const incrementTaskTokenUsageMock = vi.fn();
 const saveTaskSessionIdMock = vi.fn();
 const getTaskSessionIdMock = vi.fn(() => null);
+const getAppDefaultRuntimeProfileIdMock = vi.fn<
+  (mode: "task" | "plan" | "review" | "chat") => string | null
+>(() => null);
 
 interface MockTaskRow {
   id: string;
@@ -60,6 +63,7 @@ vi.mock("@aif/data", async (importOriginal) => {
     renewTaskClaim: vi.fn(),
     saveTaskSessionId: saveTaskSessionIdMock,
     getTaskSessionId: getTaskSessionIdMock,
+    getAppDefaultRuntimeProfileId: getAppDefaultRuntimeProfileIdMock,
     findTaskById: findTaskByIdMock,
     resolveEffectiveRuntimeProfile: resolveEffectiveRuntimeProfileMock,
   };
@@ -134,7 +138,7 @@ vi.mock("../stderrCollector.js", () => ({
   }),
 }));
 
-const { executeSubagentQuery } = await import("../subagentQuery.js");
+const { executeSubagentQuery, resolveAdapterForTask } = await import("../subagentQuery.js");
 
 function makeDelayedSuccess(delayMs: number, result: string) {
   return async function* () {
@@ -215,6 +219,84 @@ describe("executeSubagentQuery attribution", () => {
     const callOptions = queryMock.mock.calls[0][0].options;
     expect(callOptions.settings).toEqual(
       expect.objectContaining({ attribution: { commit: "", pr: "" } }),
+    );
+  });
+});
+
+describe("subagent app-default runtime resolution", () => {
+  beforeEach(() => {
+    (globalThis as { __AIF_CLAUDE_QUERY_MOCK__?: typeof queryMock }).__AIF_CLAUDE_QUERY_MOCK__ =
+      queryMock;
+    queryMock.mockReset();
+    logActivityMock.mockReset();
+    incrementTaskTokenUsageMock.mockReset();
+    saveTaskSessionIdMock.mockReset();
+    getTaskSessionIdMock.mockReset();
+    getAppDefaultRuntimeProfileIdMock.mockReset();
+    findTaskByIdMock.mockReset();
+    resolveEffectiveRuntimeProfileMock.mockReset();
+    getTaskSessionIdMock.mockReturnValue(null);
+    getAppDefaultRuntimeProfileIdMock.mockReturnValue(null);
+    findTaskByIdMock.mockReturnValue({
+      id: "task-1",
+      projectId: "project-1",
+      runtimeOptionsJson: null,
+      modelOverride: null,
+    });
+    resolveEffectiveRuntimeProfileMock.mockReturnValue({
+      source: "none",
+      profile: null,
+      taskRuntimeProfileId: null,
+      projectRuntimeProfileId: null,
+      systemRuntimeProfileId: null,
+    });
+  });
+
+  it("passes app-level review defaults when resolving an adapter for a task", async () => {
+    getAppDefaultRuntimeProfileIdMock.mockReturnValue("app-review-default");
+
+    await resolveAdapterForTask("task-1", "review");
+
+    expect(getAppDefaultRuntimeProfileIdMock).toHaveBeenCalledWith("review");
+    expect(resolveEffectiveRuntimeProfileMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: "task-1",
+        projectId: "project-1",
+        mode: "review",
+        systemDefaultRuntimeProfileId: "app-review-default",
+      }),
+    );
+  });
+
+  it("passes app-level plan defaults into subagent execution context resolution", async () => {
+    getAppDefaultRuntimeProfileIdMock.mockReturnValue("app-plan-default");
+    queryMock.mockImplementation(async function* () {
+      yield {
+        type: "result",
+        subtype: "success",
+        result: "done",
+        usage: {},
+        total_cost_usd: 0,
+      };
+    });
+
+    await executeSubagentQuery({
+      taskId: "task-1",
+      projectRoot: "/tmp/project",
+      agentName: "plan-coordinator",
+      prompt: "run",
+      profileMode: "plan",
+      workflowKind: "planner",
+    });
+
+    expect(getAppDefaultRuntimeProfileIdMock).toHaveBeenCalledWith("plan");
+    expect(resolveEffectiveRuntimeProfileMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: "task-1",
+        projectId: "project-1",
+        mode: "plan",
+        systemDefaultRuntimeProfileId: "app-plan-default",
+      }),
     );
   });
 });
