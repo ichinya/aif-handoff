@@ -268,6 +268,9 @@ Used by API/agent services to trigger project-scoped WebSocket broadcasts withou
 - If `INTERNAL_BROADCAST_TOKEN` is configured, callers must provide the same token via `Authorization: Bearer <token>` or `X-Internal-Broadcast-Token`.
 - If no token is configured, development fallback only trusts loopback callers (`localhost`, `127.0.0.1`, `::1`).
 - Unauthorized callers receive `401`.
+- Relation validation is enforced before broadcasting:
+  - `project:auto_queue_advanced` returns `400` when `taskId` does not belong to the target project.
+  - `project:runtime_limit_updated` returns `400` when `runtimeProfileId` does not belong to the target project and is not global.
 
 **Body:**
 | Field | Type | Required | Description |
@@ -332,7 +335,9 @@ The normalized `runtimeLimitSnapshot` object is shared across runtime-profile, t
 | `retryAfterSeconds` | number\|null | Retry hint when only backoff seconds are known                             |
 | `warningThreshold`  | number\|null | Exact threshold percentage when the provider reports it                    |
 | `windows`           | array        | Per-window quota details (`remaining`, `percentRemaining`, `resetAt`, ...) |
-| `providerMeta`      | object\|null | Provider-specific qualitative metadata kept for diagnostics/UI             |
+| `providerMeta`      | object\|null | Sanitized provider-specific qualitative metadata kept for diagnostics/UI   |
+
+`providerMeta` is client-visible and always normalized before leaving the server. It may include safe identifiers such as `limitId`, `providerLabel`, `quotaSource`, `accountLabel`, `accountFingerprint`, `planType`, `modelUsageSummary`, or `toolUsageSummary`, but raw provider responses, headers, bodies, traces, and token-like fields are stripped or redacted.
 
 ---
 
@@ -627,7 +632,7 @@ POST /chat
 - `429` — Runtime usage limit reached (`code: "CHAT_USAGE_LIMIT"`, response may include `runtimeLimitSnapshot`)
 - `500` — Chat request failed (`code: "CHAT_REQUEST_FAILED"`)
 
-On error, a `chat:error` event is sent via WebSocket before the HTTP response.
+On error, a `chat:error` event is sent via WebSocket before the HTTP response. Both HTTP and WebSocket chat payloads normalize `runtimeLimitSnapshot` before emission, so client-visible snapshots follow the same sanitized contract as runtime-profile and task payloads.
 
 **Timeout:** Requests may take up to 120 seconds due to agent processing.
 

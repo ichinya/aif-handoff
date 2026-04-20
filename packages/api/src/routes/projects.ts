@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { jsonValidator } from "../middleware/zodValidator.js";
 import { getEnv, logger, getProjectConfig } from "@aif/shared";
-import { findTaskById } from "@aif/data";
+import { findRuntimeProfileById, findTaskById } from "@aif/data";
 import {
   createProjectSchema,
   roadmapImportSchema,
@@ -277,6 +277,24 @@ projectsRouter.post("/:id/broadcast", jsonValidator(broadcastProjectSchema), asy
   const { type, taskId, runtimeProfileId } = c.req.valid("json");
   const project = findProjectById(id);
   if (!project) return c.json({ error: "Project not found" }, 404);
+
+  if (type === "project:auto_queue_advanced" && taskId) {
+    const task = findTaskById(taskId);
+    if (!task || task.projectId !== id) {
+      return c.json({ error: "taskId does not belong to the target project" }, 400);
+    }
+  }
+
+  if (type === "project:runtime_limit_updated" && runtimeProfileId) {
+    const runtimeProfile = findRuntimeProfileById(runtimeProfileId);
+    const belongsToProject = runtimeProfile?.projectId === id || runtimeProfile?.projectId == null;
+    if (!runtimeProfile || !belongsToProject) {
+      return c.json(
+        { error: "runtimeProfileId must belong to the target project or be global" },
+        400,
+      );
+    }
+  }
 
   if (type === "project:auto_queue_advanced" && taskId) {
     broadcast({ type, payload: { id: taskId } });

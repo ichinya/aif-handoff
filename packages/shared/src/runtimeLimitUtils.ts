@@ -21,6 +21,8 @@ const GENERIC_ALLOWED_PROVIDER_META_KEYS = toNormalizedKeySet([
   "category",
   "providerFamily",
   "providerLabel",
+  "quotaSource",
+  "limitId",
   "planType",
   "accountId",
   "accountName",
@@ -40,6 +42,7 @@ const PROVIDER_META_ALLOWLIST: Record<string, ReadonlySet<string>> = {
   anthropic: toNormalizedKeySet([
     "providerFamily",
     "providerLabel",
+    "quotaSource",
     "planType",
     "accountId",
     "accountName",
@@ -56,6 +59,7 @@ const PROVIDER_META_ALLOWLIST: Record<string, ReadonlySet<string>> = {
   claude: toNormalizedKeySet([
     "providerFamily",
     "providerLabel",
+    "quotaSource",
     "planType",
     "accountId",
     "accountName",
@@ -92,6 +96,13 @@ const PROVIDER_META_ALLOWLIST: Record<string, ReadonlySet<string>> = {
     "retryAfterSeconds",
     "resetAt",
     "rateLimitType",
+    "limitId",
+    "accountLabel",
+    "accountFingerprint",
+    "providerLabel",
+    "planType",
+    "modelUsageSummary",
+    "toolUsageSummary",
   ]),
 };
 
@@ -127,6 +138,8 @@ const TOKEN_PATTERNS: ReadonlyArray<RegExp> = [
   /\bsk-[A-Za-z0-9_\-]{6,}\b/gi,
   /\b(?:api[_-]?key|token|secret[_-]?token|authorization|password)\s*[:=]\s*["']?[^\s,"']+["']?/gi,
   /\bbearer\s+[A-Za-z0-9\-._~+/]+=*/gi,
+  /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
+  /\bhttps?:\/\/[^\s"']+/gi,
 ];
 
 function toFiniteNumber(value: unknown): number | null {
@@ -151,7 +164,7 @@ function isFiniteNonNegative(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
-function redactSensitiveText(raw: string): string {
+export function redactProviderText(raw: string): string {
   let redacted = raw;
   for (const pattern of TOKEN_PATTERNS) {
     redacted = redacted.replace(pattern, REDACTED_VALUE);
@@ -168,7 +181,7 @@ function sanitizeProviderMetaValue(value: unknown, depth: number): unknown {
   }
 
   if (typeof value === "string") {
-    return redactSensitiveText(value);
+    return redactProviderText(value);
   }
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : null;
@@ -396,8 +409,9 @@ export function resolveRuntimeLimitFutureHint(
     ),
   ];
 
+  const preferWindowHints = input.windowFirst ?? input.preferredWindow != null;
   const ordered = (
-    input.windowFirst
+    preferWindowHints
       ? [...windowCandidates, ...snapshotCandidates]
       : [...snapshotCandidates, ...windowCandidates]
   ).filter((candidate): candidate is HintCandidate => candidate != null);

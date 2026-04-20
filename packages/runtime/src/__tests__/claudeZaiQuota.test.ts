@@ -158,6 +158,83 @@ describe("fetchZaiClaudeQuotaSnapshot", () => {
     expect(global.fetch).toHaveBeenCalledTimes(3);
   });
 
+  it("selects resetAt and primaryScope from the violated Z.AI window instead of the first window", async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          code: 200,
+          success: true,
+          data: {
+            level: "pro",
+            limits: [
+              {
+                type: "TIME_LIMIT",
+                usage: 1000,
+                currentValue: 100,
+                remaining: 900,
+                percentage: 10,
+                nextResetTime: 1_800_000_000_000,
+              },
+              {
+                type: "TOKENS_LIMIT",
+                percentage: 96,
+                nextResetTime: 1_800_100_000_000,
+              },
+            ],
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ code: 200, success: true, data: {} }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ code: 200, success: true, data: {} }),
+      }) as typeof fetch;
+
+    const snapshot = await fetchZaiClaudeQuotaSnapshot({
+      runtimeId: "claude",
+      providerId: "anthropic",
+      profileId: "profile-zai",
+      authToken: "secret-token",
+      identity: {
+        providerFamily: "zai-glm-coding",
+        providerLabel: "Z.AI GLM Coding Plan",
+        quotaSource: "zai_monitor",
+        baseUrl: "https://api.z.ai/api/anthropic",
+        baseOrigin: "https://api.z.ai",
+        apiKeyEnvVar: "ANTHROPIC_AUTH_TOKEN",
+        accountFingerprint: "glm-account-1",
+        accountLabel: null,
+      },
+      checkedAt: "2026-04-18T10:00:00.000Z",
+    });
+
+    expect(snapshot).toMatchObject({
+      status: "warning",
+      primaryScope: "tokens",
+      resetAt: new Date(1_800_100_000_000).toISOString(),
+      providerMeta: {
+        quotaSource: "zai_monitor",
+      },
+    });
+    expect(snapshot?.windows).toEqual([
+      expect.objectContaining({
+        scope: "tool_usage",
+        percentRemaining: 90,
+        resetAt: new Date(1_800_000_000_000).toISOString(),
+      }),
+      expect.objectContaining({
+        scope: "tokens",
+        percentRemaining: 4,
+        resetAt: new Date(1_800_100_000_000).toISOString(),
+      }),
+    ]);
+  });
+
   it("returns null for non-Z.AI provider families", async () => {
     const snapshot = await fetchZaiClaudeQuotaSnapshot({
       runtimeId: "claude",

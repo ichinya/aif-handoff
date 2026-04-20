@@ -193,6 +193,65 @@ function resolveSnapshotStatus(windows: RuntimeLimitWindow[]): RuntimeLimitStatu
   return RuntimeLimitStatus.UNKNOWN;
 }
 
+function selectPrimaryQuotaWindow(
+  windows: RuntimeLimitWindow[],
+  status: RuntimeLimitStatus,
+): RuntimeLimitWindow | null {
+  if (windows.length === 0) return null;
+
+  const score = (window: RuntimeLimitWindow): number => {
+    if (typeof window.resetAt === "string") {
+      const parsed = Date.parse(window.resetAt);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return Number.NEGATIVE_INFINITY;
+  };
+
+  const matching = windows.filter((window) => {
+    if (status === RuntimeLimitStatus.BLOCKED) {
+      return (
+        (typeof window.percentRemaining === "number" && window.percentRemaining <= 0) ||
+        (typeof window.remaining === "number" && window.remaining <= 0)
+      );
+    }
+
+    if (status === RuntimeLimitStatus.WARNING) {
+      return (
+        (typeof window.percentRemaining === "number" &&
+          window.percentRemaining <= WARNING_THRESHOLD) ||
+        (typeof window.remaining === "number" &&
+          typeof window.limit === "number" &&
+          window.limit > 0 &&
+          window.remaining / window.limit <= WARNING_THRESHOLD / 100)
+      );
+    }
+
+    return true;
+  });
+
+  const candidates = matching.length > 0 ? matching : windows;
+  return candidates.reduce(
+    (best, candidate) => {
+      if (!best) return candidate;
+      const bestScore = score(best);
+      const candidateScore = score(candidate);
+      if (candidateScore > bestScore) return candidate;
+      if (candidateScore < bestScore) return best;
+
+      const bestRemaining =
+        typeof best.percentRemaining === "number"
+          ? best.percentRemaining
+          : Number.POSITIVE_INFINITY;
+      const candidateRemaining =
+        typeof candidate.percentRemaining === "number"
+          ? candidate.percentRemaining
+          : Number.POSITIVE_INFINITY;
+      return candidateRemaining < bestRemaining ? candidate : best;
+    },
+    null as RuntimeLimitWindow | null,
+  );
+}
+
 function buildMonitorHeaders(authToken: string): Record<string, string> {
   return {
     Authorization: authToken,
@@ -422,9 +481,8 @@ export async function fetchZaiClaudeQuotaSnapshot(
   }
 
   const status = resolveSnapshotStatus(windows);
-  const resetAt =
-    windows.find((window) => typeof window.resetAt === "string" && window.resetAt.length > 0)
-      ?.resetAt ?? null;
+  const primaryWindow = selectPrimaryQuotaWindow(windows, status);
+  const resetAt = primaryWindow?.resetAt ?? null;
   const usageDetails =
     rawLimits.map((limit) => asRecord(limit)).find((limit) => Array.isArray(limit?.usageDetails))
       ?.usageDetails ?? null;
@@ -439,7 +497,7 @@ export async function fetchZaiClaudeQuotaSnapshot(
     providerId: input.providerId,
     runtimeId: input.runtimeId,
     profileId: input.profileId ?? null,
-    primaryScope: windows[0]?.scope ?? RuntimeLimitScope.TOKENS,
+    primaryScope: primaryWindow?.scope ?? windows[0]?.scope ?? RuntimeLimitScope.TOKENS,
     resetAt,
     retryAfterSeconds: null,
     warningThreshold: WARNING_THRESHOLD,

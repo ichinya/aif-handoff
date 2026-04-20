@@ -5,7 +5,12 @@
  */
 
 import type { RuntimeLimitSnapshot } from "@aif/runtime";
-import { logger, mapSafeRuntimeErrorReason, type TaskStatus } from "@aif/shared";
+import {
+  logger,
+  mapSafeRuntimeErrorReason,
+  redactProviderText,
+  type TaskStatus,
+} from "@aif/shared";
 import { logActivity } from "./hooks.js";
 import {
   findRuntimeExecutionError,
@@ -133,10 +138,12 @@ export function classifyStageError(input: StageErrorInput): ErrorRecovery {
       {
         taskId,
         stage: stageLabel,
-        err,
         retryAfter: null,
         retryAfterSource: "none",
         runtimeCategory: runtimeError.category,
+        errorName: err instanceof Error ? err.name : typeof err,
+        errorMessage:
+          err instanceof Error ? redactProviderText(err.message) : redactProviderText(String(err)),
       },
       "Subagent failed with non-retryable runtime error, task requires manual action",
     );
@@ -174,9 +181,9 @@ export function classifyStageError(input: StageErrorInput): ErrorRecovery {
           taskId,
           stage: stageLabel,
           safeReason: blockedReason,
-          rawReason: reason,
+          rawReason: redactProviderText(reason),
         },
-        "[FIX] Redacted raw runtime error before persisting blocked task state",
+        "Redacted runtime error details before persisting blocked task state",
       );
     }
 
@@ -205,7 +212,6 @@ export function classifyStageError(input: StageErrorInput): ErrorRecovery {
       {
         taskId,
         stage: stageLabel,
-        err,
         retryAfter,
         retryAfterSource,
         backoffMinutes,
@@ -214,6 +220,8 @@ export function classifyStageError(input: StageErrorInput): ErrorRecovery {
         profileId: limitSnapshot?.profileId ?? null,
         resetAt: runtimeError?.resetAt ?? null,
         retryAfterSeconds: runtimeError?.retryAfterSeconds ?? null,
+        errorName: err instanceof Error ? err.name : typeof err,
+        errorMessage: redactProviderText(reason),
       },
       "Subagent failed with external error, task blocked with backoff",
     );
@@ -228,7 +236,16 @@ export function classifyStageError(input: StageErrorInput): ErrorRecovery {
     };
   }
 
-  log.error({ taskId, stage: stageLabel, err }, "Subagent failed, reverting status");
+  log.error(
+    {
+      taskId,
+      stage: stageLabel,
+      errorName: err instanceof Error ? err.name : typeof err,
+      errorMessage:
+        err instanceof Error ? redactProviderText(err.message) : redactProviderText(String(err)),
+    },
+    "Subagent failed, reverting status",
+  );
 
   return { kind: "revert" };
 }

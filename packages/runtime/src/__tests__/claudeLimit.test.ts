@@ -79,16 +79,48 @@ describe("normalizeClaudeLimitSnapshot", () => {
 
     expect(snapshot).toMatchObject({
       status: RuntimeLimitStatus.WARNING,
-      primaryScope: RuntimeLimitScope.TIME,
+      primaryScope: RuntimeLimitScope.SPEND,
       profileId: null,
       resetAt: new Date(1_800_000_000_000).toISOString(),
     });
     expect(snapshot?.windows[0]).toMatchObject({
-      scope: RuntimeLimitScope.TIME,
-      name: "five_hour",
+      scope: RuntimeLimitScope.SPEND,
+      name: "overage",
       percentUsed: 55,
       percentRemaining: 45,
       resetAt: new Date(1_800_000_000_000).toISOString(),
+    });
+  });
+
+  it("keeps the standard reset when the standard window is the active warning condition", () => {
+    const snapshot = normalizeClaudeLimitSnapshot({
+      info: {
+        status: "allowed_warning",
+        overageStatus: "allowed",
+        rateLimitType: "five_hour",
+        resetsAt: 1_800_000_000,
+        overageResetsAt: 1_800_100_000,
+        utilization: 88,
+      },
+      runtimeId: "claude",
+      providerId: "anthropic",
+      profileId: "profile-1",
+      checkedAt: "2026-04-17T00:00:00.000Z",
+    });
+
+    expect(snapshot).toMatchObject({
+      status: RuntimeLimitStatus.WARNING,
+      primaryScope: RuntimeLimitScope.TIME,
+      resetAt: new Date(1_800_000_000 * 1000).toISOString(),
+      providerMeta: expect.objectContaining({
+        rateLimitType: "five_hour",
+        overageStatus: "allowed",
+      }),
+    });
+    expect(snapshot?.windows[0]).toMatchObject({
+      scope: RuntimeLimitScope.TIME,
+      name: "five_hour",
+      resetAt: new Date(1_800_000_000 * 1000).toISOString(),
     });
   });
 

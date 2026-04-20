@@ -38,7 +38,7 @@ import {
   type RuntimeTransport,
   type RuntimeWorkflowSpec,
 } from "@aif/runtime";
-import { getEnv, logger } from "@aif/shared";
+import { getEnv, logger, redactProviderText } from "@aif/shared";
 import { logActivity } from "./hooks.js";
 import { PROJECT_SCOPE_SYSTEM_APPEND, REVIEW_DIFF_SCOPE_SYSTEM_APPEND } from "./constants.js";
 import { createStderrCollector } from "./stderrCollector.js";
@@ -272,13 +272,17 @@ function refreshRuntimeProfileLimitState(input: {
   } catch (error) {
     log.warn(
       {
-        err: error,
         taskId: input.taskId,
         runtimeProfileId,
         runtimeId: input.runtimeId ?? normalizedSnapshot?.runtimeId ?? null,
         providerId: input.providerId ?? normalizedSnapshot?.providerId ?? null,
         workflowKind: input.workflowKind ?? null,
         reason: input.reason,
+        errorName: error instanceof Error ? error.name : typeof error,
+        errorMessage:
+          error instanceof Error
+            ? redactProviderText(error.message)
+            : redactProviderText(String(error)),
       },
       "Failed to refresh runtime profile limit state for subagent execution",
     );
@@ -916,7 +920,7 @@ export async function executeSubagentQuery(
           providerId: context.providerId,
           workflowKind: context.workflow.workflowKind,
         },
-        "[FIX] Preserving runtime limit state after successful subagent execution without an authoritative recovery signal",
+        "Preserving runtime limit state after successful subagent execution without an authoritative recovery signal",
       );
     }
 
@@ -987,16 +991,22 @@ export async function executeSubagentQuery(
       diagnosticsReason.trim().length > 0 &&
       diagnosticsReason.trim() !== safeReason.reason
     ) {
+      const scrubbedDiagnosticsReason = redactProviderText(diagnosticsReason);
       log.debug(
         {
           taskId,
           runtimeId: runtimeIdForError,
           category: safeReason.category,
-          diagnosticsReason,
+          diagnosticsReason: scrubbedDiagnosticsReason,
         },
         "Redacted runtime diagnostics before writing task activity",
       );
     }
+    const scrubbedDiagnosticsReason =
+      diagnosticsReason && diagnosticsReason.trim().length > 0
+        ? redactProviderText(diagnosticsReason)
+        : null;
+    const scrubbedRuntimeStderr = redactProviderText(stderrCollector.getTail());
     logActivity(
       taskId,
       "Agent",
@@ -1005,11 +1015,11 @@ export async function executeSubagentQuery(
     log.error(
       {
         taskId,
-        err: error,
         runtimeId: runtimeIdForError,
         category: safeReason.category,
-        diagnosticsReason,
-        runtimeStderr: stderrCollector.getTail(),
+        errorName: error instanceof Error ? error.name : typeof error,
+        diagnosticsReason: scrubbedDiagnosticsReason,
+        runtimeStderr: scrubbedRuntimeStderr,
       },
       `${agentName} execution failed`,
     );

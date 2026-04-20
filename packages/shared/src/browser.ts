@@ -66,6 +66,7 @@ export { withTimeout } from "./withTimeout.js";
 export {
   buildRuntimeLimitSignature,
   normalizeRuntimeLimitSnapshot,
+  redactProviderText,
   resolveRuntimeLimitFutureHint,
   sanitizeProviderMeta,
   selectViolatedWindowForExactThreshold,

@@ -4,6 +4,7 @@ import {
   buildRuntimeLimitSignature,
   mapSafeRuntimeErrorReason,
   normalizeRuntimeLimitSnapshot,
+  redactProviderText,
   resolveRuntimeLimitFutureHint,
   sanitizeProviderMeta,
   selectViolatedWindowForExactThreshold,
@@ -86,7 +87,7 @@ describe("runtimeLimitUtils", () => {
     expect(violated?.percentRemaining).toBe(5);
   });
 
-  it("resolves future hints with snapshot-first or window-first priority", () => {
+  it("prefers the explicit preferred window by default when resolving future hints", () => {
     const snapshot = makeSnapshot({
       resetAt: "2026-04-19T09:30:00.000Z",
       retryAfterSeconds: null,
@@ -100,24 +101,19 @@ describe("runtimeLimitUtils", () => {
     const window = snapshot.windows[0]!;
     const nowMs = Date.parse("2026-04-19T09:00:00.000Z");
 
-    const snapshotFirst = resolveRuntimeLimitFutureHint(snapshot, {
+    const preferredWindowFirst = resolveRuntimeLimitFutureHint(snapshot, {
       nowMs,
       preferredWindow: window,
-      windowFirst: false,
     });
-    const windowFirst = resolveRuntimeLimitFutureHint(snapshot, {
-      nowMs,
-      preferredWindow: window,
-      windowFirst: true,
-    });
+    const snapshotFirst = resolveRuntimeLimitFutureHint(snapshot, { nowMs });
+
+    expect(preferredWindowFirst.source).toBe("window_reset_at");
+    expect(preferredWindowFirst.resetAt).toBe("2026-04-19T10:00:00.000Z");
+    expect(preferredWindowFirst.windowScope).toBe("tokens");
+    expect(preferredWindowFirst.isFuture).toBe(true);
 
     expect(snapshotFirst.source).toBe("snapshot_reset_at");
     expect(snapshotFirst.resetAt).toBe("2026-04-19T09:30:00.000Z");
-    expect(snapshotFirst.isFuture).toBe(true);
-
-    expect(windowFirst.source).toBe("window_reset_at");
-    expect(windowFirst.resetAt).toBe("2026-04-19T10:00:00.000Z");
-    expect(windowFirst.windowScope).toBe("tokens");
   });
 
   it("falls back to retry-after when no reset timestamps are present", () => {
@@ -139,6 +135,7 @@ describe("runtimeLimitUtils", () => {
   it("sanitizes provider meta via allowlist, key filtering, and token redaction", () => {
     const meta = sanitizeProviderMeta("anthropic", {
       providerLabel: "Anthropic",
+      quotaSource: "zai_monitor",
       AccountFingerprint: "acct_123",
       status: "ok",
       body: "raw-provider-body",
@@ -150,9 +147,24 @@ describe("runtimeLimitUtils", () => {
 
     expect(meta).toEqual({
       providerLabel: "Anthropic",
+      quotaSource: "zai_monitor",
       AccountFingerprint: "acct_123",
       status: "ok",
       modelUsageSummary: '[REDACTED] [REDACTED] "more"',
+    });
+  });
+
+  it("preserves limitId while stripping non-allowlisted provider metadata", () => {
+    const meta = sanitizeProviderMeta("codex", {
+      limitId: "codex_bengalfox",
+      accountLabel: "Anton Ageev Pro",
+      usageDetails: [{ raw: "drop-me" }],
+      accountEmail: "private@example.com",
+    });
+
+    expect(meta).toEqual({
+      limitId: "codex_bengalfox",
+      accountLabel: "Anton Ageev Pro",
     });
   });
 
@@ -187,6 +199,14 @@ describe("runtimeLimitUtils", () => {
       status: "warning",
       reason: "[REDACTED]",
     });
+  });
+
+  it("redacts provider text for logs without dropping the whole message", () => {
+    expect(
+      redactProviderText(
+        '429 {"error":"secret_token=abc sk-SECRET bearer abc.def ghi@example.com https://internal.local"}',
+      ),
+    ).toBe('429 {"error":"[REDACTED] [REDACTED] [REDACTED] [REDACTED] [REDACTED]"}');
   });
 
   it("builds deterministic signatures without checkedAt and window-order noise", () => {

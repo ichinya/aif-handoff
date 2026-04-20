@@ -311,7 +311,7 @@ export function refreshRuntimeProfileLimitState(input: {
         workflowKind: input.workflowKind ?? null,
         reason: input.reason,
       },
-      "[FIX] Skipping runtime limit DB write because identical profile state is still cached; project-scoped broadcast will still be evaluated",
+      "Skipping runtime limit DB write because identical profile state is still cached; project-scoped broadcast will still be evaluated",
     );
   }
 
@@ -655,7 +655,7 @@ export async function runApiRuntimeOneShot(input: {
           projectId: input.projectId,
           workflowKind: workflow.workflowKind,
         },
-        "[FIX] Preserving runtime limit state after successful API execution without an authoritative recovery signal",
+        "Preserving runtime limit state after successful API execution without an authoritative recovery signal",
       );
     }
   } catch (error) {

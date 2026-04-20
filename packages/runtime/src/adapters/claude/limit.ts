@@ -68,7 +68,7 @@ function normalizeTimestamp(value: number | null): string | null {
         rawValue: value,
         normalizedMs: ms,
       },
-      "[FIX] Dropping invalid Claude reset hint while normalizing rate-limit metadata",
+      "Dropping invalid Claude reset hint while normalizing rate-limit metadata",
     );
     return null;
   }
@@ -80,7 +80,7 @@ function normalizeTimestamp(value: number | null): string | null {
         rawValue: value,
         normalizedMs: ms,
       },
-      "[FIX] Dropping invalid Claude reset hint while normalizing rate-limit metadata",
+      "Dropping invalid Claude reset hint while normalizing rate-limit metadata",
     );
     return null;
   }
@@ -131,6 +131,27 @@ function mapScope(rateLimitType: ClaudeRateLimitType | null): RuntimeLimitScope 
   return RuntimeLimitScope.OTHER;
 }
 
+function resolvePrimaryRateLimitType(
+  info: ClaudeRateLimitInfo,
+  status: RuntimeLimitStatus,
+): ClaudeRateLimitType | null {
+  const baseType = info.rateLimitType ?? null;
+  const overageRelevant =
+    info.overageStatus === "rejected" ||
+    info.overageStatus === "allowed_warning" ||
+    info.isUsingOverage === true;
+
+  if (status === RuntimeLimitStatus.BLOCKED) {
+    return info.overageStatus === "rejected" ? "overage" : baseType;
+  }
+
+  if (status === RuntimeLimitStatus.WARNING) {
+    return overageRelevant ? "overage" : baseType;
+  }
+
+  return overageRelevant ? "overage" : baseType;
+}
+
 export function normalizeClaudeLimitSnapshot(
   input: NormalizeClaudeLimitSnapshotInput,
 ): RuntimeLimitSnapshot | null {
@@ -148,19 +169,23 @@ export function normalizeClaudeLimitSnapshot(
   };
 
   const status = mapStatus(info);
-  const rateLimitType = info.rateLimitType ?? null;
-  const scope = mapScope(rateLimitType);
+  const primaryRateLimitType = resolvePrimaryRateLimitType(info, status);
+  const scope = mapScope(primaryRateLimitType);
   const percentUsed = normalizeUtilizationPercent(info.utilization ?? null);
   const percentRemaining =
     percentUsed == null ? null : Math.max(0, Math.min(100, 100 - percentUsed));
   const resetAt =
-    normalizeTimestamp(info.overageResetsAt ?? null) ?? normalizeTimestamp(info.resetsAt ?? null);
+    primaryRateLimitType === "overage"
+      ? (normalizeTimestamp(info.overageResetsAt ?? null) ??
+        normalizeTimestamp(info.resetsAt ?? null))
+      : (normalizeTimestamp(info.resetsAt ?? null) ??
+        normalizeTimestamp(info.overageResetsAt ?? null));
 
   const hasMeaningfulSignal =
     status !== RuntimeLimitStatus.UNKNOWN ||
     resetAt != null ||
     percentUsed != null ||
-    rateLimitType != null ||
+    primaryRateLimitType != null ||
     info.isUsingOverage === true;
 
   if (!hasMeaningfulSignal) {
@@ -169,7 +194,7 @@ export function normalizeClaudeLimitSnapshot(
 
   const window: RuntimeLimitWindow = {
     scope,
-    name: rateLimitType,
+    name: primaryRateLimitType,
     percentUsed,
     percentRemaining,
     resetAt,
@@ -194,7 +219,7 @@ export function normalizeClaudeLimitSnapshot(
       quotaSource: input.providerIdentity?.quotaSource ?? null,
       accountFingerprint: input.providerIdentity?.accountFingerprint ?? null,
       accountLabel: input.providerIdentity?.accountLabel ?? null,
-      rateLimitType,
+      rateLimitType: primaryRateLimitType,
       status: info.status ?? null,
       overageStatus: info.overageStatus ?? null,
       isUsingOverage: info.isUsingOverage ?? null,

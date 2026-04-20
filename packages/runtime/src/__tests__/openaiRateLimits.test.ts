@@ -77,6 +77,41 @@ describe("buildOpenAiCompatibleLimitSnapshot", () => {
     ]);
   });
 
+  it("uses the violated window reset instead of the earliest unrelated reset", () => {
+    const snapshot = buildOpenAiCompatibleLimitSnapshot(
+      createHeaders({
+        "x-ratelimit-limit-requests": "100",
+        "x-ratelimit-remaining-requests": "5",
+        "x-ratelimit-reset-requests": "60m",
+        "x-ratelimit-limit-tokens": "1000",
+        "x-ratelimit-remaining-tokens": "900",
+        "x-ratelimit-reset-tokens": "5m",
+      }),
+      {
+        providerId: "openai",
+        runtimeId: "codex",
+      },
+    );
+
+    expect(snapshot).toMatchObject({
+      status: RuntimeLimitStatus.WARNING,
+      primaryScope: RuntimeLimitScope.REQUESTS,
+      resetAt: "2026-04-17T01:00:00.000Z",
+    });
+    expect(snapshot?.windows).toMatchObject([
+      {
+        scope: RuntimeLimitScope.REQUESTS,
+        percentRemaining: 5,
+        resetAt: "2026-04-17T01:00:00.000Z",
+      },
+      {
+        scope: RuntimeLimitScope.TOKENS,
+        percentRemaining: 90,
+        resetAt: "2026-04-17T00:05:00.000Z",
+      },
+    ]);
+  });
+
   it("marks exhausted windows as blocked and chooses the blocking scope", () => {
     const snapshot = buildOpenAiCompatibleLimitSnapshot(
       createHeaders({

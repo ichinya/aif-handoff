@@ -206,7 +206,7 @@ describe("classifyStageError", () => {
     expect(activityText).not.toContain("<script>");
   });
 
-  it("logs error with taskId, stage, retryAfter, and backoffMinutes for blocked_external", () => {
+  it("logs scrubbed metadata with taskId, stage, retryAfter, and backoffMinutes for blocked_external", () => {
     const err = new RuntimeExecutionError("rate limit exceeded", undefined, "rate_limit");
     classifyStageError(makeInput({ err, taskId: "t-ext", stageLabel: "reviewer" }));
 
@@ -216,9 +216,10 @@ describe("classifyStageError", () => {
       taskId: "t-ext",
       stage: "reviewer",
       backoffMinutes: 10,
+      errorName: "RuntimeExecutionError",
+      errorMessage: "rate limit exceeded",
     });
     expect(meta.retryAfter).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-    expect(meta.err).toBe(err);
     expect(msg).toMatch(/external error/i);
   });
 
@@ -252,7 +253,7 @@ describe("classifyStageError", () => {
     expect(result).toEqual({ kind: "revert" });
   });
 
-  it("logs error with taskId, stage, and err for revert", () => {
+  it("logs scrubbed error metadata for revert", () => {
     const err = new Error("unexpected null");
     classifyStageError(makeInput({ err, taskId: "t-rev", stageLabel: "planner" }));
 
@@ -261,9 +262,28 @@ describe("classifyStageError", () => {
     expect(meta).toMatchObject({
       taskId: "t-rev",
       stage: "planner",
-      err,
+      errorName: "Error",
+      errorMessage: "unexpected null",
     });
     expect(msg).toMatch(/reverting status/i);
+  });
+
+  it("scrubs raw provider text in blocked_external logs", () => {
+    const err = new RuntimeExecutionError(
+      "provider leaked secret_token=abc sk-SECRET bearer abc@example.com",
+      undefined,
+      "transport",
+    );
+
+    classifyStageError(makeInput({ err, taskId: "t-redact", stageLabel: "planner" }));
+
+    expect(mockError).toHaveBeenCalledOnce();
+    const [meta] = mockError.mock.calls[0];
+    expect(meta).toMatchObject({ taskId: "t-redact" });
+    expect(String(meta.errorMessage)).toContain("[REDACTED]");
+    expect(String(meta.errorMessage)).not.toContain("secret_token=abc");
+    expect(String(meta.errorMessage)).not.toContain("sk-SECRET");
+    expect(String(meta.errorMessage)).not.toContain("abc@example.com");
   });
 
   it("does not write activity log for revert errors", () => {

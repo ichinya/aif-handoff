@@ -165,6 +165,7 @@ export {
   buildRuntimeLimitSignature,
   mapSafeRuntimeErrorReason,
   normalizeRuntimeLimitSnapshot,
+  redactProviderText,
   resolveRuntimeLimitFutureHint,
   sanitizeProviderMeta,
   selectViolatedWindowForExactThreshold,

@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { projects } from "@aif/shared";
+import { projects, runtimeProfiles, tasks } from "@aif/shared";
 import { createTestDb } from "@aif/shared/server";
 
 const testDb = { current: createTestDb() };
@@ -362,6 +362,16 @@ describe("projects API", () => {
     db.insert(projects)
       .values({ id: "proj-broadcast", name: "Broadcast", rootPath: "/tmp/b" })
       .run();
+    db.insert(runtimeProfiles)
+      .values({
+        id: "profile-1",
+        projectId: "proj-broadcast",
+        name: "Broadcast Profile",
+        runtimeId: "claude",
+        providerId: "anthropic",
+        enabled: true,
+      })
+      .run();
 
     const res = await app.request("/projects/proj-broadcast/broadcast", {
       method: "POST",
@@ -411,6 +421,16 @@ describe("projects API", () => {
     db.insert(projects)
       .values({ id: "proj-broadcast-auth-ok", name: "Broadcast Auth OK", rootPath: "/tmp/bao" })
       .run();
+    db.insert(runtimeProfiles)
+      .values({
+        id: "profile-1",
+        projectId: "proj-broadcast-auth-ok",
+        name: "Broadcast Auth Profile",
+        runtimeId: "claude",
+        providerId: "anthropic",
+        enabled: true,
+      })
+      .run();
 
     const res = await app.request("/projects/proj-broadcast-auth-ok/broadcast", {
       method: "POST",
@@ -446,6 +466,16 @@ describe("projects API", () => {
         rootPath: "/tmp/bab",
       })
       .run();
+    db.insert(runtimeProfiles)
+      .values({
+        id: "profile-1",
+        projectId: "proj-broadcast-auth-bearer",
+        name: "Broadcast Bearer Profile",
+        runtimeId: "claude",
+        providerId: "anthropic",
+        enabled: true,
+      })
+      .run();
 
     const res = await app.request("/projects/proj-broadcast-auth-bearer/broadcast", {
       method: "POST",
@@ -469,5 +499,73 @@ describe("projects API", () => {
         taskId: "task-1",
       },
     });
+  });
+
+  it("rejects runtime-limit broadcasts when the runtime profile belongs to another project", async () => {
+    const db = testDb.current;
+    db.insert(projects)
+      .values([
+        { id: "proj-runtime-a", name: "Project A", rootPath: "/tmp/a" },
+        { id: "proj-runtime-b", name: "Project B", rootPath: "/tmp/b" },
+      ])
+      .run();
+    db.insert(runtimeProfiles)
+      .values({
+        id: "profile-other-project",
+        projectId: "proj-runtime-b",
+        name: "Other Project Profile",
+        runtimeId: "claude",
+        providerId: "anthropic",
+        enabled: true,
+      })
+      .run();
+
+    const res = await app.request("/projects/proj-runtime-a/broadcast", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "project:runtime_limit_updated",
+        runtimeProfileId: "profile-other-project",
+      }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: "runtimeProfileId must belong to the target project or be global",
+    });
+    expect(mockBroadcast).not.toHaveBeenCalled();
+  });
+
+  it("rejects auto-queue broadcasts when the task belongs to another project", async () => {
+    const db = testDb.current;
+    db.insert(projects)
+      .values([
+        { id: "proj-queue-a", name: "Project A", rootPath: "/tmp/a" },
+        { id: "proj-queue-b", name: "Project B", rootPath: "/tmp/b" },
+      ])
+      .run();
+    db.insert(tasks)
+      .values({
+        id: "task-other-project",
+        projectId: "proj-queue-b",
+        title: "Other project task",
+        status: "backlog",
+      })
+      .run();
+
+    const res = await app.request("/projects/proj-queue-a/broadcast", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "project:auto_queue_advanced",
+        taskId: "task-other-project",
+      }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: "taskId does not belong to the target project",
+    });
+    expect(mockBroadcast).not.toHaveBeenCalled();
   });
 });

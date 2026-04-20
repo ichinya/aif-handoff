@@ -1,3 +1,4 @@
+import { redactProviderText } from "@aif/shared";
 import type {
   RuntimeConnectionValidationInput,
   RuntimeConnectionValidationResult,
@@ -346,7 +347,7 @@ async function postChatCompletionsWith429Retry(
         nextAttempt: attempt + 1,
         retryAfterMs: backoffMs,
         retryAfterHeader: retryAfterHeader ?? null,
-        errorPreview: rawText.slice(0, 240),
+        errorPreview: redactProviderText(rawText).slice(0, 240),
       },
       "OpenRouter returned retryable 429, retrying request",
     );

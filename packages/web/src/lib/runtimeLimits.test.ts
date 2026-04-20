@@ -136,4 +136,29 @@ describe("getRuntimeLimitDisplay", () => {
       shortLabel: "LAST KNOWN",
     });
   });
+
+  it("shows temporary provider backoff for unknown snapshots with a future retry hint", () => {
+    const display = getRuntimeLimitDisplay(
+      createSnapshot({
+        status: "unknown",
+        resetAt: null,
+        retryAfterSeconds: 120,
+        windows: [
+          { scope: "requests", percentRemaining: null, resetAt: null, retryAfterSeconds: null },
+        ],
+      }),
+      {
+        nowMs: Date.parse("2026-04-17T00:30:00.000Z"),
+      },
+    );
+
+    expect(display).toMatchObject({
+      state: "active",
+      tone: "info",
+      label: "Provider Backoff",
+      shortLabel: "BACKOFF",
+    });
+    expect(display?.summary).toContain("temporary backoff");
+    expect(display?.resetText).toContain("Provider retry window ends");
+  });
 });

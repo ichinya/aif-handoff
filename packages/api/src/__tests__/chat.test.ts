@@ -295,6 +295,78 @@ describe("chat API", () => {
     expect(mockSendToClient).not.toHaveBeenCalled();
   });
 
+  it("normalizes runtime limit snapshots before emitting chat:done and HTTP success payloads", async () => {
+    mockAdapterRun.mockImplementationOnce(async (input: RuntimeRunInput) => {
+      const onEvent = input.execution?.onEvent as
+        | ((event: Record<string, unknown>) => void)
+        | undefined;
+      onEvent?.({
+        type: "runtime:limit",
+        data: {
+          snapshot: {
+            source: "provider_api",
+            status: "warning",
+            precision: "exact",
+            checkedAt: "2026-04-19T10:00:00.000Z",
+            providerId: "anthropic",
+            runtimeId: "claude",
+            profileId: "profile-1",
+            primaryScope: "tool_usage",
+            resetAt: "2026-04-19T11:00:00.000Z",
+            retryAfterSeconds: null,
+            warningThreshold: 10,
+            windows: [
+              {
+                scope: "tool_usage",
+                percentRemaining: 7,
+                warningThreshold: 10,
+                resetAt: "2026-04-19T11:00:00.000Z",
+              },
+            ],
+            providerMeta: {
+              providerLabel: "Z.AI GLM Coding Plan",
+              quotaSource: "zai_monitor",
+              accountLabel: "Anton Ageev Pro",
+              usageDetails: [{ token: "sk-SECRET" }],
+              headers: { authorization: "Bearer secret" },
+              accountEmail: "private@example.com",
+            },
+          },
+        },
+      });
+      return { outputText: "runtime output", sessionId: "runtime-session-1" };
+    });
+
+    const res = await app.request("/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: "project-1",
+        message: "plain prompt",
+        clientId: "client-1",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.runtimeLimitSnapshot).toEqual(
+      expect.objectContaining({
+        status: "warning",
+        providerMeta: {
+          providerLabel: "Z.AI GLM Coding Plan",
+          quotaSource: "zai_monitor",
+          accountLabel: "Anton Ageev Pro",
+        },
+      }),
+    );
+    expect(body.runtimeLimitSnapshot.providerMeta).not.toHaveProperty("usageDetails");
+    expect(body.runtimeLimitSnapshot.providerMeta).not.toHaveProperty("headers");
+    expect(body.runtimeLimitSnapshot.providerMeta).not.toHaveProperty("accountEmail");
+
+    const doneCall = mockSendToClient.mock.calls.find((call) => call[1]?.type === "chat:done");
+    expect(doneCall?.[1]?.payload?.runtimeLimitSnapshot).toEqual(body.runtimeLimitSnapshot);
+  });
+
   it("uses adapter.resume and prefixes prompt with /aif-explore", async () => {
     mockFindChatSessionById.mockReturnValue({
       id: "session-1",
@@ -381,6 +453,75 @@ describe("chat API", () => {
           code: "CHAT_USAGE_LIMIT",
           message: "Runtime usage limit reached. Try again later.",
         }),
+      }),
+    );
+  });
+
+  it("normalizes runtime limit snapshots before emitting chat:error and HTTP error payloads", async () => {
+    mockAdapterRun.mockRejectedValueOnce(
+      new RuntimeExecutionError("You're out of extra usage", undefined, "rate_limit", {
+        limitSnapshot: {
+          source: "provider_api",
+          status: "blocked",
+          precision: "exact",
+          checkedAt: "2026-04-19T10:00:00.000Z",
+          providerId: "anthropic",
+          runtimeId: "claude",
+          profileId: "profile-1",
+          primaryScope: "tool_usage",
+          resetAt: "2026-04-19T11:00:00.000Z",
+          retryAfterSeconds: null,
+          warningThreshold: 10,
+          windows: [
+            {
+              scope: "tool_usage",
+              percentRemaining: 0,
+              warningThreshold: 10,
+              resetAt: "2026-04-19T11:00:00.000Z",
+            },
+          ],
+          providerMeta: {
+            providerLabel: "Z.AI GLM Coding Plan",
+            quotaSource: "zai_monitor",
+            accountLabel: "Anton Ageev Pro",
+            usageDetails: [{ token: "sk-SECRET" }],
+            diagnostics: "Bearer secret",
+          },
+        },
+      }),
+    );
+
+    const res = await app.request("/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: "project-1",
+        message: "hello",
+        clientId: "client-1",
+        conversationId: "conv-limit-sanitized",
+      }),
+    });
+
+    expect(res.status).toBe(429);
+    const body = await res.json();
+    expect(body.runtimeLimitSnapshot).toEqual(
+      expect.objectContaining({
+        status: "blocked",
+        providerMeta: {
+          providerLabel: "Z.AI GLM Coding Plan",
+          quotaSource: "zai_monitor",
+          accountLabel: "Anton Ageev Pro",
+        },
+      }),
+    );
+    expect(body.runtimeLimitSnapshot.providerMeta).not.toHaveProperty("usageDetails");
+    expect(body.runtimeLimitSnapshot.providerMeta).not.toHaveProperty("diagnostics");
+
+    const errorCall = mockSendToClient.mock.calls.find((call) => call[1]?.type === "chat:error");
+    expect(errorCall?.[1]?.payload).toEqual(
+      expect.objectContaining({
+        conversationId: "conv-limit-sanitized",
+        runtimeLimitSnapshot: body.runtimeLimitSnapshot,
       }),
     );
   });

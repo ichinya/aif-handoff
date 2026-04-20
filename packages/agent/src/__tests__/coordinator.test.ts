@@ -564,7 +564,8 @@ describe("coordinator", () => {
     const task = db.select().from(tasks).where(eq(tasks.id, "task-preblocked")).get();
     expect(task!.status).toBe("blocked_external");
     expect(task!.blockedFromStatus).toBe("planning");
-    expect(task!.blockedReason).toContain("provider runtime limit still blocked");
+    expect(task!.blockedReason).toContain("time limit still blocked");
+    expect(task!.blockedReason).toContain("hint=snapshot_reset_at");
     expect(task!.retryAfter).toBe(resetAt);
     expect(task!.runtimeLimitSnapshotJson).toContain('"profileId":"profile-plan-blocked"');
   });
@@ -616,8 +617,9 @@ describe("coordinator", () => {
     const task = db.select().from(tasks).where(eq(tasks.id, "task-threshold")).get();
     expect(task!.status).toBe("blocked_external");
     expect(task!.blockedFromStatus).toBe("planning");
-    expect(task!.blockedReason).toContain("exact quota threshold reached");
+    expect(task!.blockedReason).toContain("requests threshold reached");
     expect(task!.blockedReason).toContain("5% <= 10%");
+    expect(task!.blockedReason).toContain("hint=window_reset_at");
     expect(task!.retryAfter).toBe(resetAt);
     expect(task!.runtimeLimitSnapshotJson).toContain('"precision":"exact"');
   });

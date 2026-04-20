@@ -47,7 +47,7 @@ function toSafeIsoTimestamp(
         durationMs: context.durationMs,
         targetMs,
       },
-      "[FIX] Dropping invalid OpenAI-compatible reset hint",
+      "Dropping invalid OpenAI-compatible reset hint",
     );
     return null;
   }
@@ -61,7 +61,7 @@ function toSafeIsoTimestamp(
         durationMs: context.durationMs,
         targetMs,
       },
-      "[FIX] Dropping invalid OpenAI-compatible reset hint",
+      "Dropping invalid OpenAI-compatible reset hint",
     );
     return null;
   }
@@ -184,12 +184,12 @@ function parseRetryAfterSeconds(raw: string | null): number | null {
   return Math.max(0, Math.ceil(durationMs / 1000));
 }
 
-function pickEarliestIso(values: Array<string | null | undefined>): string | null {
+function pickLatestIso(values: Array<string | null | undefined>): string | null {
   const parsed = values
     .filter((value): value is string => typeof value === "string" && value.length > 0)
     .map((value) => Date.parse(value))
     .filter((value) => Number.isFinite(value))
-    .sort((a, b) => a - b);
+    .sort((a, b) => b - a);
   if (parsed.length === 0) return null;
   return new Date(parsed[0]!).toISOString();
 }
@@ -268,6 +268,74 @@ function resolvePrimaryScope(
   return windows[0]!.scope;
 }
 
+function pickWindowByLatestReset(
+  windows: RuntimeLimitWindow[],
+  predicate: (window: RuntimeLimitWindow) => boolean,
+): RuntimeLimitWindow | null {
+  const matching = windows.filter(predicate);
+  if (matching.length === 0) return null;
+
+  const score = (window: RuntimeLimitWindow): number => {
+    if (typeof window.resetAt === "string") {
+      const parsed = Date.parse(window.resetAt);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return Number.NEGATIVE_INFINITY;
+  };
+
+  return matching.reduce(
+    (best, candidate) => {
+      if (!best) return candidate;
+      const bestScore = score(best);
+      const candidateScore = score(candidate);
+      if (candidateScore > bestScore) return candidate;
+      if (candidateScore < bestScore) return best;
+
+      const bestRemaining =
+        typeof best.percentRemaining === "number"
+          ? best.percentRemaining
+          : Number.POSITIVE_INFINITY;
+      const candidateRemaining =
+        typeof candidate.percentRemaining === "number"
+          ? candidate.percentRemaining
+          : Number.POSITIVE_INFINITY;
+      return candidateRemaining < bestRemaining ? candidate : best;
+    },
+    null as RuntimeLimitWindow | null,
+  );
+}
+
+function resolvePrimaryWindow(
+  windows: RuntimeLimitWindow[],
+  status: RuntimeLimitStatus,
+): RuntimeLimitWindow | null {
+  if (windows.length === 0) return null;
+  if (status === RuntimeLimitStatus.BLOCKED) {
+    return (
+      pickWindowByLatestReset(windows, (window) => window.remaining === 0) ??
+      windows.find((window) => window.remaining === 0) ??
+      windows[0]!
+    );
+  }
+  if (status === RuntimeLimitStatus.WARNING) {
+    return (
+      pickWindowByLatestReset(
+        windows,
+        (window) =>
+          typeof window.percentRemaining === "number" &&
+          window.percentRemaining <= DEFAULT_WARNING_THRESHOLD,
+      ) ??
+      windows.find(
+        (window) =>
+          typeof window.percentRemaining === "number" &&
+          window.percentRemaining <= DEFAULT_WARNING_THRESHOLD,
+      ) ??
+      windows[0]!
+    );
+  }
+  return windows[0]!;
+}
+
 export function buildOpenAiCompatibleLimitSnapshot(
   headers: Headers,
   input: BuildOpenAiCompatibleLimitSnapshotInput,
@@ -306,7 +374,17 @@ export function buildOpenAiCompatibleLimitSnapshot(
   }
 
   const status = resolveStatus(windows, input.statusOverride);
-  const resetAt = pickEarliestIso([...windows.map((window) => window.resetAt), retryAfterResetAt]);
+  const primaryWindow = resolvePrimaryWindow(windows, status);
+  const resetAt =
+    primaryWindow?.resetAt ??
+    (primaryWindow
+      ? pickLatestIso(
+          windows
+            .filter((window) => window.scope === primaryWindow.scope)
+            .map((window) => window.resetAt),
+        )
+      : null) ??
+    retryAfterResetAt;
 
   return {
     source: RuntimeLimitSource.API_HEADERS,
@@ -316,7 +394,7 @@ export function buildOpenAiCompatibleLimitSnapshot(
     providerId: input.providerId,
     runtimeId: input.runtimeId,
     profileId: input.profileId ?? null,
-    primaryScope: resolvePrimaryScope(windows, status),
+    primaryScope: primaryWindow?.scope ?? resolvePrimaryScope(windows, status),
     resetAt,
     retryAfterSeconds,
     warningThreshold: windows.some((window) => window.percentRemaining != null)

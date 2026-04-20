@@ -18,6 +18,8 @@ import {
 import {
   logger,
   getEnv,
+  normalizeRuntimeLimitSnapshot,
+  redactProviderText,
   type ChatMessageAttachment,
   type ChatSession,
   type ChatSessionMessage,
@@ -259,7 +261,7 @@ function classifyChatError(err: unknown): {
   message: string;
 } {
   const rawMessage = err instanceof Error ? err.message : String(err);
-  const normalizedRawMessage = rawMessage?.trim() ? rawMessage.trim() : null;
+  const normalizedRawMessage = rawMessage?.trim() ? redactProviderText(rawMessage.trim()) : null;
 
   const redactForClient = (message: string, code: string, status: 429 | 500) => {
     if (normalizedRawMessage && normalizedRawMessage !== message) {
@@ -269,7 +271,7 @@ function classifyChatError(err: unknown): {
           status,
           rawMessage: normalizedRawMessage,
         },
-        "[FIX] Redacted raw runtime error before sending chat failure to the client",
+        "Redacted runtime error details before sending chat failure to the client",
       );
     }
     return { status, code, message };
@@ -297,6 +299,12 @@ function classifyChatError(err: unknown): {
 /** Runtime-aware input sanitization. Uses adapter.sanitizeInput if available, otherwise passthrough. */
 function sanitizeRuntimeInput(text: string, adapter?: RuntimeAdapter): string {
   return adapter?.sanitizeInput ? adapter.sanitizeInput(text) : text.trim();
+}
+
+function normalizeOptionalRuntimeLimitSnapshot(
+  snapshot: RuntimeLimitSnapshot | null | undefined,
+): RuntimeLimitSnapshot | null {
+  return snapshot ? normalizeRuntimeLimitSnapshot(snapshot) : null;
 }
 
 /**
@@ -1443,7 +1451,7 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
           runtimeId,
           providerId: runtimeProviderId,
         },
-        "[FIX] Preserving runtime limit state after successful chat execution without an authoritative recovery signal",
+        "Preserving runtime limit state after successful chat execution without an authoritative recovery signal",
       );
     }
 
@@ -1485,6 +1493,8 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
       updateChatSessionTimestamp(chatSessionId);
     }
 
+    const normalizedLatestLimitSnapshot =
+      normalizeOptionalRuntimeLimitSnapshot(latestLimitSnapshot);
     const doneEvent: WsEvent = {
       type: "chat:done",
       payload: {
@@ -1492,7 +1502,7 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
         projectId,
         taskId: taskId ?? null,
         runtimeProfileId: runtimeProfileId ?? null,
-        runtimeLimitSnapshot: latestLimitSnapshot,
+        runtimeLimitSnapshot: normalizedLatestLimitSnapshot,
         // Expose per-turn usage so the frontend can show token/cost spend
         // without a round-trip to the usage_events table. Recording of the
         // usage itself already happened inside the registry wrapper via the
@@ -1514,11 +1524,12 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
         profileId: runtimeProfileId,
         providerId: runtimeProviderId,
       },
-      runtimeLimitSnapshot: latestLimitSnapshot,
+      runtimeLimitSnapshot: normalizedLatestLimitSnapshot,
       ...(savedAttachments?.length ? { attachments: savedAttachments } : {}),
     });
   } catch (err) {
     const errorLimitSnapshot = extractRuntimeLimitSnapshotFromError(err) ?? latestLimitSnapshot;
+    const normalizedErrorLimitSnapshot = normalizeOptionalRuntimeLimitSnapshot(errorLimitSnapshot);
     const aborted = abortController.signal.aborted || isAbortError(err);
     if (aborted) {
       // Persist any tokens streamed before the abort so the partial assistant
@@ -1567,7 +1578,7 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
           projectId,
           taskId: taskId ?? null,
           runtimeProfileId: runtimeProfileId ?? null,
-          runtimeLimitSnapshot: errorLimitSnapshot,
+          runtimeLimitSnapshot: normalizedErrorLimitSnapshot,
           message: "Chat run aborted by user",
           code: "aborted",
         },
@@ -1579,7 +1590,7 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
           projectId,
           taskId: taskId ?? null,
           runtimeProfileId: runtimeProfileId ?? null,
-          runtimeLimitSnapshot: errorLimitSnapshot,
+          runtimeLimitSnapshot: normalizedErrorLimitSnapshot,
         },
       };
       if (clientId) {
@@ -1592,7 +1603,7 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
           code: "aborted",
           conversationId: chatConversationId,
           sessionId: chatSessionId,
-          runtimeLimitSnapshot: errorLimitSnapshot,
+          runtimeLimitSnapshot: normalizedErrorLimitSnapshot,
           // Expose the partial assistant reply so clients without an active
           // WebSocket can render what was saved server-side. Mirrors the
           // success path's `assistantMessage`.
@@ -1617,8 +1628,17 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
       workflowKind: "chat",
       reason: "chat:error",
     });
+    const scrubbedErrorMessage =
+      err instanceof Error ? redactProviderText(err.message) : redactProviderText(String(err));
     log.error(
-      { err, runtimeId, runtimeProfileId, runtimeProviderId, conversationId: chatConversationId },
+      {
+        runtimeId,
+        runtimeProfileId,
+        runtimeProviderId,
+        conversationId: chatConversationId,
+        errorName: err instanceof Error ? err.name : typeof err,
+        errorMessage: scrubbedErrorMessage,
+      },
       "Chat request failed",
     );
     const classified = classifyChatError(err);
@@ -1630,7 +1650,7 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
         projectId,
         taskId: taskId ?? null,
         runtimeProfileId: runtimeProfileId ?? null,
-        runtimeLimitSnapshot: errorLimitSnapshot,
+        runtimeLimitSnapshot: normalizedErrorLimitSnapshot,
         message: classified.message,
         code: classified.code,
       },
@@ -1646,7 +1666,7 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
         projectId,
         taskId: taskId ?? null,
         runtimeProfileId: runtimeProfileId ?? null,
-        runtimeLimitSnapshot: errorLimitSnapshot,
+        runtimeLimitSnapshot: normalizedErrorLimitSnapshot,
       },
     };
     if (clientId) {
@@ -1657,7 +1677,7 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
       {
         error: classified.message,
         code: classified.code,
-        runtimeLimitSnapshot: errorLimitSnapshot,
+        runtimeLimitSnapshot: normalizedErrorLimitSnapshot,
       },
       classified.status,
     );

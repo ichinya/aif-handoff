@@ -316,6 +316,30 @@ export function getRuntimeLimitDisplay(
     };
   }
 
+  if (snapshot.status === "unknown" && futureHint.isFuture) {
+    return {
+      state: "active",
+      tone: "info",
+      isExpired: false,
+      label: "Provider Backoff",
+      shortLabel: "BACKOFF",
+      summary: "Provider requested a temporary backoff window. Auto-pause stays disabled.",
+      detail:
+        "This is treated as a temporary provider retry hint, not as a healthy signal and not as an active quota block.",
+      resetAt,
+      resetText: resetLabel
+        ? `Provider retry window ends ${resetLabel}.`
+        : typeof retryAfterSeconds === "number"
+          ? `Provider retry after ${Math.max(0, Math.round(retryAfterSeconds))}s.`
+          : null,
+      taskRetryAt,
+      taskRetryText,
+      hintSource: futureHint.source,
+      checkedAt,
+      checkedText,
+    };
+  }
+
   const tone: RuntimeLimitTone =
     snapshot.status === "blocked"
       ? "error"

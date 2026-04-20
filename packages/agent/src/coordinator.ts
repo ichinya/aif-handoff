@@ -233,19 +233,21 @@ function buildRuntimeGateBlockedReason(
   gateDecision: ReturnType<typeof evaluateRuntimeLimitGate>,
 ): string {
   const snapshot = gateDecision.snapshot;
+  const hintSource = gateDecision.futureHint.source;
+  const scope = gateDecision.violatedWindow?.scope ?? snapshot?.primaryScope ?? "runtime";
   if (gateDecision.reason === "exact_threshold") {
     const thresholdWindow = gateDecision.violatedWindow;
     if (thresholdWindow) {
       const thresholdValue = thresholdWindow.warningThreshold ?? snapshot?.warningThreshold;
       const percentRemaining = thresholdWindow.percentRemaining;
       if (typeof percentRemaining === "number" && typeof thresholdValue === "number") {
-        return `Coordinator pre-start runtime gate: exact quota threshold reached (${percentRemaining}% <= ${thresholdValue}%)`;
+        return `Coordinator pre-start runtime gate: ${scope} threshold reached (${percentRemaining}% <= ${thresholdValue}%; hint=${hintSource})`;
       }
     }
-    return "Coordinator pre-start runtime gate: exact quota threshold reached";
+    return `Coordinator pre-start runtime gate: ${scope} threshold reached (hint=${hintSource})`;
   }
 
-  return "Coordinator pre-start runtime gate: provider runtime limit still blocked";
+  return `Coordinator pre-start runtime gate: ${scope} limit still blocked (hint=${hintSource})`;
 }
 
 function proactivelyBlockTaskForRuntimeGate(

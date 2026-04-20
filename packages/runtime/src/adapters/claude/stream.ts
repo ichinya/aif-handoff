@@ -345,7 +345,7 @@ export async function runClaudeQueryAttempt(
         quotaAuthEnvVar: providerIdentity.apiKeyEnvVar,
         providerFamily: providerIdentity.providerFamily,
       },
-      "[FIX] Refreshing Z.AI coding quota snapshot with resolved Claude auth identity",
+      "Refreshing Z.AI coding quota snapshot with resolved Claude auth identity",
     );
     try {
       const providerSnapshot = await fetchZaiClaudeQuotaSnapshot({

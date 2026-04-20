@@ -158,7 +158,7 @@ function normalizeSdkExecutablePath(
         wrapperPath: path,
         nativeExecutablePath: normalized,
       },
-      "[FIX] Resolved Claude SDK wrapper path to native executable",
+      "Resolved Claude SDK wrapper path to native executable",
     );
   } else if (!normalized) {
     logger.warn(
@@ -166,7 +166,7 @@ function normalizeSdkExecutablePath(
         runtimeId,
         wrapperPath: path,
       },
-      "[FIX] Dropped Claude SDK wrapper path and deferred to Agent SDK lookup",
+      "Dropped Claude SDK wrapper path and deferred to Agent SDK lookup",
     );
   }
   return normalized;

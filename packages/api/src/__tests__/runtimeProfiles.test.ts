@@ -354,13 +354,13 @@ describe("runtimeProfiles API", () => {
     expect(body[0].runtimeLimitSnapshot.providerMeta).toEqual(
       expect.objectContaining({
         accountId: "account-codex-1",
-        authMode: "chatgpt",
         accountName: "Anton Ageev",
-        accountEmail: "ichi.chaik@gmail.com",
         planType: "pro",
         limitId: "codex",
       }),
     );
+    expect(body[0].runtimeLimitSnapshot.providerMeta).not.toHaveProperty("authMode");
+    expect(body[0].runtimeLimitSnapshot.providerMeta).not.toHaveProperty("accountEmail");
   });
 
   it("refreshes local Codex quota snapshots from the live session store when newer pool state exists", async () => {
@@ -464,6 +464,7 @@ describe("runtimeProfiles API", () => {
         }),
       }),
     );
+    expect(body[0].runtimeLimitSnapshot.providerMeta).not.toHaveProperty("accountEmail");
   });
 
   it("prefers the non-default live Codex pool for Spark profiles when multiple pools are available", async () => {

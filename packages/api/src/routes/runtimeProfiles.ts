@@ -10,7 +10,12 @@ import {
   resolveRuntimeProfile,
   selectPreferredCodexLimitSnapshot,
 } from "@aif/runtime";
-import { getEnv, logger } from "@aif/shared";
+import {
+  getEnv,
+  logger,
+  normalizeRuntimeLimitSnapshot,
+  type RuntimeLimitSnapshot,
+} from "@aif/shared";
 import {
   createRuntimeProfile,
   deleteRuntimeProfile,
@@ -127,10 +132,7 @@ interface LocalCodexAccountProfileLike {
   providerId: string;
   transport?: string | null;
   defaultModel?: string | null;
-  runtimeLimitSnapshot?: {
-    checkedAt?: string | null;
-    providerMeta?: Record<string, unknown> | null;
-  } | null;
+  runtimeLimitSnapshot?: RuntimeLimitSnapshot | null;
   runtimeLimitUpdatedAt?: string | null;
 }
 
@@ -141,9 +143,7 @@ interface ClaudeIdentityProfileLike {
   baseUrl?: string | null;
   apiKeyEnvVar?: string | null;
   defaultModel?: string | null;
-  runtimeLimitSnapshot?: {
-    providerMeta?: Record<string, unknown> | null;
-  } | null;
+  runtimeLimitSnapshot?: RuntimeLimitSnapshot | null;
 }
 
 type CodexLiveSnapshotList = Awaited<ReturnType<typeof listLatestCodexLimitSnapshots>>;
@@ -173,10 +173,10 @@ function enrichProfileWithCodexIdentity<T extends LocalCodexAccountProfileLike>(
 
   return {
     ...profile,
-    runtimeLimitSnapshot: {
+    runtimeLimitSnapshot: normalizeRuntimeLimitSnapshot({
       ...snapshot,
       providerMeta: nextProviderMeta,
-    },
+    }),
   };
 }
 
@@ -201,16 +201,15 @@ function parseTimestampMs(value: string | null | undefined): number {
   return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY;
 }
 
-function applyCodexSnapshotToProfile<T extends { profileId?: string | null }>(
+function applyCodexSnapshotToProfile<T extends RuntimeLimitSnapshot>(
   snapshot: T,
   profileId: string,
 ): T {
-  return snapshot.profileId === profileId ? snapshot : { ...snapshot, profileId };
+  const nextSnapshot = snapshot.profileId === profileId ? snapshot : { ...snapshot, profileId };
+  return normalizeRuntimeLimitSnapshot(nextSnapshot) as unknown as T;
 }
 
-function mergeCodexLimitSnapshots<
-  T extends { checkedAt?: string | null; providerMeta?: Record<string, unknown> | null },
->(...groups: T[][]): T[] {
+function mergeCodexLimitSnapshots<T extends RuntimeLimitSnapshot>(...groups: T[][]): T[] {
   const snapshots = groups
     .flat()
     .sort((left, right) => parseTimestampMs(right.checkedAt) - parseTimestampMs(left.checkedAt));
@@ -368,10 +367,10 @@ async function enrichProfileWithClaudeIdentity<T extends ClaudeIdentityProfileLi
 
   return {
     ...profile,
-    runtimeLimitSnapshot: {
+    runtimeLimitSnapshot: normalizeRuntimeLimitSnapshot({
       ...snapshot,
       providerMeta: nextProviderMeta,
-    },
+    }),
   };
 }
 
