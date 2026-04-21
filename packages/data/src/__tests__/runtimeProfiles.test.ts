@@ -366,6 +366,46 @@ describe("runtime profiles data layer", () => {
     expect(getAppDefaultRuntimeProfileId("chat")).toBeNull();
   });
 
+  it("invalidates cached app settings after runtime profile deletion trigger clears defaults", () => {
+    const globalProfile = createRuntimeProfile({
+      projectId: null,
+      name: "Global Default",
+      runtimeId: "codex",
+      providerId: "openai",
+      enabled: true,
+    });
+
+    const getAppSettings = dataModuleWithAppSettings.getAppSettings;
+    const updateAppSettings = dataModuleWithAppSettings.updateAppSettings;
+
+    expect(getAppSettings).toBeTypeOf("function");
+    expect(updateAppSettings).toBeTypeOf("function");
+    if (!getAppSettings || !updateAppSettings) return;
+
+    updateAppSettings({
+      defaultTaskRuntimeProfileId: globalProfile!.id,
+      defaultPlanRuntimeProfileId: globalProfile!.id,
+      defaultReviewRuntimeProfileId: globalProfile!.id,
+      defaultChatRuntimeProfileId: globalProfile!.id,
+    });
+
+    expect(getAppSettings()).toMatchObject({
+      defaultTaskRuntimeProfileId: globalProfile!.id,
+      defaultPlanRuntimeProfileId: globalProfile!.id,
+      defaultReviewRuntimeProfileId: globalProfile!.id,
+      defaultChatRuntimeProfileId: globalProfile!.id,
+    });
+
+    deleteRuntimeProfile(globalProfile!.id);
+
+    expect(getAppSettings()).toMatchObject({
+      defaultTaskRuntimeProfileId: null,
+      defaultPlanRuntimeProfileId: null,
+      defaultReviewRuntimeProfileId: null,
+      defaultChatRuntimeProfileId: null,
+    });
+  });
+
   it("resolves task override first", () => {
     const projectDefault = createRuntimeProfile({
       projectId: "proj-1",

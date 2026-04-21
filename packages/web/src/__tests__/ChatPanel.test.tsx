@@ -215,7 +215,7 @@ describe("ChatPanel", () => {
     expect(mockSendMessage).toHaveBeenCalledWith("hello", undefined, false);
   });
 
-  it("keeps sending in the pinned session when its saved runtime differs from the current default", () => {
+  it("shows the pinned session runtime and keeps sending in that session when defaults change", () => {
     mockActiveSessionId = "session-1";
     mockSessions = [
       {
@@ -251,13 +251,12 @@ describe("ChatPanel", () => {
     };
 
     renderPanel();
+    expect(screen.getByText("Saved Runtime [Global]")).toBeDefined();
+    expect(screen.queryByText("Current Default [Project]")).toBeNull();
     const textarea = screen.getByPlaceholderText("Ask a question...");
     fireEvent.change(textarea, { target: { value: "stay pinned" } });
     fireEvent.click(screen.getByLabelText("Send message"));
 
-    expect(
-      screen.queryByText("Runtime changed — next message will start a new session"),
-    ).toBeNull();
     expect(mockPinActiveSession).toHaveBeenCalledTimes(1);
     expect(mockSendMessage).toHaveBeenCalledWith("stay pinned", undefined, false);
   });
