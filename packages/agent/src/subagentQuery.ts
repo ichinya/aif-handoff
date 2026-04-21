@@ -11,35 +11,36 @@ import {
 } from "@aif/data";
 import {
   assertRuntimeCapabilities,
-  buildRuntimeLimitSignature,
+  buildRuntimeLimitBroadcastCacheKey,
+  buildRuntimeLimitCacheSignature,
   bootstrapRuntimeRegistry,
   createRuntimeMemoryCache,
   createRuntimeWorkflowSpec,
+  extractLatestRuntimeLimitSnapshot,
+  extractRuntimeLimitSnapshotFromError,
   mapSafeRuntimeErrorReason,
   normalizeRuntimeLimitSnapshot,
+  observeRuntimeLimitEvent,
   sanitizeProviderMeta,
   getResultSessionId,
   redactResolvedRuntimeProfile,
   resolveAdapterCapabilities,
   resolveRuntimeProfile,
   resolveRuntimePromptPolicy,
-  RUNTIME_LIMIT_EVENT_TYPE,
   RuntimeExecutionError,
   RUNTIME_TRUST_TOKEN,
   UsageSource,
   type RuntimeAdapter,
   type RuntimeCapabilities,
   type RuntimeCapabilityName,
-  type RuntimeEvent,
   type RuntimeRegistry,
   type RuntimeRegistryLogger,
-  type RuntimeSessionReusePolicy,
-  type RuntimeLimitEventPayload,
   type RuntimeLimitSnapshot,
+  type RuntimeSessionReusePolicy,
   type RuntimeTransport,
   type RuntimeWorkflowSpec,
 } from "@aif/runtime";
-import { getEnv, logger, redactProviderText } from "@aif/shared";
+import { getEnv, logger, redactProviderText, redactProviderTextForLogs } from "@aif/shared";
 import { logActivity } from "./hooks.js";
 import { PROJECT_SCOPE_SYSTEM_APPEND, REVIEW_DIFF_SCOPE_SYSTEM_APPEND } from "./constants.js";
 import { createStderrCollector } from "./stderrCollector.js";
@@ -67,69 +68,6 @@ function notifyRuntimeUsageRefresh(input: {
   void notifyProjectRuntimeLimitBroadcast(input.projectId, input.runtimeProfileId, {
     taskId: input.taskId ?? null,
   });
-}
-
-function extractRuntimeLimitSnapshotFromEvent(event: RuntimeEvent): RuntimeLimitSnapshot | null {
-  if (event.type !== RUNTIME_LIMIT_EVENT_TYPE) return null;
-
-  const payload = event.data as RuntimeLimitEventPayload | undefined;
-  const snapshot = payload?.snapshot;
-  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
-    log.warn(
-      {
-        eventType: event.type,
-        runtimeEventTimestamp: event.timestamp,
-      },
-      "Dropped runtime limit event with malformed snapshot payload",
-    );
-    return null;
-  }
-  return snapshot;
-}
-
-function observeRuntimeLimitEvent(
-  event: RuntimeEvent,
-  currentSnapshot: RuntimeLimitSnapshot | null,
-  logContext: Record<string, unknown> = {},
-): RuntimeLimitSnapshot | null {
-  const snapshot = extractRuntimeLimitSnapshotFromEvent(event);
-  if (!snapshot) return currentSnapshot;
-
-  log.debug(
-    {
-      ...logContext,
-      runtimeId: snapshot.runtimeId ?? null,
-      providerId: snapshot.providerId,
-      profileId: snapshot.profileId ?? null,
-      status: snapshot.status,
-      precision: snapshot.precision,
-      source: snapshot.source,
-      resetAt: snapshot.resetAt ?? null,
-    },
-    "Observed runtime limit event during subagent execution",
-  );
-  return snapshot;
-}
-
-function extractLatestRuntimeLimitSnapshot(
-  events: RuntimeEvent[] | null | undefined,
-): RuntimeLimitSnapshot | null {
-  if (!events?.length) return null;
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const snapshot = extractRuntimeLimitSnapshotFromEvent(events[index]!);
-    if (snapshot) return snapshot;
-  }
-  return null;
-}
-
-function extractRuntimeLimitSnapshotFromError(error: unknown): RuntimeLimitSnapshot | null {
-  if (error instanceof RuntimeExecutionError && error.limitSnapshot) {
-    return error.limitSnapshot;
-  }
-  if (error instanceof Error && "cause" in error && error.cause) {
-    return extractRuntimeLimitSnapshotFromError(error.cause);
-  }
-  return null;
 }
 
 function findRuntimeExecutionError(error: unknown): RuntimeExecutionError | null {
@@ -172,27 +110,13 @@ function buildSanitizedSubagentError(
   });
 }
 
-function buildRuntimeLimitCacheSignature(
-  snapshot: RuntimeLimitSnapshot | null,
-  clearOnMissing: boolean,
-): string | null {
-  if (snapshot) {
-    return `persist:${buildRuntimeLimitSignature(snapshot)}`;
+function clearRuntimeLimitBroadcastCacheKeyIfUnchanged(
+  broadcastCacheKey: string,
+  signature: string,
+): void {
+  if (runtimeLimitBroadcastCache.get(broadcastCacheKey) === signature) {
+    runtimeLimitBroadcastCache.delete(broadcastCacheKey);
   }
-  if (clearOnMissing) {
-    return "clear";
-  }
-  return null;
-}
-
-function buildRuntimeLimitBroadcastCacheKey(input: {
-  projectId?: string | null;
-  taskId?: string | null;
-  runtimeProfileId: string;
-}): string | null {
-  const projectId = input.projectId ?? null;
-  if (!projectId) return null;
-  return `${projectId}:${input.runtimeProfileId}:${input.taskId ?? ""}`;
 }
 
 function refreshRuntimeProfileLimitState(input: {
@@ -299,7 +223,7 @@ function refreshRuntimeProfileLimitState(input: {
       })
         .then((sent) => {
           if (!sent) {
-            runtimeLimitBroadcastCache.delete(broadcastCacheKey);
+            clearRuntimeLimitBroadcastCacheKeyIfUnchanged(broadcastCacheKey, signature);
             log.warn(
               {
                 taskId: input.taskId,
@@ -311,7 +235,7 @@ function refreshRuntimeProfileLimitState(input: {
           }
         })
         .catch((error) => {
-          runtimeLimitBroadcastCache.delete(broadcastCacheKey);
+          clearRuntimeLimitBroadcastCacheKeyIfUnchanged(broadcastCacheKey, signature);
           log.warn(
             {
               taskId: input.taskId,
@@ -320,8 +244,8 @@ function refreshRuntimeProfileLimitState(input: {
               errorName: error instanceof Error ? error.name : typeof error,
               errorMessage:
                 error instanceof Error
-                  ? redactProviderText(error.message)
-                  : redactProviderText(String(error)),
+                  ? redactProviderTextForLogs(error.message)
+                  : redactProviderTextForLogs(String(error)),
             },
             "Runtime limit broadcast failed",
           );
@@ -339,8 +263,8 @@ function refreshRuntimeProfileLimitState(input: {
         errorName: error instanceof Error ? error.name : typeof error,
         errorMessage:
           error instanceof Error
-            ? redactProviderText(error.message)
-            : redactProviderText(String(error)),
+            ? redactProviderTextForLogs(error.message)
+            : redactProviderTextForLogs(String(error)),
       },
       "Failed to refresh runtime profile limit state for subagent execution",
     );
@@ -881,11 +805,16 @@ export async function executeSubagentQuery(
       executionIntent.onEvent = (event) => {
         wd.markActivity();
         latestLimitSnapshot = observeRuntimeLimitEvent(event, latestLimitSnapshot, {
-          taskId,
-          runtimeId: context.runtimeId,
-          runtimeProfileId: context.profileId,
-          workflowKind: context.workflow.workflowKind,
-          attempt: attempt + 1,
+          logger: log,
+          observedMessage: "Observed runtime limit event during subagent execution",
+          malformedMessage: "Dropped runtime limit event with malformed snapshot payload",
+          logContext: {
+            taskId,
+            runtimeId: context.runtimeId,
+            runtimeProfileId: context.profileId,
+            workflowKind: context.workflow.workflowKind,
+            attempt: attempt + 1,
+          },
         });
         originalOnEvent(event);
       };
@@ -1049,13 +978,12 @@ export async function executeSubagentQuery(
       diagnosticsReason.trim().length > 0 &&
       diagnosticsReason.trim() !== safeReason.reason
     ) {
-      const scrubbedDiagnosticsReason = redactProviderText(diagnosticsReason);
       log.debug(
         {
           taskId,
           runtimeId: runtimeIdForError,
           category: safeReason.category,
-          diagnosticsReason: scrubbedDiagnosticsReason,
+          diagnosticsReason: redactProviderTextForLogs(diagnosticsReason),
         },
         "Redacted runtime diagnostics before writing task activity",
       );
@@ -1076,8 +1004,11 @@ export async function executeSubagentQuery(
         runtimeId: runtimeIdForError,
         category: safeReason.category,
         errorName: error instanceof Error ? error.name : typeof error,
-        diagnosticsReason: scrubbedDiagnosticsReason,
-        runtimeStderr: scrubbedRuntimeStderr,
+        diagnosticsReason:
+          diagnosticsReason && diagnosticsReason.trim().length > 0
+            ? redactProviderTextForLogs(diagnosticsReason)
+            : null,
+        runtimeStderr: redactProviderTextForLogs(stderrCollector.getTail()),
       },
       `${agentName} execution failed`,
     );

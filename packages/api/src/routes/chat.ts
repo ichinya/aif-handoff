@@ -19,6 +19,7 @@ import {
   logger,
   getEnv,
   redactProviderText,
+  redactProviderTextForLogs,
   sanitizeRuntimeLimitSnapshotForExposure,
   type ChatMessageAttachment,
   type ChatSession,
@@ -280,7 +281,9 @@ function classifyChatError(err: unknown): {
   message: string;
 } {
   const rawMessage = err instanceof Error ? err.message : String(err);
-  const normalizedRawMessage = rawMessage?.trim() ? redactProviderText(rawMessage.trim()) : null;
+  const normalizedRawMessage = rawMessage?.trim()
+    ? redactProviderTextForLogs(rawMessage.trim())
+    : null;
 
   const redactForClient = (message: string, code: string, status: 429 | 500) => {
     if (normalizedRawMessage && normalizedRawMessage !== message) {
@@ -1277,11 +1280,16 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
 
     const onRuntimeEvent = (event: RuntimeEvent) => {
       latestLimitSnapshot = observeRuntimeLimitEvent(event, latestLimitSnapshot, {
-        conversationId: chatConversationId,
-        projectId,
-        taskId: taskId ?? null,
-        runtimeId,
-        runtimeProfileId,
+        logger: log,
+        observedMessage: "Observed runtime limit event during chat execution",
+        malformedMessage: "Dropped runtime limit event with malformed snapshot payload",
+        logContext: {
+          conversationId: chatConversationId,
+          projectId,
+          taskId: taskId ?? null,
+          runtimeId,
+          runtimeProfileId,
+        },
       });
 
       if (event.type === "stream:text" && event.message) {
@@ -1648,7 +1656,9 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
       reason: "chat:error",
     });
     const scrubbedErrorMessage =
-      err instanceof Error ? redactProviderText(err.message) : redactProviderText(String(err));
+      err instanceof Error
+        ? redactProviderTextForLogs(err.message)
+        : redactProviderTextForLogs(String(err));
     log.error(
       {
         runtimeId,

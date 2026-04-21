@@ -10,7 +10,7 @@ import type {
   RuntimeRunResult,
   RuntimeUsage,
 } from "../../types.js";
-import { redactProviderText } from "@aif/shared";
+import { redactProviderText, redactProviderTextForLogs } from "@aif/shared";
 import { RuntimeExecutionError, type RuntimeExecutionErrorMetadata } from "../../errors.js";
 import { buildRuntimeLimitEvent } from "../../limitEvents.js";
 import { buildOpenAiCompatibleLimitSnapshot } from "../../openaiRateLimits.js";
@@ -596,7 +596,7 @@ async function runCodexStreamingAttempt(
           }
         } catch {
           logger?.debug?.(
-            { runtimeId: input.runtimeId, rawLine: redactProviderText(trimmed) },
+            { runtimeId: input.runtimeId, rawLine: redactProviderTextForLogs(trimmed) },
             "Failed to parse SSE chunk, skipping",
           );
         }

@@ -650,6 +650,84 @@ describe("executeSubagentQuery runtime limit state refresh", () => {
     resolveBroadcast(true);
     await Promise.all([first, second]);
   });
+
+  it("keeps a newer broadcast cache signature when an older notify fails later", async () => {
+    const taskId = "task-broadcast-race";
+    let notifyCall = 0;
+    let rejectFirstBroadcast: (error: unknown) => void = () => {
+      throw new Error("Expected first runtime limit broadcast to still be pending");
+    };
+    notifyProjectRuntimeLimitBroadcastMock.mockImplementation(() => {
+      notifyCall += 1;
+      if (notifyCall === 1) {
+        return new Promise<boolean>((_resolve, reject) => {
+          rejectFirstBroadcast = reject;
+        });
+      }
+      return Promise.resolve(true);
+    });
+
+    let queryCall = 0;
+    queryMock.mockImplementation(async function* () {
+      queryCall += 1;
+      const utilization = queryCall === 1 ? 0.96 : 0.91;
+      const resetAt = queryCall === 1 ? 1_776_389_600 : 1_776_393_200;
+
+      yield {
+        type: "rate_limit_event",
+        rate_limit_info: {
+          status: "allowed_warning",
+          rateLimitType: "five_hour",
+          utilization,
+          resetsAt: resetAt,
+        },
+      };
+      yield {
+        type: "result",
+        subtype: "success",
+        result: "done",
+        usage: {},
+        total_cost_usd: 0,
+      };
+    });
+
+    await executeSubagentQuery({
+      taskId,
+      projectRoot: "/tmp/project",
+      agentName: "implement-coordinator",
+      prompt: "run",
+      workflowKind: "implementer",
+    });
+
+    await vi.waitFor(() => {
+      expect(notifyProjectRuntimeLimitBroadcastMock).toHaveBeenCalledTimes(1);
+    });
+
+    await executeSubagentQuery({
+      taskId,
+      projectRoot: "/tmp/project",
+      agentName: "implement-coordinator",
+      prompt: "run",
+      workflowKind: "implementer",
+    });
+
+    await vi.waitFor(() => {
+      expect(notifyProjectRuntimeLimitBroadcastMock).toHaveBeenCalledTimes(2);
+    });
+
+    rejectFirstBroadcast(new Error("delivery failed"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    await executeSubagentQuery({
+      taskId,
+      projectRoot: "/tmp/project",
+      agentName: "implement-coordinator",
+      prompt: "run",
+      workflowKind: "implementer",
+    });
+
+    expect(notifyProjectRuntimeLimitBroadcastMock).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("executeSubagentQuery error redaction", () => {

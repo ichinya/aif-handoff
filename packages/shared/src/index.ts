@@ -166,6 +166,7 @@ export {
   mapSafeRuntimeErrorReason,
   normalizeRuntimeLimitSnapshot,
   redactProviderText,
+  redactProviderTextForLogs,
   resolveRuntimeLimitFutureHint,
   sanitizeRuntimeLimitSnapshotForExposure,
   sanitizeProviderMeta,

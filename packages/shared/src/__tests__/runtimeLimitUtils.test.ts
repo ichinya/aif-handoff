@@ -5,6 +5,7 @@ import {
   mapSafeRuntimeErrorReason,
   normalizeRuntimeLimitSnapshot,
   redactProviderText,
+  redactProviderTextForLogs,
   resolveRuntimeLimitFutureHint,
   sanitizeProviderMeta,
   sanitizeRuntimeLimitSnapshotForExposure,
@@ -205,6 +206,55 @@ describe("runtimeLimitUtils", () => {
     });
   });
 
+  it("keeps only known nested summary fields inside structured provider metadata", () => {
+    const meta = sanitizeProviderMeta("anthropic", {
+      modelUsageSummary: {
+        granularity: "hour",
+        sampledAt: "2026-04-19T09:00:00.000Z",
+        totalModelCallCount: 12,
+        totalTokensUsage: 3456,
+        topModels: [
+          {
+            modelName: "glm-4.5",
+            totalTokens: 3200,
+            sortOrder: 1,
+            raw: "drop-me",
+          },
+        ],
+        debug: "drop-me",
+      },
+      toolUsageSummary: {
+        granularity: "hour",
+        sampledAt: "2026-04-19T09:00:00.000Z",
+        totalNetworkSearchCount: 3,
+        tools: [
+          {
+            toolName: "web_search",
+            totalCount: 3,
+            response: "drop-me",
+          },
+        ],
+        diagnostics: "drop-me",
+      },
+    });
+
+    expect(meta).toEqual({
+      modelUsageSummary: {
+        granularity: "hour",
+        sampledAt: "2026-04-19T09:00:00.000Z",
+        totalModelCallCount: 12,
+        totalTokensUsage: 3456,
+        topModels: [{ modelName: "glm-4.5", totalTokens: 3200 }],
+      },
+      toolUsageSummary: {
+        granularity: "hour",
+        sampledAt: "2026-04-19T09:00:00.000Z",
+        totalNetworkSearchCount: 3,
+        tools: [{ toolName: "web_search", totalCount: 3 }],
+      },
+    });
+  });
+
   it("preserves limitId while stripping non-allowlisted provider metadata", () => {
     const meta = sanitizeProviderMeta("codex", {
       limitId: "codex_bengalfox",
@@ -283,6 +333,16 @@ describe("runtimeLimitUtils", () => {
       ),
     ).toBe(
       '429 {"error":"secret_token=[REDACTED] [REDACTED] [REDACTED] [REDACTED] [REDACTED] jwt=[REDACTED] [REDACTED] [REDACTED] [REDACTED] [REDACTED] [REDACTED] access_token=[REDACTED]"}',
+    );
+  });
+
+  it("preserves emails and urls in log-oriented redaction while still scrubbing secrets", () => {
+    expect(
+      redactProviderTextForLogs(
+        '429 {"error":"secret_token=abc sk-SECRET bearer abc.def ghi@example.com https://internal.local access_token=oauth-token"}',
+      ),
+    ).toBe(
+      '429 {"error":"secret_token=[REDACTED] [REDACTED] [REDACTED] ghi@example.com https://internal.local access_token=[REDACTED]"}',
     );
   });
 

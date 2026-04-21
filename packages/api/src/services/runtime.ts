@@ -1,21 +1,22 @@
 import {
   bootstrapRuntimeRegistry,
-  buildRuntimeLimitSignature,
+  buildRuntimeLimitBroadcastCacheKey,
+  buildRuntimeLimitCacheSignature,
   checkRuntimeCapabilities,
   createRuntimeMemoryCache,
   createRuntimeModelDiscoveryService,
   createRuntimeWorkflowSpec,
+  extractLatestRuntimeLimitSnapshot,
+  extractRuntimeLimitSnapshotFromError,
+  observeRuntimeLimitEvent,
   redactResolvedRuntimeProfile,
   resolveAdapterCapabilities,
   resolveRuntimeProfile,
   normalizeRuntimeLimitSnapshot,
-  RUNTIME_LIMIT_EVENT_TYPE,
-  RuntimeExecutionError,
   RUNTIME_TRUST_TOKEN,
   type RuntimeRunResult,
   type RuntimeCapabilityName,
   type RuntimeEvent,
-  type RuntimeLimitEventPayload,
   type RuntimeLimitSnapshot,
   type ResolvedRuntimeProfile,
   type RuntimeAdapter,
@@ -45,6 +46,12 @@ let runtimeRegistryPromise: Promise<RuntimeRegistry> | null = null;
 let modelDiscoveryService: RuntimeModelDiscoveryService | null = null;
 const runtimeLimitStateCache = createRuntimeMemoryCache<string>({ defaultTtlMs: 30_000 });
 const runtimeLimitBroadcastCache = createRuntimeMemoryCache<string>({ defaultTtlMs: 30_000 });
+
+export {
+  extractLatestRuntimeLimitSnapshot,
+  extractRuntimeLimitSnapshotFromError,
+  observeRuntimeLimitEvent,
+};
 
 export async function getApiRuntimeRegistry(): Promise<RuntimeRegistry> {
   if (!runtimeRegistryPromise) {
@@ -96,92 +103,6 @@ export async function getApiRuntimeModelDiscoveryService(): Promise<RuntimeModel
     });
   }
   return modelDiscoveryService;
-}
-
-function extractRuntimeLimitSnapshotFromEvent(event: RuntimeEvent): RuntimeLimitSnapshot | null {
-  if (event.type !== RUNTIME_LIMIT_EVENT_TYPE) return null;
-
-  const payload = event.data as RuntimeLimitEventPayload | undefined;
-  const snapshot = payload?.snapshot;
-  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
-    log.warn(
-      {
-        eventType: event.type,
-        runtimeEventTimestamp: event.timestamp,
-      },
-      "Dropped runtime limit event with malformed snapshot payload",
-    );
-    return null;
-  }
-  return snapshot;
-}
-
-export function observeRuntimeLimitEvent(
-  event: RuntimeEvent,
-  currentSnapshot: RuntimeLimitSnapshot | null,
-  logContext: Record<string, unknown> = {},
-): RuntimeLimitSnapshot | null {
-  const snapshot = extractRuntimeLimitSnapshotFromEvent(event);
-  if (!snapshot) return currentSnapshot;
-
-  log.debug(
-    {
-      ...logContext,
-      runtimeId: snapshot.runtimeId ?? null,
-      providerId: snapshot.providerId,
-      profileId: snapshot.profileId ?? null,
-      status: snapshot.status,
-      precision: snapshot.precision,
-      source: snapshot.source,
-      resetAt: snapshot.resetAt ?? null,
-    },
-    "Observed runtime limit event during API execution",
-  );
-  return snapshot;
-}
-
-export function extractLatestRuntimeLimitSnapshot(
-  events: RuntimeEvent[] | null | undefined,
-): RuntimeLimitSnapshot | null {
-  if (!events?.length) return null;
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const snapshot = extractRuntimeLimitSnapshotFromEvent(events[index]!);
-    if (snapshot) return snapshot;
-  }
-  return null;
-}
-
-export function extractRuntimeLimitSnapshotFromError(error: unknown): RuntimeLimitSnapshot | null {
-  if (error instanceof RuntimeExecutionError && error.limitSnapshot) {
-    return error.limitSnapshot;
-  }
-  if (error instanceof Error && "cause" in error && error.cause) {
-    return extractRuntimeLimitSnapshotFromError(error.cause);
-  }
-  return null;
-}
-
-function buildRuntimeLimitCacheSignature(
-  snapshot: RuntimeLimitSnapshot | null,
-  clearOnMissing: boolean,
-): string | null {
-  if (snapshot) {
-    return `persist:${buildRuntimeLimitSignature(snapshot)}`;
-  }
-  if (clearOnMissing) {
-    return "clear";
-  }
-  return null;
-}
-
-function buildRuntimeLimitBroadcastCacheKey(input: {
-  projectId?: string | null;
-  taskId?: string | null;
-  runtimeProfileId: string;
-}): string | null {
-  const projectId = input.projectId ?? null;
-  if (!projectId) return null;
-  return `${projectId}:${input.runtimeProfileId}:${input.taskId ?? ""}`;
 }
 
 function broadcastRuntimeLimitUpdate(input: {
@@ -574,11 +495,16 @@ export async function runApiRuntimeOneShot(input: {
   let latestLimitSnapshot: RuntimeLimitSnapshot | null = null;
   const onRuntimeEvent = (event: RuntimeEvent) => {
     latestLimitSnapshot = observeRuntimeLimitEvent(event, latestLimitSnapshot, {
-      projectId: input.projectId,
-      taskId: input.taskId ?? null,
-      workflowKind: workflow.workflowKind,
-      runtimeId: context.resolvedProfile.runtimeId,
-      runtimeProfileId: context.resolvedProfile.profileId,
+      logger: log,
+      observedMessage: "Observed runtime limit event during API execution",
+      malformedMessage: "Dropped runtime limit event with malformed snapshot payload",
+      logContext: {
+        projectId: input.projectId,
+        taskId: input.taskId ?? null,
+        workflowKind: workflow.workflowKind,
+        runtimeId: context.resolvedProfile.runtimeId,
+        runtimeProfileId: context.resolvedProfile.profileId,
+      },
     });
   };
   let result: RuntimeRunResult;

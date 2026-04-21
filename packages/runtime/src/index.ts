@@ -91,6 +91,15 @@ export {
 export { createRuntimeMemoryCache, type RuntimeCache, type RuntimeCacheOptions } from "./cache.js";
 
 export {
+  buildRuntimeLimitBroadcastCacheKey,
+  buildRuntimeLimitCacheSignature,
+  extractLatestRuntimeLimitSnapshot,
+  extractRuntimeLimitSnapshotFromError,
+  extractRuntimeLimitSnapshotFromEvent,
+  observeRuntimeLimitEvent,
+} from "./limitState.js";
+
+export {
   createRuntimeModelDiscoveryService,
   type RuntimeModelDiscoveryLogger,
   type RuntimeModelDiscoveryOptions,

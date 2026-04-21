@@ -67,6 +67,7 @@ export {
   buildRuntimeLimitSignature,
   normalizeRuntimeLimitSnapshot,
   redactProviderText,
+  redactProviderTextForLogs,
   resolveRuntimeLimitFutureHint,
   sanitizeRuntimeLimitSnapshotForExposure,
   sanitizeProviderMeta,

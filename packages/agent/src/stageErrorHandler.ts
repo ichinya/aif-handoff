@@ -8,7 +8,7 @@ import type { RuntimeLimitSnapshot } from "@aif/runtime";
 import {
   logger,
   mapSafeRuntimeErrorReason,
-  redactProviderText,
+  redactProviderTextForLogs,
   type TaskStatus,
 } from "@aif/shared";
 import { logActivity } from "./hooks.js";
@@ -143,7 +143,9 @@ export function classifyStageError(input: StageErrorInput): ErrorRecovery {
         runtimeCategory: runtimeError.category,
         errorName: err instanceof Error ? err.name : typeof err,
         errorMessage:
-          err instanceof Error ? redactProviderText(err.message) : redactProviderText(String(err)),
+          err instanceof Error
+            ? redactProviderTextForLogs(err.message)
+            : redactProviderTextForLogs(String(err)),
       },
       "Subagent failed with non-retryable runtime error, task requires manual action",
     );
@@ -181,7 +183,7 @@ export function classifyStageError(input: StageErrorInput): ErrorRecovery {
           taskId,
           stage: stageLabel,
           safeReason: blockedReason,
-          rawReason: redactProviderText(reason),
+          rawReason: redactProviderTextForLogs(reason),
         },
         "Redacted runtime error details before persisting blocked task state",
       );
@@ -221,7 +223,7 @@ export function classifyStageError(input: StageErrorInput): ErrorRecovery {
         resetAt: runtimeError?.resetAt ?? null,
         retryAfterSeconds: runtimeError?.retryAfterSeconds ?? null,
         errorName: err instanceof Error ? err.name : typeof err,
-        errorMessage: redactProviderText(reason),
+        errorMessage: redactProviderTextForLogs(reason),
       },
       "Subagent failed with external error, task blocked with backoff",
     );
@@ -242,7 +244,9 @@ export function classifyStageError(input: StageErrorInput): ErrorRecovery {
       stage: stageLabel,
       errorName: err instanceof Error ? err.name : typeof err,
       errorMessage:
-        err instanceof Error ? redactProviderText(err.message) : redactProviderText(String(err)),
+        err instanceof Error
+          ? redactProviderTextForLogs(err.message)
+          : redactProviderTextForLogs(String(err)),
     },
     "Subagent failed, reverting status",
   );

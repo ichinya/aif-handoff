@@ -141,7 +141,7 @@ const EXTERNAL_PROVIDER_META_KEYS = toNormalizedKeySet([
   "accountFingerprint",
 ]);
 
-const VALUE_TOKEN_PATTERNS: ReadonlyArray<RegExp> = [
+const SECRET_VALUE_PATTERNS: ReadonlyArray<RegExp> = [
   /\bsk-[A-Za-z0-9_\-]{6,}\b/gi,
   /\bgh(?:p|o|u|s|r)_[A-Za-z0-9_]{20,}\b/gi,
   /\bgithub_pat_[A-Za-z0-9_]{20,}\b/gi,
@@ -151,6 +151,9 @@ const VALUE_TOKEN_PATTERNS: ReadonlyArray<RegExp> = [
   /\bxox(?:a|b|p|o|r|s)-[A-Za-z0-9-]{10,}\b/g,
   /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g,
   /\bbearer\s+[A-Za-z0-9\-._~+/]+=*/gi,
+];
+
+const CONTACT_VALUE_PATTERNS: ReadonlyArray<RegExp> = [
   /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
   /\bhttps?:\/\/[^\s"']+/gi,
 ];
@@ -172,7 +175,80 @@ const SENSITIVE_VALUE_KEY_PATTERN = new RegExp(
   "gi",
 );
 
-const TOKEN_PATTERNS: ReadonlyArray<RegExp> = [...VALUE_TOKEN_PATTERNS];
+const STRICT_TOKEN_PATTERNS: ReadonlyArray<RegExp> = [
+  ...SECRET_VALUE_PATTERNS,
+  ...CONTACT_VALUE_PATTERNS,
+];
+
+type ProviderMetaSchema =
+  | {
+      kind: "array";
+      item: ProviderMetaSchema | null;
+    }
+  | {
+      kind: "object";
+      allowedKeys: ReadonlySet<string>;
+      nested?: Record<string, ProviderMetaSchema>;
+    };
+
+function normalizeSchemaRecord(
+  values: Record<string, ProviderMetaSchema>,
+): Record<string, ProviderMetaSchema> {
+  const normalized: Record<string, ProviderMetaSchema> = {};
+  for (const [key, value] of Object.entries(values)) {
+    normalized[normalizeMetaKey(key)] = value;
+  }
+  return normalized;
+}
+
+const MODEL_USAGE_ITEM_SCHEMA: ProviderMetaSchema = {
+  kind: "object",
+  allowedKeys: toNormalizedKeySet(["modelName", "totalTokens"]),
+};
+
+const TOOL_USAGE_ITEM_SCHEMA: ProviderMetaSchema = {
+  kind: "object",
+  allowedKeys: toNormalizedKeySet(["toolName", "totalCount"]),
+};
+
+const PROVIDER_META_NESTED_SCHEMAS: Record<string, ProviderMetaSchema> = normalizeSchemaRecord({
+  modelUsageSummary: {
+    kind: "object",
+    allowedKeys: toNormalizedKeySet([
+      "granularity",
+      "sampledAt",
+      "totalModelCallCount",
+      "totalTokensUsage",
+      "topModels",
+      "windowHours",
+    ]),
+    nested: normalizeSchemaRecord({
+      topModels: {
+        kind: "array",
+        item: MODEL_USAGE_ITEM_SCHEMA,
+      },
+    }),
+  },
+  toolUsageSummary: {
+    kind: "object",
+    allowedKeys: toNormalizedKeySet([
+      "granularity",
+      "sampledAt",
+      "totalNetworkSearchCount",
+      "totalWebReadMcpCount",
+      "totalZreadMcpCount",
+      "totalSearchMcpCount",
+      "tools",
+      "windowHours",
+    ]),
+    nested: normalizeSchemaRecord({
+      tools: {
+        kind: "array",
+        item: TOOL_USAGE_ITEM_SCHEMA,
+      },
+    }),
+  },
+});
 
 function toFiniteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -196,7 +272,19 @@ function isFiniteNonNegative(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
-export function redactProviderText(raw: string): string {
+interface RedactProviderTextOptions {
+  redactEmailsAndUrls?: boolean;
+}
+
+interface RedactProviderTextWithPatternsOptions {
+  maxLength?: number | null;
+}
+
+function redactProviderTextWithPatterns(
+  raw: string,
+  patterns: ReadonlyArray<RegExp>,
+  options: RedactProviderTextWithPatternsOptions = {},
+): string {
   let redacted = raw;
   redacted = redacted.replace(
     SENSITIVE_VALUE_KEY_PATTERN,
@@ -213,16 +301,88 @@ export function redactProviderText(raw: string): string {
       return `${prefix}${REDACTED_VALUE}`;
     },
   );
-  for (const pattern of TOKEN_PATTERNS) {
+  for (const pattern of patterns) {
     redacted = redacted.replace(pattern, REDACTED_VALUE);
   }
-  if (redacted.length > MAX_PROVIDER_META_STRING_LENGTH) {
-    return `${redacted.slice(0, MAX_PROVIDER_META_STRING_LENGTH)}...`;
+  const maxLength =
+    options.maxLength === undefined ? MAX_PROVIDER_META_STRING_LENGTH : options.maxLength;
+  if (maxLength != null && redacted.length > maxLength) {
+    return `${redacted.slice(0, maxLength)}...`;
   }
   return redacted;
 }
 
-function sanitizeProviderMetaValue(value: unknown, depth: number): unknown {
+export function redactProviderText(raw: string, options: RedactProviderTextOptions = {}): string {
+  const patterns =
+    options.redactEmailsAndUrls === false ? SECRET_VALUE_PATTERNS : STRICT_TOKEN_PATTERNS;
+  return redactProviderTextWithPatterns(raw, patterns);
+}
+
+export function redactProviderTextForLogs(raw: string): string {
+  return redactProviderText(raw, { redactEmailsAndUrls: false });
+}
+
+function sanitizeOpaqueProviderMetaContainer(value: unknown): string {
+  try {
+    return redactProviderTextWithPatterns(JSON.stringify(value), STRICT_TOKEN_PATTERNS, {
+      maxLength: null,
+    });
+  } catch {
+    return "[UNSERIALIZABLE_PROVIDER_META]";
+  }
+}
+
+function sanitizeStructuredProviderMetaValue(
+  value: unknown,
+  schema: ProviderMetaSchema,
+  depth: number,
+): unknown {
+  if (schema.kind === "array") {
+    if (!Array.isArray(value)) {
+      return null;
+    }
+
+    const sanitized: unknown[] = [];
+    for (const item of value.slice(0, MAX_PROVIDER_META_ARRAY_ITEMS)) {
+      sanitized.push(
+        schema.item ? sanitizeStructuredProviderMetaValue(item, schema.item, depth + 1) : null,
+      );
+    }
+    if (value.length > MAX_PROVIDER_META_ARRAY_ITEMS) {
+      sanitized.push("[TRUNCATED_ARRAY]");
+    }
+    return sanitized;
+  }
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>);
+  const sanitizedObject: Record<string, unknown> = {};
+  for (const [key, nestedValue] of entries.slice(0, MAX_PROVIDER_META_OBJECT_KEYS)) {
+    const normalizedKey = normalizeMetaKey(key);
+    if (!schema.allowedKeys.has(normalizedKey)) {
+      continue;
+    }
+    if (FORBIDDEN_PROVIDER_META_KEYS.has(normalizedKey)) {
+      continue;
+    }
+
+    const nestedSchema = schema.nested?.[normalizedKey] ?? null;
+    sanitizedObject[key] = sanitizeProviderMetaValue(nestedValue, depth + 1, nestedSchema);
+  }
+  if (entries.length > MAX_PROVIDER_META_OBJECT_KEYS) {
+    sanitizedObject._truncated = true;
+  }
+  return Object.keys(sanitizedObject).length > 0 ? sanitizedObject : null;
+}
+
+function sanitizeProviderMetaValue(
+  value: unknown,
+  depth: number,
+  schema: ProviderMetaSchema | null = null,
+): unknown {
   if (depth > MAX_PROVIDER_META_DEPTH) {
     return "[TRUNCATED_DEPTH]";
   }
@@ -236,30 +396,14 @@ function sanitizeProviderMetaValue(value: unknown, depth: number): unknown {
   if (typeof value === "boolean" || value == null) {
     return value;
   }
+  if (schema) {
+    return sanitizeStructuredProviderMetaValue(value, schema, depth);
+  }
   if (Array.isArray(value)) {
-    const sanitized: unknown[] = [];
-    for (const item of value.slice(0, MAX_PROVIDER_META_ARRAY_ITEMS)) {
-      sanitized.push(sanitizeProviderMetaValue(item, depth + 1));
-    }
-    if (value.length > MAX_PROVIDER_META_ARRAY_ITEMS) {
-      sanitized.push("[TRUNCATED_ARRAY]");
-    }
-    return sanitized;
+    return sanitizeOpaqueProviderMetaContainer(value);
   }
   if (typeof value === "object") {
-    const entries = Object.entries(value as Record<string, unknown>);
-    const sanitizedObject: Record<string, unknown> = {};
-    for (const [key, nestedValue] of entries.slice(0, MAX_PROVIDER_META_OBJECT_KEYS)) {
-      const normalizedKey = normalizeMetaKey(key);
-      if (FORBIDDEN_PROVIDER_META_KEYS.has(normalizedKey)) {
-        continue;
-      }
-      sanitizedObject[key] = sanitizeProviderMetaValue(nestedValue, depth + 1);
-    }
-    if (entries.length > MAX_PROVIDER_META_OBJECT_KEYS) {
-      sanitizedObject._truncated = true;
-    }
-    return sanitizedObject;
+    return sanitizeOpaqueProviderMetaContainer(value);
   }
   return String(value);
 }
@@ -517,7 +661,11 @@ export function sanitizeProviderMeta(
     if (FORBIDDEN_PROVIDER_META_KEYS.has(normalizedKey)) {
       continue;
     }
-    sanitized[key] = sanitizeProviderMetaValue(value, 0);
+    sanitized[key] = sanitizeProviderMetaValue(
+      value,
+      0,
+      PROVIDER_META_NESTED_SCHEMAS[normalizedKey] ?? null,
+    );
   }
 
   if (Object.keys(sanitized).length === 0) {

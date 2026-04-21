@@ -1,4 +1,4 @@
-import { redactProviderText } from "@aif/shared";
+import { redactProviderText, redactProviderTextForLogs } from "@aif/shared";
 import type {
   RuntimeConnectionValidationInput,
   RuntimeConnectionValidationResult,
@@ -352,7 +352,7 @@ async function postChatCompletionsWith429Retry(
         nextAttempt: attempt + 1,
         retryAfterMs: backoffMs,
         retryAfterHeader: retryAfterHeader ?? null,
-        errorPreview: redactProviderText(rawText).slice(0, 240),
+        errorPreview: redactProviderTextForLogs(rawText).slice(0, 240),
       },
       "OpenRouter returned retryable 429, retrying request",
     );
@@ -570,7 +570,7 @@ async function runOpenRouterStreamingAttempt(
           }
         } catch {
           logger?.debug?.(
-            { runtimeId: input.runtimeId, rawLine: redactProviderText(trimmed) },
+            { runtimeId: input.runtimeId, rawLine: redactProviderTextForLogs(trimmed) },
             "Failed to parse SSE chunk, skipping",
           );
         }
