@@ -73,6 +73,23 @@ export interface CreateProjectInput {
   defaultChatRuntimeProfileId?: string | null;
 }
 
+export interface AppSettings {
+  id: number;
+  defaultTaskRuntimeProfileId: string | null;
+  defaultPlanRuntimeProfileId: string | null;
+  defaultReviewRuntimeProfileId: string | null;
+  defaultChatRuntimeProfileId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpdateAppSettingsInput {
+  defaultTaskRuntimeProfileId?: string | null;
+  defaultPlanRuntimeProfileId?: string | null;
+  defaultReviewRuntimeProfileId?: string | null;
+  defaultChatRuntimeProfileId?: string | null;
+}
+
 export interface TaskCommentAttachment {
   name: string;
   mimeType: string;

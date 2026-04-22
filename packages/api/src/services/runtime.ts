@@ -34,6 +34,7 @@ import {
   findRuntimeProfileById,
   findTaskById,
   persistRuntimeProfileLimitSnapshot,
+  getAppDefaultRuntimeProfileId,
   resolveEffectiveRuntimeProfile,
   toRuntimeProfileResponse,
   type ProjectRow,
@@ -305,7 +306,7 @@ export interface RuntimeExecutionContext {
   project: ProjectRow;
   adapter: RuntimeAdapter;
   resolvedProfile: ResolvedRuntimeProfile;
-  selectionSource: "task_override" | "project_default" | "system_default" | "none";
+  selectionSource: "task_override" | "project_default" | "system_default" | "none" | "profile_id";
 }
 
 export async function resolveApiRuntimeContext(input: {
@@ -315,6 +316,7 @@ export async function resolveApiRuntimeContext(input: {
   workflow: RuntimeWorkflowSpec;
   modelOverride?: string | null;
   runtimeOptionsOverride?: Record<string, unknown> | null;
+  runtimeProfileId?: string | null;
   allowDisabled?: boolean;
 }): Promise<RuntimeExecutionContext> {
   const task = input.taskId ? findTaskById(input.taskId) : undefined;
@@ -328,17 +330,41 @@ export async function resolveApiRuntimeContext(input: {
     throw new Error(`Project ${projectId} not found`);
   }
 
-  const selection = resolveEffectiveRuntimeProfile({
-    taskId: task?.id,
-    projectId,
-    mode: input.mode,
-    systemDefaultRuntimeProfileId: null,
-  });
+  const systemDefaultRuntimeProfileId = getAppDefaultRuntimeProfileId(input.mode);
+  const explicitProfileRow =
+    input.runtimeProfileId != null ? findRuntimeProfileById(input.runtimeProfileId) : undefined;
+  if (input.runtimeProfileId != null && !explicitProfileRow) {
+    throw new Error(`Runtime profile ${input.runtimeProfileId} not found`);
+  }
+  if (explicitProfileRow?.projectId != null && explicitProfileRow.projectId !== projectId) {
+    throw new Error(
+      `Runtime profile ${explicitProfileRow.id} is not visible to project ${projectId}`,
+    );
+  }
 
-  const profileRow = selection.profile?.id
-    ? findRuntimeProfileById(selection.profile.id)
+  const explicitProfile = explicitProfileRow
+    ? toRuntimeProfileResponse(explicitProfileRow)
     : undefined;
-  const profile = profileRow ? toRuntimeProfileResponse(profileRow) : selection.profile;
+  const selection = explicitProfile
+    ? {
+        source: "profile_id" as const,
+        profile: explicitProfile,
+        taskRuntimeProfileId: task?.runtimeProfileId ?? null,
+        projectRuntimeProfileId: null,
+        systemRuntimeProfileId: systemDefaultRuntimeProfileId,
+      }
+    : resolveEffectiveRuntimeProfile({
+        taskId: task?.id,
+        projectId,
+        mode: input.mode,
+        systemDefaultRuntimeProfileId,
+      });
+
+  const profileRow =
+    explicitProfileRow ??
+    (selection.profile?.id ? findRuntimeProfileById(selection.profile.id) : undefined);
+  const profile =
+    explicitProfile ?? (profileRow ? toRuntimeProfileResponse(profileRow) : selection.profile);
   const runtimeOptionsFromTask = parseRuntimeOptions(task?.runtimeOptionsJson);
   const resolvedProfile = resolveRuntimeProfile({
     source: selection.source,
@@ -421,11 +447,12 @@ export async function resolveApiLightModel(
   projectId: string,
   taskId?: string | null,
 ): Promise<string | null> {
+  const systemDefaultRuntimeProfileId = getAppDefaultRuntimeProfileId("task");
   const selection = resolveEffectiveRuntimeProfile({
     taskId: taskId ?? undefined,
     projectId,
     mode: "task",
-    systemDefaultRuntimeProfileId: null,
+    systemDefaultRuntimeProfileId,
   });
   const resolved = resolveRuntimeProfile({
     source: selection.source,

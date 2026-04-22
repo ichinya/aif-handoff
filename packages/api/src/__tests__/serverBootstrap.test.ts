@@ -67,7 +67,7 @@ describe("startServer", () => {
     );
   });
 
-  it("logs an actionable message when the port is already in use", async () => {
+  it("logs an actionable error message when the port is already in use", async () => {
     const server = new FakeServer();
     const logger = createLogger();
     const error = Object.assign(new Error("listen EADDRINUSE"), {

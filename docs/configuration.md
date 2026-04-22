@@ -108,13 +108,26 @@ API exposes `GET /agent/readiness` to verify auth state at runtime:
 
 ## Runtime Profile Defaults
 
-Runtime profiles are persisted in SQLite (`runtime_profiles`) and can be selected at three levels:
+Runtime profiles are persisted in SQLite (`runtime_profiles`) and can be selected at four levels:
 
 1. task override (`tasks.runtime_profile_id`)
 2. project default (`projects.default_task_runtime_profile_id` / `default_chat_runtime_profile_id`)
-3. optional system default used by runtime resolution services
+3. app default (`app_settings.default_*_runtime_profile_id`)
+4. environment fallback (`AIF_DEFAULT_RUNTIME_ID`, adapter env vars, and model env defaults)
+
+The Global Settings dialog manages reusable global profiles plus the app defaults for task, plan, review, and chat. Project settings can still override those defaults per project.
+
+Planning and review have dedicated defaults at both project and app scope. When those are unset, they inherit from the task default at the same scope before falling back again.
+
+Scope rules are enforced by the API:
+
+- app defaults may reference only enabled global profiles
+- project defaults and task/chat overrides may reference either a same-project profile or a global profile
+- references to profiles owned by another project are rejected with a 4xx validation error
 
 Only non-secret fields are persisted (`baseUrl`, `apiKeyEnvVar`, headers/options metadata, default model). Secret values remain in environment variables or temporary validation payloads.
+
+The app-default API surface lives under `GET /settings/runtime-defaults` and `PUT /settings/runtime-defaults`.
 
 For concrete profile payloads and adapter capability differences, see [Providers](providers.md).
 

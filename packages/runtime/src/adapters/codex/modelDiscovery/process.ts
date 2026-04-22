@@ -117,12 +117,12 @@ export function buildCodexAppServerDiscoveryEnvWithStats(input: RuntimeModelList
     env.CODEX_BASE_URL = baseUrl;
   }
 
-  // Some environments expose proxy vars in only one case, while downstream tools
-  // may read the opposite form. Mirror the common proxy keys so closed-network
-  // discovery behaves consistently across platforms, including Windows.
-  mirrorProxyAlias(env, "HTTP_PROXY", "http_proxy");
-  mirrorProxyAlias(env, "HTTPS_PROXY", "https_proxy");
-  mirrorProxyAlias(env, "NO_PROXY", "no_proxy");
+  // Windows environment variables are case-insensitive, so one proxy-key casing can
+  // overwrite the other in process.env. Mirror whichever variant survived so downstream
+  // subprocesses receive both forms consistently.
+  mirrorEnvPair(env, "HTTP_PROXY", "http_proxy");
+  mirrorEnvPair(env, "HTTPS_PROXY", "https_proxy");
+  mirrorEnvPair(env, "NO_PROXY", "no_proxy");
 
   return {
     env,
@@ -131,6 +131,19 @@ export function buildCodexAppServerDiscoveryEnvWithStats(input: RuntimeModelList
     blockedCount,
     droppedDisallowedPrefixKeys: [...droppedDisallowedPrefixKeys],
   };
+}
+
+function mirrorEnvPair(
+  env: Record<string, string>,
+  uppercaseKey: string,
+  lowercaseKey: string,
+): void {
+  const value = env[uppercaseKey] ?? env[lowercaseKey];
+  if (!value) {
+    return;
+  }
+  env[uppercaseKey] = value;
+  env[lowercaseKey] = value;
 }
 
 export async function reservePort(): Promise<number> {
@@ -265,18 +278,4 @@ function readString(value: unknown): string | null {
 
 function quoteIfNeeded(arg: string): string {
   return arg.includes(" ") || arg.includes('"') ? `"${arg.replace(/"/g, '\\"')}"` : arg;
-}
-
-function mirrorProxyAlias(env: Record<string, string>, upperKey: string, lowerKey: string): void {
-  const upperValue = env[upperKey];
-  const lowerValue = env[lowerKey];
-
-  if (upperValue && !lowerValue) {
-    env[lowerKey] = upperValue;
-    return;
-  }
-
-  if (!upperValue && lowerValue) {
-    env[upperKey] = lowerValue;
-  }
 }

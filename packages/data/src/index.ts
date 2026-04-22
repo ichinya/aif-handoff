@@ -19,6 +19,7 @@ import {
   AUTO_REVIEW_FINDING_SOURCES,
   AUTO_REVIEW_STRATEGIES,
   buildRuntimeLimitSignature,
+  appSettings,
   generatePlanPath,
   getProjectConfig,
   logger as createLogger,
@@ -34,6 +35,7 @@ import {
   chatSessions,
   chatMessages,
   usageEvents,
+  type AppSettings,
   type CreateRuntimeProfileInput,
   type EffectiveRuntimeProfileSelection,
   type RuntimeProfile,
@@ -41,6 +43,7 @@ import {
   type RuntimeLimitSnapshot,
   type RuntimeLimitWindow,
   type RuntimeLimitFutureHint,
+  type UpdateAppSettingsInput,
   type UpdateRuntimeProfileInput,
   type Task,
   type TaskStatus,
@@ -59,17 +62,23 @@ import { getDb } from "@aif/shared/server";
 const log = createLogger("data");
 const AUTO_REVIEW_STRATEGY_SET = new Set<string>(AUTO_REVIEW_STRATEGIES);
 const AUTO_REVIEW_FINDING_SOURCE_SET = new Set<string>(AUTO_REVIEW_FINDING_SOURCES);
+const APP_SETTINGS_ID = 1;
 
 export type TaskRow = typeof tasks.$inferSelect;
 export type CommentRow = typeof taskComments.$inferSelect;
 export type ProjectRow = typeof projects.$inferSelect;
+export type AppSettingsRow = typeof appSettings.$inferSelect;
 export type RuntimeProfileRow = typeof runtimeProfiles.$inferSelect;
 export type HydratedTaskRow = TaskRow & {
   autoReviewState?: AutoReviewState | null;
   runtimeLimitSnapshot?: RuntimeLimitSnapshot | null;
 };
+type AppSettingsDb = ReturnType<typeof getDb>;
 
 export type CoordinatorStage = "planner" | "plan-checker" | "implementer" | "reviewer";
+
+let appSettingsCacheDb: AppSettingsDb | null = null;
+let appSettingsCache: AppSettingsRow | null = null;
 
 /** DB-level patch: all mutable task columns with their storage types (attachments/tags as JSON strings). */
 export type TaskFieldsPatch = Partial<Omit<TaskRow, "id" | "projectId" | "createdAt">> & {
@@ -882,6 +891,158 @@ export function getLatestReworkComment(taskId: string): CommentRow | undefined {
   return listTaskComments(taskId).at(-1);
 }
 
+export function toAppSettingsResponse(row: AppSettingsRow): AppSettings {
+  return {
+    id: row.id,
+    defaultTaskRuntimeProfileId: row.defaultTaskRuntimeProfileId,
+    defaultPlanRuntimeProfileId: row.defaultPlanRuntimeProfileId,
+    defaultReviewRuntimeProfileId: row.defaultReviewRuntimeProfileId,
+    defaultChatRuntimeProfileId: row.defaultChatRuntimeProfileId,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function ensureAppSettingsRow(): AppSettingsRow {
+  const db = getDb();
+  if (appSettingsCacheDb === db && appSettingsCache) {
+    return appSettingsCache;
+  }
+
+  // Migration 13 seeds row id=1. Keep this fallback for legacy/test databases
+  // so read paths stay resilient even when they start from an empty schema.
+  const existing = db.select().from(appSettings).where(eq(appSettings.id, APP_SETTINGS_ID)).get();
+  if (existing) {
+    appSettingsCacheDb = db;
+    appSettingsCache = existing;
+    return existing;
+  }
+
+  const now = new Date().toISOString();
+  log.debug({ appSettingsId: APP_SETTINGS_ID }, "Seeding missing singleton app settings row");
+  db
+    .insert(appSettings)
+    .values({
+      id: APP_SETTINGS_ID,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoNothing()
+    .run();
+
+  const seeded = db.select().from(appSettings).where(eq(appSettings.id, APP_SETTINGS_ID)).get()!;
+  appSettingsCacheDb = db;
+  appSettingsCache = seeded;
+  return seeded;
+}
+
+export function getAppSettings(): AppSettingsRow {
+  const settings = ensureAppSettingsRow();
+  log.debug({ appSettingsId: settings.id }, "Loaded app settings");
+  return settings;
+}
+
+export function updateAppSettings(input: UpdateAppSettingsInput): AppSettingsRow {
+  ensureAppSettingsRow();
+
+  const patch: Partial<AppSettingsRow> = {
+    updatedAt: new Date().toISOString(),
+  };
+  if (input.defaultTaskRuntimeProfileId !== undefined) {
+    patch.defaultTaskRuntimeProfileId = input.defaultTaskRuntimeProfileId;
+  }
+  if (input.defaultPlanRuntimeProfileId !== undefined) {
+    patch.defaultPlanRuntimeProfileId = input.defaultPlanRuntimeProfileId;
+  }
+  if (input.defaultReviewRuntimeProfileId !== undefined) {
+    patch.defaultReviewRuntimeProfileId = input.defaultReviewRuntimeProfileId;
+  }
+  if (input.defaultChatRuntimeProfileId !== undefined) {
+    patch.defaultChatRuntimeProfileId = input.defaultChatRuntimeProfileId;
+  }
+
+  log.debug(
+    {
+      appSettingsId: APP_SETTINGS_ID,
+      defaultTaskRuntimeProfileId: input.defaultTaskRuntimeProfileId ?? null,
+      defaultPlanRuntimeProfileId: input.defaultPlanRuntimeProfileId ?? null,
+      defaultReviewRuntimeProfileId: input.defaultReviewRuntimeProfileId ?? null,
+      defaultChatRuntimeProfileId: input.defaultChatRuntimeProfileId ?? null,
+    },
+    "Updating app settings runtime defaults",
+  );
+
+  getDb()
+    .update(appSettings)
+    .set(patch)
+    .where(eq(appSettings.id, APP_SETTINGS_ID))
+    .run();
+
+  appSettingsCache = null;
+  const updated = ensureAppSettingsRow();
+  appSettingsCache = updated;
+  return updated;
+}
+
+export function getAppDefaultRuntimeProfileId(
+  mode: "task" | "plan" | "review" | "chat",
+): string | null {
+  const settings = getAppSettings();
+  const candidates =
+    mode === "chat"
+      ? [{ slot: "chat", profileId: settings.defaultChatRuntimeProfileId }]
+      : mode === "plan"
+        ? [
+            { slot: "plan", profileId: settings.defaultPlanRuntimeProfileId },
+            { slot: "task", profileId: settings.defaultTaskRuntimeProfileId },
+          ]
+        : mode === "review"
+          ? [
+              { slot: "review", profileId: settings.defaultReviewRuntimeProfileId },
+              { slot: "task", profileId: settings.defaultTaskRuntimeProfileId },
+            ]
+          : [{ slot: "task", profileId: settings.defaultTaskRuntimeProfileId }];
+
+  const seenProfileIds = new Set<string>();
+
+  for (const candidate of candidates) {
+    if (!candidate.profileId || seenProfileIds.has(candidate.profileId)) continue;
+    seenProfileIds.add(candidate.profileId);
+
+    const profile = findRuntimeProfileById(candidate.profileId);
+    if (!profile) {
+      log.warn(
+        { mode, appDefaultSlot: candidate.slot, runtimeProfileId: candidate.profileId },
+        "App runtime default points to a missing profile",
+      );
+      continue;
+    }
+    if (profile.projectId != null) {
+      log.warn(
+        {
+          mode,
+          appDefaultSlot: candidate.slot,
+          runtimeProfileId: candidate.profileId,
+          ownerProjectId: profile.projectId,
+        },
+        "App runtime default points to a project-scoped profile",
+      );
+      continue;
+    }
+    if (!profile.enabled) {
+      log.warn(
+        { mode, appDefaultSlot: candidate.slot, runtimeProfileId: candidate.profileId },
+        "App runtime default points to a disabled profile",
+      );
+      continue;
+    }
+
+    return profile.id;
+  }
+
+  return null;
+}
+
 export function listProjects(): ProjectRow[] {
   return getDb().select().from(projects).all();
 }
@@ -899,6 +1060,8 @@ export function createProject(input: {
   reviewSidecarMaxBudgetUsd?: number | null;
   parallelEnabled?: boolean;
   defaultTaskRuntimeProfileId?: string | null;
+  defaultPlanRuntimeProfileId?: string | null;
+  defaultReviewRuntimeProfileId?: string | null;
   defaultChatRuntimeProfileId?: string | null;
 }): ProjectRow | undefined {
   const id = crypto.randomUUID();
@@ -907,6 +1070,8 @@ export function createProject(input: {
     {
       projectId: id,
       defaultTaskRuntimeProfileId: input.defaultTaskRuntimeProfileId ?? null,
+      defaultPlanRuntimeProfileId: input.defaultPlanRuntimeProfileId ?? null,
+      defaultReviewRuntimeProfileId: input.defaultReviewRuntimeProfileId ?? null,
       defaultChatRuntimeProfileId: input.defaultChatRuntimeProfileId ?? null,
     },
     "Creating project runtime defaults",
@@ -923,6 +1088,8 @@ export function createProject(input: {
       reviewSidecarMaxBudgetUsd: input.reviewSidecarMaxBudgetUsd ?? null,
       parallelEnabled: input.parallelEnabled ?? false,
       defaultTaskRuntimeProfileId: input.defaultTaskRuntimeProfileId ?? null,
+      defaultPlanRuntimeProfileId: input.defaultPlanRuntimeProfileId ?? null,
+      defaultReviewRuntimeProfileId: input.defaultReviewRuntimeProfileId ?? null,
       defaultChatRuntimeProfileId: input.defaultChatRuntimeProfileId ?? null,
       createdAt: now,
       updatedAt: now,
@@ -1924,6 +2091,56 @@ export function clearRuntimeProfileLimitSnapshot(
 export function deleteRuntimeProfile(id: string): void {
   log.debug({ runtimeProfileId: id }, "Deleting runtime profile");
   getDb().delete(runtimeProfiles).where(eq(runtimeProfiles.id, id)).run();
+  appSettingsCache = null;
+  appSettingsCacheDb = null;
+}
+
+export function isRuntimeProfileVisibleToProject(input: {
+  projectId: string;
+  runtimeProfileId: string | null;
+}): boolean {
+  if (input.runtimeProfileId == null) {
+    log.debug({ projectId: input.projectId, runtimeProfileId: null }, "Null runtime profile is visible");
+    return true;
+  }
+
+  const profile = findRuntimeProfileById(input.runtimeProfileId);
+  const isVisible =
+    profile != null && (profile.projectId == null || profile.projectId === input.projectId);
+
+  log.debug(
+    {
+      projectId: input.projectId,
+      runtimeProfileId: input.runtimeProfileId,
+      ownerProjectId: profile?.projectId ?? null,
+      isVisible,
+    },
+    "Checked runtime profile visibility for project",
+  );
+
+  return isVisible;
+}
+
+export function isRuntimeProfileEligibleForAppDefaults(runtimeProfileId: string | null): boolean {
+  if (runtimeProfileId == null) {
+    log.debug({ runtimeProfileId: null }, "Null runtime profile is eligible for app defaults");
+    return true;
+  }
+
+  const profile = findRuntimeProfileById(runtimeProfileId);
+  const isEligible = profile != null && profile.projectId == null && profile.enabled;
+
+  log.debug(
+    {
+      runtimeProfileId,
+      ownerProjectId: profile?.projectId ?? null,
+      enabled: profile?.enabled ?? null,
+      isEligible,
+    },
+    "Checked runtime profile eligibility for app defaults",
+  );
+
+  return isEligible;
 }
 
 export function updateProjectRuntimeDefaults(

@@ -24,19 +24,21 @@ import {
   findTaskById,
   getRuntimeProfileResponseById,
   listRuntimeProfileResponses,
+  getAppDefaultRuntimeProfileId,
   resolveEffectiveRuntimeProfile,
   toRuntimeProfileResponse,
   updateRuntimeProfile,
 } from "@aif/data";
 import {
   createRuntimeProfileSchema,
+  runtimeProfileListQuerySchema,
   runtimeProfileModelsSchema,
   runtimeProfileValidationSchema,
   updateRuntimeProfileSchema,
 } from "../schemas.js";
 import { getApiRuntimeModelDiscoveryService, getApiRuntimeRegistry } from "../services/runtime.js";
 import { createRateLimiter } from "../middleware/rateLimit.js";
-import { jsonValidator } from "../middleware/zodValidator.js";
+import { jsonValidator, queryValidator } from "../middleware/zodValidator.js";
 
 const log = logger("runtime-profile-route");
 
@@ -383,6 +385,24 @@ async function enrichProfilesWithProviderIdentity<
   );
 }
 
+function compareVisibleRuntimeProfiles(
+  left: { id: string; projectId: string | null; createdAt: string },
+  right: { id: string; projectId: string | null; createdAt: string },
+): number {
+  const leftRank = left.projectId == null ? 0 : 1;
+  const rightRank = right.projectId == null ? 0 : 1;
+  if (leftRank !== rightRank) {
+    return leftRank - rightRank;
+  }
+
+  const createdAtComparison = left.createdAt.localeCompare(right.createdAt);
+  if (createdAtComparison !== 0) {
+    return createdAtComparison;
+  }
+
+  return left.id.localeCompare(right.id);
+}
+
 function resolveValidationProfile(input: {
   profileId?: string;
   projectId?: string;
@@ -434,10 +454,11 @@ function resolveValidationProfile(input: {
   }
 
   if (input.projectId) {
+    const systemDefaultRuntimeProfileId = getAppDefaultRuntimeProfileId("task");
     const effective = resolveEffectiveRuntimeProfile({
       projectId: input.projectId,
       mode: "task",
-      systemDefaultRuntimeProfileId: null,
+      systemDefaultRuntimeProfileId,
     });
     if (!effective.profile) {
       return null;
@@ -473,17 +494,38 @@ runtimeProfilesRouter.get("/runtimes", async (c) => {
   );
 });
 
-// GET /runtime-profiles?projectId=...&includeGlobal=...&enabledOnly=...
-runtimeProfilesRouter.get("/", async (c) => {
-  const projectId = c.req.query("projectId");
-  const includeGlobal = sanitizeBooleanQuery(c.req.query("includeGlobal"), true);
-  const enabledOnly = sanitizeBooleanQuery(c.req.query("enabledOnly"), false);
+// GET /runtime-profiles?projectId=...&includeGlobal=...&enabledOnly=...&scope=...
+runtimeProfilesRouter.get("/", queryValidator(runtimeProfileListQuerySchema), async (c) => {
+  const query = c.req.valid("query");
+  const projectId = query.projectId;
+  const includeGlobal = sanitizeBooleanQuery(query.includeGlobal, true);
+  const enabledOnly = sanitizeBooleanQuery(query.enabledOnly, false);
+  const scope = query.scope ?? "visible";
 
   log.debug(
-    { projectId, includeGlobal, enabledOnly },
+    { projectId, includeGlobal, enabledOnly, scope },
     "DEBUG [runtime-profile-route] List request",
   );
-  const profiles = listRuntimeProfileResponses({ projectId, includeGlobal, enabledOnly });
+  if (scope === "project" && !projectId) {
+    return c.json({ error: "projectId is required when scope=project" }, 400);
+  }
+
+  let profiles;
+  if (scope === "global") {
+    profiles = listRuntimeProfileResponses({ enabledOnly }).filter(
+      (profile) => profile.projectId == null,
+    );
+  } else if (scope === "project") {
+    profiles = listRuntimeProfileResponses({
+      projectId,
+      includeGlobal: false,
+      enabledOnly,
+    }).filter((profile) => profile.projectId === projectId);
+  } else {
+    profiles = listRuntimeProfileResponses({ projectId, includeGlobal, enabledOnly }).sort(
+      compareVisibleRuntimeProfiles,
+    );
+  }
   const refreshedProfiles = await refreshProfilesWithLiveCodexLimits(profiles, projectId ?? null);
   return c.json(await enrichProfilesWithProviderIdentity(refreshedProfiles));
 });
@@ -581,11 +623,12 @@ runtimeProfilesRouter.get("/effective/task/:taskId", async (c) => {
   const task = findTaskById(taskId);
   if (!task) return c.json({ error: "Task not found" }, 404);
 
+  const systemDefaultRuntimeProfileId = getAppDefaultRuntimeProfileId("task");
   const effective = resolveEffectiveRuntimeProfile({
     taskId,
     projectId: task.projectId,
     mode: "task",
-    systemDefaultRuntimeProfileId: null,
+    systemDefaultRuntimeProfileId,
   });
 
   return c.json({
@@ -606,10 +649,11 @@ runtimeProfilesRouter.get("/effective/task/:taskId", async (c) => {
 // GET /runtime-profiles/effective/chat/:projectId
 runtimeProfilesRouter.get("/effective/chat/:projectId", async (c) => {
   const { projectId } = c.req.param();
+  const systemDefaultRuntimeProfileId = getAppDefaultRuntimeProfileId("chat");
   const effective = resolveEffectiveRuntimeProfile({
     projectId,
     mode: "chat",
-    systemDefaultRuntimeProfileId: null,
+    systemDefaultRuntimeProfileId,
   });
 
   const workflow = createRuntimeWorkflowSpec({

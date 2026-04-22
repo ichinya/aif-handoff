@@ -36,22 +36,27 @@ import {
 } from "../repositories/tasks.js";
 import {
   findProjectById,
+  getAppDefaultRuntimeProfileId,
   resolveEffectiveRuntimeProfile,
   updateTaskPositionOnly,
   type TaskRow,
 } from "@aif/data";
+import { validateProjectScopedRuntimeProfileSelections } from "../services/runtimeProfileScope.js";
 
 const log = logger("tasks-route");
 
 export const tasksRouter = new Hono();
 
-function toTaskRouteResponse(task: TaskRow) {
+function toTaskRouteResponse(
+  task: TaskRow,
+  systemDefaultRuntimeProfileId = getAppDefaultRuntimeProfileId("task"),
+) {
   const response = toTaskResponse(task);
   const effective = resolveEffectiveRuntimeProfile({
     taskId: task.id,
     projectId: task.projectId,
     mode: "task",
-    systemDefaultRuntimeProfileId: null,
+    systemDefaultRuntimeProfileId,
   });
 
   return {
@@ -91,13 +96,25 @@ tasksRouter.get("/", (c) => {
   }
 
   const allTasks = listTasks(projectId);
+  const systemDefaultRuntimeProfileId = getAppDefaultRuntimeProfileId("task");
   log.debug({ count: allTasks.length, projectId }, "Listed tasks");
-  return c.json(allTasks.map(toTaskRouteResponse));
+  return c.json(allTasks.map((task) => toTaskRouteResponse(task, systemDefaultRuntimeProfileId)));
 });
 
 // POST /tasks — create
 tasksRouter.post("/", jsonValidator(createTaskSchema), async (c) => {
   const body = c.req.valid("json");
+  const runtimeValidation = validateProjectScopedRuntimeProfileSelections({
+    projectId: body.projectId,
+    selections: { runtimeProfileId: body.runtimeProfileId },
+  });
+  if (runtimeValidation) {
+    log.warn(
+      { projectId: body.projectId, fieldErrors: runtimeValidation.fieldErrors },
+      "Rejected invalid task runtime selection",
+    );
+    return c.json(runtimeValidation, 400);
+  }
 
   // Resolve planPath default from project config.yaml (if present)
   const project = findProjectById(body.projectId);
@@ -317,6 +334,18 @@ tasksRouter.put("/:id", jsonValidator(updateTaskSchema), async (c) => {
   const existing = findTaskById(id);
   if (!existing) {
     return c.json({ error: "Task not found" }, 404);
+  }
+
+  const runtimeValidation = validateProjectScopedRuntimeProfileSelections({
+    projectId: existing.projectId,
+    selections: { runtimeProfileId: body.runtimeProfileId },
+  });
+  if (runtimeValidation) {
+    log.warn(
+      { taskId: id, projectId: existing.projectId, fieldErrors: runtimeValidation.fieldErrors },
+      "Rejected invalid task runtime selection",
+    );
+    return c.json(runtimeValidation, 400);
   }
 
   // Parallel-enabled projects enforce full mode

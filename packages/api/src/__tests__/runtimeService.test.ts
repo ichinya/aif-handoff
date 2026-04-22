@@ -131,6 +131,7 @@ class MockRuntimeExecutionError extends Error {
 const mockFindProjectById = vi.fn();
 const mockFindRuntimeProfileById = vi.fn();
 const mockFindTaskById = vi.fn();
+const mockGetAppDefaultRuntimeProfileId = vi.fn();
 const mockResolveEffectiveRuntimeProfile = vi.fn();
 const mockToRuntimeProfileResponse = vi.fn((row: unknown) => row);
 
@@ -167,6 +168,7 @@ vi.mock("@aif/data", () => ({
   findRuntimeProfileById: mockFindRuntimeProfileById,
   findTaskById: mockFindTaskById,
   persistRuntimeProfileLimitSnapshot: mockPersistRuntimeProfileLimitSnapshot,
+  getAppDefaultRuntimeProfileId: mockGetAppDefaultRuntimeProfileId,
   resolveEffectiveRuntimeProfile: mockResolveEffectiveRuntimeProfile,
   toRuntimeProfileResponse: mockToRuntimeProfileResponse,
   createDbUsageSink: () => ({ record: vi.fn() }),
@@ -254,6 +256,7 @@ describe("runtime service", () => {
     mockRegistryResolveRuntime.mockReturnValue(adapter);
 
     mockFindProjectById.mockReturnValue({ id: "proj-1", rootPath: "/tmp/project" });
+    mockGetAppDefaultRuntimeProfileId.mockReturnValue(null);
     mockResolveEffectiveRuntimeProfile.mockReturnValue({
       source: "project_default",
       profile: {
@@ -375,6 +378,81 @@ describe("runtime service", () => {
       }),
     );
     expect(mockRegistryResolveRuntime).toHaveBeenCalledWith("claude");
+  });
+
+  it("passes app-level task defaults into effective runtime resolution", async () => {
+    const runtimeService = await loadRuntimeService();
+    mockGetAppDefaultRuntimeProfileId.mockReturnValue("app-task-default");
+
+    await runtimeService.resolveApiRuntimeContext({
+      projectId: "proj-1",
+      mode: "task",
+      workflow: { workflowKind: "implementer", requiredCapabilities: [] } as never,
+    });
+
+    expect(mockGetAppDefaultRuntimeProfileId).toHaveBeenCalledWith("task");
+    expect(mockResolveEffectiveRuntimeProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: "proj-1",
+        mode: "task",
+        systemDefaultRuntimeProfileId: "app-task-default",
+      }),
+    );
+  });
+
+  it("passes app-level chat defaults into effective runtime resolution", async () => {
+    const runtimeService = await loadRuntimeService();
+    mockGetAppDefaultRuntimeProfileId.mockReturnValue("app-chat-default");
+
+    await runtimeService.resolveApiRuntimeContext({
+      projectId: "proj-1",
+      mode: "chat",
+      workflow: { workflowKind: "chat", requiredCapabilities: [] } as never,
+    });
+
+    expect(mockGetAppDefaultRuntimeProfileId).toHaveBeenCalledWith("chat");
+    expect(mockResolveEffectiveRuntimeProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: "proj-1",
+        mode: "chat",
+        systemDefaultRuntimeProfileId: "app-chat-default",
+      }),
+    );
+  });
+
+  it("prefers an explicit runtime profile id over effective chat defaults", async () => {
+    const runtimeService = await loadRuntimeService();
+    mockFindRuntimeProfileById.mockImplementation((id: string) =>
+      id === "profile-pinned"
+        ? {
+            id,
+            runtimeId: "codex",
+            providerId: "openai",
+            defaultModel: "gpt-5.4",
+            enabled: true,
+          }
+        : null,
+    );
+
+    const context = await runtimeService.resolveApiRuntimeContext({
+      projectId: "proj-1",
+      mode: "chat",
+      runtimeProfileId: "profile-pinned",
+      workflow: { workflowKind: "chat", requiredCapabilities: [] } as never,
+    });
+
+    expect(context.selectionSource).toBe("profile_id");
+    expect(mockResolveEffectiveRuntimeProfile).not.toHaveBeenCalled();
+    expect(mockResolveRuntimeProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: "profile_id",
+        profile: expect.objectContaining({
+          id: "profile-pinned",
+          runtimeId: "codex",
+          providerId: "openai",
+        }),
+      }),
+    );
   });
 
   it("prefers explicit model/runtime options overrides over task values", async () => {
@@ -536,6 +614,22 @@ describe("runtime service", () => {
             _trustToken: Symbol.for("aif.runtime.trust"),
           }),
         }),
+      }),
+    );
+  });
+
+  it("uses app-level task defaults when resolving the light model", async () => {
+    const runtimeService = await loadRuntimeService();
+    mockGetAppDefaultRuntimeProfileId.mockReturnValue("app-task-default");
+
+    await runtimeService.resolveApiLightModel("proj-1");
+
+    expect(mockGetAppDefaultRuntimeProfileId).toHaveBeenCalledWith("task");
+    expect(mockResolveEffectiveRuntimeProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: "proj-1",
+        mode: "task",
+        systemDefaultRuntimeProfileId: "app-task-default",
       }),
     );
   });

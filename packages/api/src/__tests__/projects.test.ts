@@ -281,7 +281,58 @@ describe("projects API", () => {
     expect(body.rootPath).toBe("/tmp/demo-project");
   });
 
+  it("rejects foreign project-owned runtime profile defaults on create", async () => {
+    testDb.current
+      .insert(runtimeProfiles)
+      .values({
+        id: "other-project-profile",
+        projectId: "other-project",
+        name: "Other Project Profile",
+        runtimeId: "claude",
+        providerId: "anthropic",
+        enabled: true,
+      })
+      .run();
+
+    const res = await app.request("/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Invalid Defaults",
+        rootPath: "/tmp/invalid-defaults-project",
+        defaultTaskRuntimeProfileId: "other-project-profile",
+      }),
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBeTruthy();
+    expect(body.fieldErrors.defaultTaskRuntimeProfileId).toBeDefined();
+  });
+
   it("persists per-stage runtime profile IDs on project update", async () => {
+    testDb.current
+      .insert(runtimeProfiles)
+      .values([
+        {
+          id: "profile-task",
+          projectId: null,
+          name: "Task Profile",
+          runtimeId: "claude",
+          providerId: "anthropic",
+          enabled: true,
+        },
+        {
+          id: "profile-chat",
+          projectId: null,
+          name: "Chat Profile",
+          runtimeId: "claude",
+          providerId: "anthropic",
+          enabled: true,
+        },
+      ])
+      .run();
+
     // Create a project first
     const createRes = await app.request("/projects", {
       method: "POST",
@@ -290,6 +341,28 @@ describe("projects API", () => {
     });
     expect(createRes.status).toBe(201);
     const created = await createRes.json();
+
+    testDb.current
+      .insert(runtimeProfiles)
+      .values([
+        {
+          id: "profile-plan",
+          projectId: created.id,
+          name: "Plan Profile",
+          runtimeId: "claude",
+          providerId: "anthropic",
+          enabled: true,
+        },
+        {
+          id: "profile-review",
+          projectId: created.id,
+          name: "Review Profile",
+          runtimeId: "claude",
+          providerId: "anthropic",
+          enabled: true,
+        },
+      ])
+      .run();
 
     // Update with per-stage profile IDs
     const updateRes = await app.request(`/projects/${created.id}`, {
@@ -318,6 +391,80 @@ describe("projects API", () => {
     const refetched = projects.find((p: { id: string }) => p.id === created.id);
     expect(refetched.defaultPlanRuntimeProfileId).toBe("profile-plan");
     expect(refetched.defaultReviewRuntimeProfileId).toBe("profile-review");
+  });
+
+  it("rejects foreign project-owned runtime profile defaults on update", async () => {
+    testDb.current
+      .insert(runtimeProfiles)
+      .values({
+        id: "other-project-profile",
+        projectId: "other-project",
+        name: "Other Project Profile",
+        runtimeId: "claude",
+        providerId: "anthropic",
+        enabled: true,
+      })
+      .run();
+
+    const createRes = await app.request("/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Scoped", rootPath: "/tmp/scoped-project" }),
+    });
+    expect(createRes.status).toBe(201);
+    const created = await createRes.json();
+
+    const updateRes = await app.request(`/projects/${created.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Scoped",
+        rootPath: "/tmp/scoped-project",
+        defaultTaskRuntimeProfileId: "other-project-profile",
+      }),
+    });
+
+    expect(updateRes.status).toBe(400);
+    const body = await updateRes.json();
+    expect(body.error).toBeTruthy();
+    expect(body.fieldErrors.defaultTaskRuntimeProfileId).toBeDefined();
+  });
+
+  it("rejects disabled runtime profile defaults on update", async () => {
+    testDb.current
+      .insert(runtimeProfiles)
+      .values({
+        id: "disabled-global-profile",
+        projectId: null,
+        name: "Disabled Global",
+        runtimeId: "codex",
+        providerId: "openai",
+        enabled: false,
+      })
+      .run();
+
+    const createRes = await app.request("/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Scoped", rootPath: "/tmp/scoped-project-disabled" }),
+    });
+    expect(createRes.status).toBe(201);
+    const created = await createRes.json();
+
+    const updateRes = await app.request(`/projects/${created.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Scoped",
+        rootPath: "/tmp/scoped-project-disabled",
+        defaultTaskRuntimeProfileId: "disabled-global-profile",
+      }),
+    });
+
+    expect(updateRes.status).toBe(400);
+    const body = await updateRes.json();
+    expect(body.error).toBeTruthy();
+    expect(body.fieldErrors.defaultTaskRuntimeProfileId).toBeDefined();
   });
 
   describe("auto-queue mode", () => {

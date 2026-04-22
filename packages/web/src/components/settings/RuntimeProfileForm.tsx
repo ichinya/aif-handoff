@@ -337,6 +337,11 @@ export function RuntimeProfileForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-3 border border-border bg-card/40 p-3">
+      <p className="text-[11px] text-muted-foreground">
+        {projectId
+          ? "Project scope: only this project can select this profile by default."
+          : "Global scope: every project can reuse this profile."}
+      </p>
       <div className="grid gap-2 md:grid-cols-2">
         <div className="space-y-1">
           <p className="text-xs font-medium text-muted-foreground">Name</p>

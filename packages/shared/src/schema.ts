@@ -33,6 +33,23 @@ export const projects = sqliteTable("projects", {
 export type ProjectRow = typeof projects.$inferSelect;
 export type NewProjectRow = typeof projects.$inferInsert;
 
+export const appSettings = sqliteTable("app_settings", {
+  id: integer("id").primaryKey().notNull().default(1),
+  defaultTaskRuntimeProfileId: text("default_task_runtime_profile_id"),
+  defaultPlanRuntimeProfileId: text("default_plan_runtime_profile_id"),
+  defaultReviewRuntimeProfileId: text("default_review_runtime_profile_id"),
+  defaultChatRuntimeProfileId: text("default_chat_runtime_profile_id"),
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+  updatedAt: text("updated_at")
+    .notNull()
+    .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+});
+
+export type AppSettingsRow = typeof appSettings.$inferSelect;
+export type NewAppSettingsRow = typeof appSettings.$inferInsert;
+
 export const tasks = sqliteTable("tasks", {
   id: text("id")
     .primaryKey()

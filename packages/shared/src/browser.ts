@@ -11,6 +11,8 @@ export {
   type AutoReviewState,
   type Project,
   type CreateProjectInput,
+  type AppSettings,
+  type UpdateAppSettingsInput,
   type Task,
   type CreateTaskInput,
   type UpdateTaskInput,

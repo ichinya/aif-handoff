@@ -7,6 +7,12 @@ Element.prototype.scrollIntoView = vi.fn();
 const mockSendMessage = vi.fn();
 const mockClearMessages = vi.fn();
 const mockSetExplore = vi.fn();
+const mockPinActiveSession = vi.fn();
+const mockClearActiveSession = vi.fn();
+const mockDeleteSession = vi.fn();
+const mockRenameSession = vi.fn();
+const mockSetActiveSessionId = vi.fn();
+const mockNewSession = vi.fn();
 
 let mockMessages: {
   role: string;
@@ -32,10 +38,13 @@ let mockChatRuntimeLimitSnapshot: {
   providerMeta?: Record<string, unknown> | null;
 } | null = null;
 let mockActiveSessionId: string | null = null;
+let mockSessions: Array<Record<string, unknown>> = [];
+let mockRuntimeProfiles: Array<Record<string, unknown>> = [];
 let mockEffectiveChatRuntime: {
   source: string;
   profile: {
     name: string;
+    projectId?: string | null;
     runtimeId: string;
     providerId: string;
     defaultModel: string | null;
@@ -55,21 +64,21 @@ vi.mock("@/hooks/useChat", () => ({
     setExplore: mockSetExplore,
     sendMessage: mockSendMessage,
     clearMessages: mockClearMessages,
-    newSession: vi.fn(),
+    newSession: mockNewSession,
   }),
 }));
 
 vi.mock("@/hooks/useChatSessions", () => ({
   useChatSessions: () => ({
-    sessions: [],
+    sessions: mockSessions,
     isLoading: false,
     activeSessionId: mockActiveSessionId,
-    setActiveSessionId: vi.fn(),
-    pinActiveSession: vi.fn(),
-    clearActiveSession: vi.fn(),
+    setActiveSessionId: mockSetActiveSessionId,
+    pinActiveSession: mockPinActiveSession,
+    clearActiveSession: mockClearActiveSession,
     createSession: vi.fn(),
-    deleteSession: vi.fn(),
-    renameSession: vi.fn(),
+    deleteSession: mockDeleteSession,
+    renameSession: mockRenameSession,
     loadSessionMessages: vi.fn(),
   }),
 }));
@@ -84,7 +93,7 @@ vi.mock("@/hooks/useRuntimeProfiles", () => ({
     data: mockEffectiveChatRuntime,
   }),
   useRuntimeProfiles: () => ({
-    data: [],
+    data: mockRuntimeProfiles,
   }),
 }));
 
@@ -120,10 +129,18 @@ describe("ChatPanel", () => {
     mockChatErrorCode = null;
     mockChatRuntimeLimitSnapshot = null;
     mockActiveSessionId = null;
+    mockSessions = [];
+    mockRuntimeProfiles = [];
     mockEffectiveChatRuntime = null;
     mockSendMessage.mockClear();
     mockClearMessages.mockClear();
     mockSetExplore.mockClear();
+    mockPinActiveSession.mockClear();
+    mockClearActiveSession.mockClear();
+    mockDeleteSession.mockClear();
+    mockRenameSession.mockClear();
+    mockSetActiveSessionId.mockClear();
+    mockNewSession.mockClear();
     mockOnClose.mockClear();
   });
 
@@ -132,6 +149,7 @@ describe("ChatPanel", () => {
       source: "project_default",
       profile: {
         name: "GLM Claude",
+        projectId: "p-1",
         runtimeId: "claude",
         providerId: "anthropic",
         defaultModel: "glm-5",
@@ -146,11 +164,28 @@ describe("ChatPanel", () => {
     renderPanel();
 
     expect(screen.getByText("Profile:")).toBeDefined();
-    expect(screen.getByText("GLM Claude")).toBeDefined();
+    expect(screen.getByText("GLM Claude [Project]")).toBeDefined();
     expect(screen.getByText("Runtime:")).toBeDefined();
     expect(screen.getByText("claude/anthropic")).toBeDefined();
     expect(screen.getByText("Model:")).toBeDefined();
     expect(screen.getByText("glm-5")).toBeDefined();
+  });
+
+  it("shows app-default label when chat resolves through the global fallback chain", () => {
+    mockEffectiveChatRuntime = {
+      source: "system_default",
+      profile: null,
+      resolved: {
+        runtimeId: "codex",
+        providerId: "openai",
+        model: "gpt-5.4",
+      },
+    };
+
+    renderPanel();
+
+    expect(screen.getByText("App default")).toBeDefined();
+    expect(screen.getByText("codex/openai")).toBeDefined();
   });
 
   it("shows the current project scope in the header", () => {
@@ -197,6 +232,52 @@ describe("ChatPanel", () => {
     const sendButton = screen.getByLabelText("Send message");
     fireEvent.click(sendButton);
     expect(mockSendMessage).toHaveBeenCalledWith("hello", undefined, false);
+  });
+
+  it("shows the pinned session runtime and keeps sending in that session when defaults change", () => {
+    mockActiveSessionId = "session-1";
+    mockSessions = [
+      {
+        id: "session-1",
+        title: "Pinned session",
+        runtimeProfileId: "profile-saved",
+      },
+    ];
+    mockRuntimeProfiles = [
+      {
+        id: "profile-saved",
+        name: "Saved Runtime",
+        projectId: null,
+        runtimeId: "claude",
+        providerId: "anthropic",
+        defaultModel: "sonnet",
+      },
+    ];
+    mockEffectiveChatRuntime = {
+      source: "project_default",
+      profile: {
+        name: "Current Default",
+        projectId: "p-1",
+        runtimeId: "codex",
+        providerId: "openai",
+        defaultModel: "gpt-5.4",
+      },
+      resolved: {
+        runtimeId: "codex",
+        providerId: "openai",
+        model: "gpt-5.4",
+      },
+    };
+
+    renderPanel();
+    expect(screen.getByText("Saved Runtime [Global]")).toBeDefined();
+    expect(screen.queryByText("Current Default [Project]")).toBeNull();
+    const textarea = screen.getByPlaceholderText("Ask a question...");
+    fireEvent.change(textarea, { target: { value: "stay pinned" } });
+    fireEvent.click(screen.getByLabelText("Send message"));
+
+    expect(mockPinActiveSession).toHaveBeenCalledTimes(1);
+    expect(mockSendMessage).toHaveBeenCalledWith("stay pinned", undefined, false);
   });
 
   it("shows Explore checkbox toggle", () => {
@@ -288,7 +369,7 @@ describe("ChatPanel", () => {
     renderPanel();
 
     expect(screen.getByText("Runtime Near Limit")).toBeDefined();
-    expect(screen.getAllByText("Claude Team").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Claude Team/).length).toBeGreaterThan(0);
     expect(screen.getByText("Request quota is at 8% remaining (threshold 10%).")).toBeDefined();
     expect(screen.getByText(/Provider reset/)).toBeDefined();
   });
