@@ -122,11 +122,17 @@ export function recordNetwork(
  * Budgets enforced by every perf spec. Tune these after a few runs on the
  * target hardware so that regressions (not natural variance) trigger failures.
  */
+// Budgets are calibrated for the full dev stack running (api + web + agent
+// poller) — the agent's 2s tick adds contention on shared caches, so cold
+// numbers here are noticeably higher than a curl-against-idle-server baseline.
+// Tune after a handful of local runs; they should catch 10× regressions
+// (the original "v13 schema miss" bug pushed cold /runtime-profiles to ~14s),
+// not natural variance.
 export const PERF_BUDGETS = {
   dashboardLcpMs: 3_000,
   dashboardDomReadyMs: 4_000,
-  runtimeProfilesColdMs: 6_000,
+  runtimeProfilesColdMs: 10_000,
   runtimeProfilesWarmMs: 250,
-  chatSessionsColdMs: 5_000,
+  chatSessionsColdMs: 6_000,
   chatSessionsWarmMs: 1_500,
 } as const;
