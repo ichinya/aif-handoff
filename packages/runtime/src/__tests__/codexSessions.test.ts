@@ -5,6 +5,7 @@ import { join } from "node:path";
 const readdirMock = vi.fn();
 const readFileMock = vi.fn();
 const statMock = vi.fn();
+const createReadStreamMock = vi.fn();
 
 vi.mock("node:os", () => ({
   homedir: () => "C:/Users/test",
@@ -20,13 +21,17 @@ vi.mock("node:fs", async () => {
   const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
   return {
     ...actual,
-    createReadStream: (path: string) => {
+    createReadStream: (path: string, options?: { start?: number; end?: number }) => {
+      createReadStreamMock(path, options);
       // Reuse readFile mock so each test only configures one source of
       // session-file content; stream reads just yield the full payload.
       const stream = Readable.from(
         (async function* () {
           const data = await readFileMock(path, "utf-8");
-          yield typeof data === "string" ? data : String(data ?? "");
+          const text = typeof data === "string" ? data : String(data ?? "");
+          const start = typeof options?.start === "number" ? options.start : 0;
+          const end = typeof options?.end === "number" ? options.end + 1 : undefined;
+          yield text.slice(start, end);
         })(),
       );
       return stream as unknown as ReturnType<typeof import("node:fs").createReadStream>;
@@ -73,6 +78,7 @@ describe("Codex SDK session store parsing", () => {
     readdirMock.mockReset();
     readFileMock.mockReset();
     statMock.mockReset();
+    createReadStreamMock.mockReset();
 
     readdirMock.mockImplementation(async (target: string) => {
       switch (target) {
@@ -499,7 +505,7 @@ describe("Codex SDK session store parsing", () => {
     expect(mainSnapshot?.providerMeta?.limitId).toBe("codex");
   });
 
-  it("caps the session scan to avoid reading thousands of rollouts when many match", async () => {
+  it("pushes the session scan cap before hydrating every rollout meta", async () => {
     const bulkFiles = Array.from({ length: 120 }, (_, index) => {
       const id = `019d6e2c-e143-7642-8917-${index.toString(16).padStart(12, "0")}`;
       return {
@@ -577,9 +583,95 @@ describe("Codex SDK session store parsing", () => {
     });
 
     const sessionReads = readCalls.filter((path) => path !== authFile);
-    // 120 meta reads (readSessionMetas scans all) + up to 50 limit-snapshot reads (capped).
-    expect(sessionReads.length).toBeLessThanOrEqual(120 + 50);
-    expect(sessionReads.length).toBeGreaterThanOrEqual(120);
+    // 50 matching meta reads + 50 limit-snapshot reads. The old path read all
+    // 120 metas before applying the snapshot scan cap.
+    expect(sessionReads.length).toBeLessThanOrEqual(100);
+    expect(sessionReads.length).toBeLessThan(120);
+  });
+
+  it("reads recent limit snapshots from the file tail for global latest scans", async () => {
+    const filler = Array.from({ length: 2_000 }, (_, index) =>
+      JSON.stringify({
+        timestamp: "2026-04-08T17:38:00.000Z",
+        type: "event_msg",
+        payload: {
+          type: "agent_message",
+          message: `filler ${index}`,
+        },
+      }),
+    ).join("\n");
+    const tokenCountLine = JSON.stringify({
+      timestamp: "2026-04-08T17:39:09.000Z",
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        rate_limits: {
+          limit_id: "codex",
+          primary: { used_percent: 10, window_minutes: 300, resets_at: 4080085200 },
+        },
+      },
+    });
+    const sessionContent = `${filler}\n${tokenCountLine}`;
+
+    readdirMock.mockImplementation(async (target: string) => {
+      switch (target) {
+        case sessionsRoot:
+          return [dirEntry("2026")];
+        case join(sessionsRoot, "2026"):
+          return [dirEntry("04")];
+        case join(sessionsRoot, "2026", "04"):
+          return [dirEntry("08")];
+        case aprilDir:
+          return [fileEntry(`rollout-2026-04-08T22-38-48-${newerSessionId}.jsonl`)];
+        default:
+          return [];
+      }
+    });
+
+    statMock.mockImplementation(async (target: string) => {
+      if (target !== newerFile) throw new Error(`Unexpected stat path: ${target}`);
+      return {
+        birthtime: new Date("2026-04-08T17:38:48.271Z"),
+        mtime: new Date("2026-04-08T17:39:48.271Z"),
+        size: Buffer.byteLength(sessionContent),
+      };
+    });
+
+    readFileMock.mockImplementation(async (target: string) => {
+      if (target === authFile) {
+        return JSON.stringify({
+          tokens: {
+            id_token: null,
+            access_token: null,
+            refresh_token: null,
+            account_id: null,
+          },
+        });
+      }
+      if (target === newerFile) {
+        return sessionContent;
+      }
+      throw new Error(`Unexpected readFile path: ${target}`);
+    });
+
+    const snapshots = await sessionsModule.listLatestCodexLimitSnapshots({
+      runtimeId: "codex",
+      providerId: "openai",
+      profileId: "profile-1",
+    });
+
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0]?.providerMeta?.limitId).toBe("codex");
+    const sessionStreamCalls = createReadStreamMock.mock.calls.filter(
+      ([path]) => path === newerFile,
+    );
+    expect(sessionStreamCalls).toHaveLength(1);
+    expect(sessionStreamCalls[0]?.[1]).toEqual(
+      expect.objectContaining({
+        start: Buffer.byteLength(sessionContent) - 64 * 1024,
+        end: Buffer.byteLength(sessionContent) - 1,
+      }),
+    );
   });
 
   it("does not crash when a token_count event omits rate_limits", async () => {
