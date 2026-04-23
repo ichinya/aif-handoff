@@ -130,11 +130,12 @@ Optional `supportsInteractiveQuestions` flag in `RuntimeCapabilities` declares t
 
 ### Transport Types
 
-| Transport | Description                           | Example                                  |
-| --------- | ------------------------------------- | ---------------------------------------- |
-| `sdk`     | In-process library call via JS/TS SDK | Claude Agent SDK, Codex SDK              |
-| `cli`     | Spawn a subprocess, parse stdout      | `claude --agent ...`, `codex run --json` |
-| `api`     | HTTP POST to a remote endpoint        | OpenAI-compatible REST API               |
+| Transport    | Description                                           | Example                                  |
+| ------------ | ----------------------------------------------------- | ---------------------------------------- |
+| `sdk`        | In-process library call via JS/TS SDK                 | Claude Agent SDK, Codex SDK              |
+| `cli`        | Spawn a subprocess, parse stdout                      | `claude --agent ...`, `codex run --json` |
+| `app-server` | Spawn `codex app-server` and exchange stdio JSONL RPC | Codex App Server transport               |
+| `api`        | HTTP POST to a remote endpoint                        | OpenAI-compatible REST API               |
 
 #### Transport Observability Differences
 
@@ -146,6 +147,8 @@ Optional `supportsInteractiveQuestions` flag in `RuntimeCapabilities` declares t
 - **First-activity watchdog** is disabled (no `onToolUse` callbacks to monitor)
 - **Start timeout** (`AGENT_QUERY_START_TIMEOUT_MS`) is disabled — CLI/API produce output only after the full run completes, so the only protection is the run timeout (`AGENT_STAGE_RUN_TIMEOUT_MS`)
 - **Token usage** is reported as a single aggregate at the end of the run
+
+**Codex App Server transport** streams JSONL notifications from the subprocess, so it behaves closer to SDK from an observability perspective (streaming events, resumable thread IDs) while still using a local process execution model.
 
 ## Built-In Adapter Examples
 
@@ -215,7 +218,7 @@ SDK-specific options:
 - `sandboxMode` — one of `read-only`, `workspace-write`, `danger-full-access`
 - `approvalPolicy` — one of `untrusted`, `on-failure`, `on-request`, `never`
 - `modelReasoningEffort` — one of `minimal`, `low`, `medium`, `high`, `xhigh`
-- `skipGitRepoCheck` — bypass the Codex guard that refuses to run outside a git repo (both SDK and CLI)
+- `skipGitRepoCheck` — bypass the Codex guard that refuses to run outside a git repo (SDK, App Server, and CLI)
 
 Invalid `options.approvalPolicy` / `options.sandboxMode` values are ignored with a runtime warning, and the adapter falls back to the effective default for that execution path.
 
@@ -238,6 +241,33 @@ Invalid `options.approvalPolicy` / `options.sandboxMode` values are ignored with
 ```
 
 **`codexCliArgs` is a full escape hatch.** When `options.codexCliArgs` is set, the adapter uses the custom template verbatim (with `{prompt}`, `{model}`, `{session_id}` substitutions) and **skips all adapter-managed flags** — including `--model`, `-c model_reasoning_effort`, `-c approval_policy`, `-c sandbox_mode`, `--skip-git-repo-check`, and the bypass-permission translation. If you use a custom template you are responsible for emitting these flags yourself. Profile-level `options.approvalPolicy`, `options.sandboxMode`, `options.skipGitRepoCheck`, `options.modelReasoningEffort`, and `AGENT_BYPASS_PERMISSIONS` all have **no effect** when a custom template is active. Use this only for integration with non-standard CLI wrappers.
+
+### Codex (App Server transport)
+
+Runs `codex app-server` over stdio JSONL RPC and keeps Codex thread IDs as resumable runtime session IDs.
+
+```json
+{
+  "projectId": null,
+  "name": "Codex App Server",
+  "runtimeId": "codex",
+  "providerId": "openai",
+  "transport": "app-server",
+  "defaultModel": "gpt-5.4",
+  "options": {
+    "approvalPolicy": "on-request",
+    "sandboxMode": "workspace-write"
+  },
+  "enabled": true
+}
+```
+
+App Server operational notes:
+
+- Reuses the same key options as other Codex transports: `codexCliPath`, `approvalPolicy`, `sandboxMode`, `modelReasoningEffort`, and `skipGitRepoCheck`.
+- Session list APIs are supported through `thread/list` and `thread/read`; AIF stores Codex thread IDs as runtime session IDs for resume.
+- Docker images already include `@openai/codex` and mount persistent `~/.codex` auth state (`codex-auth` volume), so no extra Docker wiring is required for this transport.
+- On Windows, configured `codexCliPath` / `CODEX_CLI_PATH` values are treated as executable paths or shim names, not shell snippets. Values containing command-shell metacharacters are rejected before spawn.
 
 ### Codex (API transport)
 
@@ -314,18 +344,19 @@ When `AGENT_BYPASS_PERMISSIONS=1` is set in the environment, the runtime layer f
 
 Each adapter translates this to its native "trust me, just run" mechanism:
 
-| Runtime / transport | Bypass translation                                                            |
-| ------------------- | ----------------------------------------------------------------------------- |
-| Claude SDK          | `permissionMode="bypassPermissions"` + `allowDangerouslySkipPermissions=true` |
-| Claude CLI          | `--dangerously-skip-permissions`                                              |
-| Codex SDK           | `approvalPolicy="never"` + `sandboxMode="danger-full-access"` (ThreadOptions) |
-| Codex CLI           | `-c approval_policy="never" -c sandbox_mode="danger-full-access"`             |
+| Runtime / transport | Bypass translation                                                                                          |
+| ------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Claude SDK          | `permissionMode="bypassPermissions"` + `allowDangerouslySkipPermissions=true`                               |
+| Claude CLI          | `--dangerously-skip-permissions`                                                                            |
+| Codex SDK           | `approvalPolicy="never"` + `sandboxMode="danger-full-access"` (ThreadOptions)                               |
+| Codex App Server    | `approvalPolicy="never"` + `sandboxMode="danger-full-access"` (thread metadata + interrupt-aware turn flow) |
+| Codex CLI           | `-c approval_policy="never" -c sandbox_mode="danger-full-access"`                                           |
 
 Why Codex disables both approval prompts **and** the sandbox: Codex has two orthogonal safety rails (approval policy + OS-level sandbox), while Claude has only one (permission prompts). To match Claude's effective "agent can do anything" behavior, both rails must be cleared. Leaving the Codex sandbox at its default `workspace-write` blocks network access — so `npm install`, `curl`, `git push`, and WebFetch would silently fail.
 
 The Codex CLI uses `--config` (`-c`) overrides instead of the single `--dangerously-bypass-approvals-and-sandbox` flag because the same code path must work for both `codex exec` and `codex exec resume` — the resume subcommand rejects the standalone `--sandbox` flag, while `--config` overrides are accepted on both. The end-state is identical to the atomic flag.
 
-**Opting out for Codex:** if you want narrower safety even in bypass mode, set `options.sandboxMode` or `options.approvalPolicy` explicitly in your profile — explicit profile values override the bypass defaults on both SDK and CLI transports:
+**Opting out for Codex:** if you want narrower safety even in bypass mode, set `options.sandboxMode` or `options.approvalPolicy` explicitly in your profile — explicit profile values override the bypass defaults on SDK, App Server, and CLI transports:
 
 ```json
 {
