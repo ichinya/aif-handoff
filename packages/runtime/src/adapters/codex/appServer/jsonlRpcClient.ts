@@ -22,6 +22,7 @@ export interface JsonlRpcClientOptions {
   logger?: JsonlRpcClientLogger;
   onNotification?: (notification: JsonRpcNotificationEnvelope) => void;
   onRequest?: (request: JsonRpcRequestEnvelope) => Promise<unknown> | unknown;
+  onProtocolError?: (error: Error) => void;
 }
 
 interface PendingRequest {
@@ -63,6 +64,7 @@ export class JsonlRpcClient {
   private readonly transport: string;
   private readonly onNotification?: (notification: JsonRpcNotificationEnvelope) => void;
   private readonly onRequest?: (request: JsonRpcRequestEnvelope) => Promise<unknown> | unknown;
+  private readonly onProtocolError?: (error: Error) => void;
   private readonly pending = new Map<string, PendingRequest>();
   private readonly decoder = new StringDecoder("utf8");
 
@@ -79,6 +81,7 @@ export class JsonlRpcClient {
     this.transport = options.transport ?? "app-server";
     this.onNotification = options.onNotification;
     this.onRequest = options.onRequest;
+    this.onProtocolError = options.onProtocolError;
 
     childProcess.stdout.on("data", this.handleStdoutData);
     childProcess.on("error", this.handleChildError);
@@ -227,7 +230,9 @@ export class JsonlRpcClient {
         },
         "WARN [runtime:codex] Failed to parse JSONL RPC message",
       );
-      this.failPendingRequests(new Error("Malformed JSONL RPC payload from Codex app-server"));
+      const protocolError = new Error("Malformed JSONL RPC payload from Codex app-server");
+      this.failPendingRequests(protocolError);
+      this.onProtocolError?.(protocolError);
       this.detach();
       return;
     }

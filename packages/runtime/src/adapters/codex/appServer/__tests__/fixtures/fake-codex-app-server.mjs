@@ -341,6 +341,30 @@ function handleRequest(message) {
     case "turn/start": {
       turnCounter += 1;
       turnId = `turn-${turnCounter}`;
+      if (scenario === "delayed-turn-start-requires-interrupt") {
+        waitingForInterrupt = true;
+        setTimeout(() => {
+          sendResult(id, {
+            turn: makeTurn("inProgress"),
+          });
+          sendNotification("turn/started", {
+            threadId,
+            turn: makeTurn("inProgress"),
+          });
+          interruptFallbackTimer = setTimeout(() => {
+            if (!waitingForInterrupt) {
+              return;
+            }
+            waitingForInterrupt = false;
+            completeTurn("No interrupt received", {
+              inputTokens: 1,
+              outputTokens: 1,
+            });
+          }, 250);
+        }, 50);
+        return;
+      }
+
       sendResult(id, {
         turn: makeTurn("inProgress"),
       });
@@ -348,6 +372,11 @@ function handleRequest(message) {
         threadId,
         turn: makeTurn("inProgress"),
       });
+
+      if (scenario === "malformed-after-turn-start") {
+        process.stdout.write("not-json\n");
+        return;
+      }
 
       if (scenario === "requires-interrupt") {
         waitingForInterrupt = true;

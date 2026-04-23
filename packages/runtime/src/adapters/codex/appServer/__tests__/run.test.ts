@@ -183,6 +183,54 @@ describe("codex app-server run transport", () => {
     expect(result.sessionId).toBe("thread-1");
   }, 15_000);
 
+  it("sends deferred turn/interrupt when abort happens before turn id is known", async () => {
+    const abortController = new AbortController();
+    const runPromise = runCodexAppServer(
+      createRunInput(
+        {
+          execution: {
+            startTimeoutMs: 500,
+            runTimeoutMs: 5_000,
+            abortController,
+          },
+        },
+        "delayed-turn-start-requires-interrupt",
+      ),
+    );
+    setTimeout(() => abortController.abort(), 10);
+
+    const result = await runPromise;
+    expect(result.outputText).toContain("Interrupted by client");
+    expect(result.sessionId).toBe("thread-1");
+  }, 15_000);
+
+  it("honors an AbortController that was already aborted before listener registration", async () => {
+    const abortController = new AbortController();
+    abortController.abort();
+
+    const result = await runCodexAppServer(
+      createRunInput(
+        {
+          execution: {
+            startTimeoutMs: 500,
+            runTimeoutMs: 5_000,
+            abortController,
+          },
+        },
+        "requires-interrupt",
+      ),
+    );
+
+    expect(result.outputText).toContain("Interrupted by client");
+    expect(result.sessionId).toBe("thread-1");
+  }, 15_000);
+
+  it("fails active run immediately on malformed JSONL during notification streaming", async () => {
+    await expect(
+      runCodexAppServer(createRunInput({}, "malformed-after-turn-start")),
+    ).rejects.toThrow("Malformed JSONL RPC payload from Codex app-server");
+  });
+
   it("normalizes structured turn failures into runtime adapter errors", async () => {
     await expect(runCodexAppServer(createRunInput({}, "turn-failed"))).rejects.toMatchObject({
       message: "simulated turn failure",

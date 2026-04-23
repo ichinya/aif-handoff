@@ -97,6 +97,7 @@ async function runCodexAppServerAttempt(
   logger?: CodexAppServerRunLogger,
 ): Promise<RuntimeRunResult> {
   const completion = createDeferredCompletion<void>();
+  completion.promise.catch(() => undefined);
   const launch = spawnCodexAppServerProcess({
     input: toLaunchInput(input),
     logger,
@@ -153,30 +154,38 @@ async function runCodexAppServerAttempt(
     logger,
   });
   const sendInterruptIfReady = (): void => {
-    if (!interruptRequested || !threadId || !turnId || interruptInFlight || completion.isSettled()) {
+    if (
+      !interruptRequested ||
+      !threadId ||
+      !turnId ||
+      interruptInFlight ||
+      completion.isSettled()
+    ) {
       return;
     }
 
+    const interruptThreadId = threadId;
+    const interruptTurnId = turnId;
     logger?.debug?.(
       {
         runtimeId: input.runtimeId,
         profileId: input.profileId ?? null,
         transport: "app-server",
-        threadId,
-        turnId,
+        threadId: interruptThreadId,
+        turnId: interruptTurnId,
       },
       "DEBUG [runtime:codex] Abort requested, sending turn/interrupt",
     );
 
-    interruptInFlight = requestInterrupt(client, threadId, turnId, logger)
+    interruptInFlight = requestInterrupt(client, interruptThreadId, interruptTurnId, logger)
       .catch((error) => {
         logger?.error?.(
           {
             runtimeId: input.runtimeId,
             profileId: input.profileId ?? null,
             transport: "app-server",
-            threadId,
-            turnId,
+            threadId: interruptThreadId,
+            turnId: interruptTurnId,
             error: error instanceof Error ? error.message : String(error),
           },
           "ERROR [runtime:codex] Failed to interrupt app-server turn",

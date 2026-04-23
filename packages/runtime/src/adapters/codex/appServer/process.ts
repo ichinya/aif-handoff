@@ -212,7 +212,7 @@ export function spawnCodexAppServerProcess(
     IS_WINDOWS && !executablePath.toLowerCase().endsWith(".exe")
       ? spawn(
           process.env.ComSpec ?? "cmd.exe",
-          ["/d", "/c", [executablePath, ...args].map(quoteIfNeeded).join(" ")],
+          ["/d", "/c", buildWindowsAppServerCommandLine(executablePath, args)],
           {
             cwd,
             env: envStats.env,
@@ -409,6 +409,19 @@ async function waitForExit(
   });
 }
 
-function quoteIfNeeded(arg: string): string {
-  return arg.includes(" ") || arg.includes('"') ? `"${arg.replace(/"/g, '\\"')}"` : arg;
+export function buildWindowsAppServerCommandLine(executablePath: string, args: string[]): string {
+  return [executablePath, ...args].map(quoteSafeWindowsShellArg).join(" ");
+}
+
+function quoteSafeWindowsShellArg(arg: string): string {
+  assertSafeWindowsShellArg(arg);
+  return /[\s()]/.test(arg) ? `"${arg}"` : arg;
+}
+
+function assertSafeWindowsShellArg(arg: string): void {
+  if (/[\r\n&|<>^%"]/.test(arg)) {
+    throw new Error(
+      "Unsafe Codex app-server command argument contains Windows shell metacharacters",
+    );
+  }
 }
