@@ -123,7 +123,7 @@ const envSchema = z.object({
       }
       return value;
     }, z.boolean())
-    .default(true),
+    .default(false),
   AIF_ENABLE_CODEX_LOGIN_PROXY: z
     .preprocess((value) => {
       if (typeof value === "string") {

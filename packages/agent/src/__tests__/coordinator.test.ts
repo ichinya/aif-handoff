@@ -1,8 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { tasks, projects, runtimeProfiles } from "@aif/shared";
+import { tasks, projects, runtimeProfiles, resetEnvCache } from "@aif/shared";
 import { createTestDb } from "@aif/shared/server";
 import { RuntimeExecutionError } from "@aif/runtime";
 import { eq } from "drizzle-orm";
+
+// Flag defaults to false (opt-in). Coordinator tests assert on persisted
+// limitSnapshot, which requires the gate to be open.
+process.env.AIF_USAGE_LIMITS_ENABLED = "true";
+resetEnvCache();
 
 // Set up test db
 const testDb = { current: createTestDb() };

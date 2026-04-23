@@ -6,6 +6,7 @@
 
 import type { RuntimeLimitSnapshot } from "@aif/runtime";
 import {
+  getEnv,
   logger,
   mapSafeRuntimeErrorReason,
   redactProviderTextForLogs,
@@ -80,7 +81,12 @@ function resolveRetryAfter(err: unknown): {
   limitSnapshot: RuntimeLimitSnapshot | null;
 } {
   const runtimeError = findRuntimeExecutionError(err);
-  const limitSnapshot = runtimeError?.limitSnapshot ?? null;
+  // When usage-limits feature is disabled, don't persist the limit snapshot
+  // onto the task. Retry/backoff still applies — we just skip the surface
+  // that feeds the (also-gated) UI.
+  const limitSnapshot = getEnv().AIF_USAGE_LIMITS_ENABLED
+    ? (runtimeError?.limitSnapshot ?? null)
+    : null;
 
   if (runtimeError?.resetAt) {
     const resetAtMs = Date.parse(runtimeError.resetAt);
@@ -126,7 +132,9 @@ export function classifyStageError(input: StageErrorInput): ErrorRecovery {
   if (runtimeError && NON_RETRYABLE_RUNTIME_CATEGORIES.has(runtimeError.category)) {
     const safeReason = mapSafeRuntimeErrorReason(runtimeError);
     const blockedReason = `${safeReason.reason} Manual action required before retry.`;
-    const limitSnapshot = runtimeError.limitSnapshot ?? null;
+    const limitSnapshot = getEnv().AIF_USAGE_LIMITS_ENABLED
+      ? (runtimeError.limitSnapshot ?? null)
+      : null;
 
     logActivity(
       taskId,

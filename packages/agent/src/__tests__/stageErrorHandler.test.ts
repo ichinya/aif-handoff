@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { RuntimeExecutionError, type RuntimeLimitSnapshot } from "@aif/runtime";
+import { resetEnvCache } from "@aif/shared";
+
+// Flag defaults to false (opt-in). These tests assert on limitSnapshot
+// persistence, which requires the gate to be open.
+process.env.AIF_USAGE_LIMITS_ENABLED = "true";
+resetEnvCache();
 
 const { mockWarn, mockError } = vi.hoisted(() => ({
   mockWarn: vi.fn(),

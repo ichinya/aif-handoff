@@ -6,9 +6,9 @@ import {
   createRuntimeMemoryCache,
   createRuntimeModelDiscoveryService,
   createRuntimeWorkflowSpec,
-  extractLatestRuntimeLimitSnapshot,
-  extractRuntimeLimitSnapshotFromError,
-  observeRuntimeLimitEvent,
+  extractLatestRuntimeLimitSnapshot as extractLatestRuntimeLimitSnapshotRaw,
+  extractRuntimeLimitSnapshotFromError as extractRuntimeLimitSnapshotFromErrorRaw,
+  observeRuntimeLimitEvent as observeRuntimeLimitEventRaw,
   redactResolvedRuntimeProfile,
   resolveAdapterCapabilities,
   resolveRuntimeProfile,
@@ -48,11 +48,32 @@ let modelDiscoveryService: RuntimeModelDiscoveryService | null = null;
 const runtimeLimitStateCache = createRuntimeMemoryCache<string>({ defaultTtlMs: 30_000 });
 const runtimeLimitBroadcastCache = createRuntimeMemoryCache<string>({ defaultTtlMs: 30_000 });
 
-export {
-  extractLatestRuntimeLimitSnapshot,
-  extractRuntimeLimitSnapshotFromError,
-  observeRuntimeLimitEvent,
-};
+/**
+ * Wrappers that short-circuit the limit-observation pipeline when
+ * `AIF_USAGE_LIMITS_ENABLED=false`. Callers (this file + chat route) import
+ * these wrapped versions so a disabled deployment never parses stream events
+ * for limit snapshots, never persists them, never broadcasts them.
+ */
+export function observeRuntimeLimitEvent(
+  ...args: Parameters<typeof observeRuntimeLimitEventRaw>
+): ReturnType<typeof observeRuntimeLimitEventRaw> {
+  if (!getEnv().AIF_USAGE_LIMITS_ENABLED) return args[1] ?? null;
+  return observeRuntimeLimitEventRaw(...args);
+}
+
+export function extractLatestRuntimeLimitSnapshot(
+  ...args: Parameters<typeof extractLatestRuntimeLimitSnapshotRaw>
+): ReturnType<typeof extractLatestRuntimeLimitSnapshotRaw> {
+  if (!getEnv().AIF_USAGE_LIMITS_ENABLED) return null;
+  return extractLatestRuntimeLimitSnapshotRaw(...args);
+}
+
+export function extractRuntimeLimitSnapshotFromError(
+  ...args: Parameters<typeof extractRuntimeLimitSnapshotFromErrorRaw>
+): ReturnType<typeof extractRuntimeLimitSnapshotFromErrorRaw> {
+  if (!getEnv().AIF_USAGE_LIMITS_ENABLED) return null;
+  return extractRuntimeLimitSnapshotFromErrorRaw(...args);
+}
 
 export async function getApiRuntimeRegistry(): Promise<RuntimeRegistry> {
   if (!runtimeRegistryPromise) {
@@ -112,6 +133,10 @@ function broadcastRuntimeLimitUpdate(input: {
   runtimeProfileId: string;
   signature: string;
 }): void {
+  // Skip WS fan-out entirely when usage-limits feature is disabled —
+  // the frontend UI that reacts to `project:runtime_limit_updated` is
+  // gated on the same flag, so broadcasting is wasted work.
+  if (!getEnv().AIF_USAGE_LIMITS_ENABLED) return;
   const projectId = input.projectId ?? null;
   if (!projectId) {
     log.debug(

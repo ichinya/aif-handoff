@@ -327,6 +327,10 @@ function sanitizeRuntimeInput(text: string, adapter?: RuntimeAdapter): string {
 function normalizeOptionalRuntimeLimitSnapshot(
   snapshot: RuntimeLimitSnapshot | null | undefined,
 ): RuntimeLimitSnapshot | null {
+  // Skip exposure entirely when usage-limits feature is disabled — the
+  // client UI surfaces are gated on the same flag, so forwarding a snapshot
+  // just wastes bytes and risks stale UI in disabled deployments.
+  if (!getEnv().AIF_USAGE_LIMITS_ENABLED) return null;
   return snapshot ? sanitizeRuntimeLimitSnapshotForExposure(snapshot, "chat") : null;
 }
 

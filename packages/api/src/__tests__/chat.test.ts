@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 import { RuntimeExecutionError, type RuntimeAdapter, type RuntimeRunInput } from "@aif/runtime";
+import { resetEnvCache } from "@aif/shared";
+
+// Flag defaults to false (opt-in). These tests assert on runtime limit
+// snapshots being emitted to chat responses, which needs the gate open.
+process.env.AIF_USAGE_LIMITS_ENABLED = "true";
+resetEnvCache();
 
 const mockFindProjectById = vi.fn();
 const mockFindTaskById = vi.fn();
@@ -119,6 +125,7 @@ vi.mock("@aif/shared", async (importOriginal) => {
       AGENT_CHAT_MAX_TURNS: 50,
       AIF_DEFAULT_RUNTIME_ID: "claude",
       AIF_DEFAULT_PROVIDER_ID: "anthropic",
+      AIF_USAGE_LIMITS_ENABLED: true,
     }),
   };
 });

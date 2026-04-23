@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 import { createTestDb } from "@aif/shared/server";
@@ -62,8 +62,15 @@ function createApp() {
 
 describe("runtimeProfiles API", () => {
   let app: ReturnType<typeof createApp>;
+  let previousUsageLimitsEnv: string | undefined;
 
   beforeEach(() => {
+    previousUsageLimitsEnv = process.env.AIF_USAGE_LIMITS_ENABLED;
+    // Flag defaults to false (opt-in). Most tests here exercise the live
+    // refresh path, so enable it per-test. Cases that need the disabled
+    // path override and restore this inside the test body.
+    process.env.AIF_USAGE_LIMITS_ENABLED = "true";
+    resetEnvCache();
     testDb.current = createTestDb();
     app = createApp();
     mockValidateConnection.mockReset();
@@ -107,6 +114,15 @@ describe("runtimeProfiles API", () => {
         },
       },
     ]);
+  });
+
+  afterEach(() => {
+    if (previousUsageLimitsEnv === undefined) {
+      delete process.env.AIF_USAGE_LIMITS_ENABLED;
+    } else {
+      process.env.AIF_USAGE_LIMITS_ENABLED = previousUsageLimitsEnv;
+    }
+    resetEnvCache();
   });
 
   it("lists runtime descriptors", async () => {

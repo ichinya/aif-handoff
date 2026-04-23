@@ -30,6 +30,7 @@ import { useChat } from "@/hooks/useChat";
 import { useChatSessions } from "@/hooks/useChatSessions";
 import { useTask } from "@/hooks/useTasks";
 import { useEffectiveChatRuntime, useRuntimeProfiles } from "@/hooks/useRuntimeProfiles";
+import { useUsageLimitsEnabled } from "@/hooks/useSettings";
 import { toAttachmentPayload } from "@/components/task/useTaskDetailActions";
 import { getRuntimeLimitDisplay } from "@/lib/runtimeLimits";
 import { formatRuntimeProfileName } from "@/lib/runtimeProfiles";
@@ -202,13 +203,16 @@ export function ChatPanel({
       : "n/a";
   const activeRuntimeModel =
     displayProfile?.defaultModel ?? effectiveChatRuntime?.resolved?.model ?? "auto";
-  const chatRuntimeLimitDisplay = getRuntimeLimitDisplay(
-    chatRuntimeLimitSnapshot ?? displayProfile?.runtimeLimitSnapshot ?? null,
-    {
-      checkedAt:
-        displayProfile?.runtimeLimitUpdatedAt ?? chatRuntimeLimitSnapshot?.checkedAt ?? null,
-    },
-  );
+  const usageLimitsEnabled = useUsageLimitsEnabled();
+  const chatRuntimeLimitDisplay = usageLimitsEnabled
+    ? getRuntimeLimitDisplay(
+        chatRuntimeLimitSnapshot ?? displayProfile?.runtimeLimitSnapshot ?? null,
+        {
+          checkedAt:
+            displayProfile?.runtimeLimitUpdatedAt ?? chatRuntimeLimitSnapshot?.checkedAt ?? null,
+        },
+      )
+    : null;
   const chatRuntimeLimitTone = chatRuntimeLimitDisplay?.tone ?? "warning";
   const chatRuntimeLimitContainerClassName = cn(
     "mt-2 border px-2.5 py-2",
@@ -390,21 +394,23 @@ export function ChatPanel({
               </div>
             </div>
           )}
-          {chatErrorCode === "CHAT_USAGE_LIMIT" && !chatRuntimeLimitDisplay && (
-            <div className="px-3 pb-2">
-              <div className="rounded border border-amber-500/50 bg-amber-500/15 p-2">
-                <Badge
-                  variant="outline"
-                  className="border-amber-600/60 text-amber-700 dark:border-amber-400/50 dark:text-amber-300"
-                >
-                  Usage Limit Reached
-                </Badge>
-                <p className="mt-1 text-xs text-amber-700/90 dark:text-amber-200/90">
-                  Runtime usage limit is currently exhausted. Wait for reset time and send again.
-                </p>
+          {usageLimitsEnabled &&
+            chatErrorCode === "CHAT_USAGE_LIMIT" &&
+            !chatRuntimeLimitDisplay && (
+              <div className="px-3 pb-2">
+                <div className="rounded border border-amber-500/50 bg-amber-500/15 p-2">
+                  <Badge
+                    variant="outline"
+                    className="border-amber-600/60 text-amber-700 dark:border-amber-400/50 dark:text-amber-300"
+                  >
+                    Usage Limit Reached
+                  </Badge>
+                  <p className="mt-1 text-xs text-amber-700/90 dark:text-amber-200/90">
+                    Runtime usage limit is currently exhausted. Wait for reset time and send again.
+                  </p>
+                </div>
               </div>
-            </div>
-          )}
+            )}
           {(isLoadingMessages || isLoadingSessions) && (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">
               <Spinner size="lg" />

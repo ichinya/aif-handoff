@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Bell, Moon, Sun, Command, ChartColumn, Cpu, Map, Settings, Activity } from "lucide-react";
 import { useTheme } from "@/hooks/useTheme";
 import { useEffectiveChatRuntime } from "@/hooks/useRuntimeProfiles";
+import { useUsageLimitsEnabled } from "@/hooks/useSettings";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ProjectSelector } from "@/components/project/ProjectSelector";
@@ -68,6 +69,7 @@ export function Header({
   const [roadmapOpen, setRoadmapOpen] = useState(false);
   const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
   const [runtimeUsageOpen, setRuntimeUsageOpen] = useState(false);
+  const usageLimitsEnabled = useUsageLimitsEnabled();
   const isCompact = density === "compact";
   const currentRuntimeProfileLabel = !selectedProject
     ? "No project"
@@ -199,18 +201,20 @@ export function Header({
             <ChartColumn className="h-3.5 w-3.5" />
             <span className="hidden md:inline">METRICS</span>
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setRuntimeUsageOpen(true)}
-            disabled={!selectedProject}
-            className="gap-1 font-mono text-3xs"
-            aria-label="Runtime usage"
-            title={runtimeUsageButtonTitle}
-          >
-            <Activity className="h-3.5 w-3.5" />
-            <span className="hidden md:inline">USAGE</span>
-          </Button>
+          {usageLimitsEnabled && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setRuntimeUsageOpen(true)}
+              disabled={!selectedProject}
+              className="gap-1 font-mono text-3xs"
+              aria-label="Runtime usage"
+              title={runtimeUsageButtonTitle}
+            >
+              <Activity className="h-3.5 w-3.5" />
+              <span className="hidden md:inline">USAGE</span>
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -275,7 +279,7 @@ export function Header({
         onOpenChange={setGlobalSettingsOpen}
         projectId={selectedProject?.id ?? null}
       />
-      {selectedProject && (
+      {selectedProject && usageLimitsEnabled && (
         <RuntimeUsageDialog
           open={runtimeUsageOpen}
           onOpenChange={setRuntimeUsageOpen}

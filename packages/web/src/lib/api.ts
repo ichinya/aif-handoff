@@ -97,6 +97,7 @@ export interface SettingsResponse {
   useSubagents: boolean;
   maxReviewIterations: number;
   autoReviewStrategy: "full_re_review" | "closure_first";
+  usageLimitsEnabled: boolean;
   runtimeReadiness: {
     availableRuntimeCount: number;
     runtimeProfileCount: number;

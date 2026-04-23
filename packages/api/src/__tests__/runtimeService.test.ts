@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeLimitSnapshot } from "@aif/runtime";
+import { resetEnvCache } from "@aif/shared";
+
+// Flag defaults to false (opt-in). These tests exercise the runtime limit
+// observation + broadcast pipeline which is fully gated, so enable it.
+process.env.AIF_USAGE_LIMITS_ENABLED = "true";
+resetEnvCache();
 
 const mockLog = {
   debug: vi.fn(),
@@ -13,6 +19,7 @@ const mockGetEnv = vi.fn(() => ({
   AIF_RUNTIME_MODULES: [] as string[],
   AIF_DEFAULT_RUNTIME_ID: "claude",
   AIF_DEFAULT_PROVIDER_ID: "anthropic",
+  AIF_USAGE_LIMITS_ENABLED: true,
   API_RUNTIME_START_TIMEOUT_MS: 60_000,
   API_RUNTIME_RUN_TIMEOUT_MS: 120_000,
 }));
@@ -219,6 +226,7 @@ describe("runtime service", () => {
       AIF_RUNTIME_MODULES: [],
       AIF_DEFAULT_RUNTIME_ID: "claude",
       AIF_DEFAULT_PROVIDER_ID: "anthropic",
+      AIF_USAGE_LIMITS_ENABLED: true,
       API_RUNTIME_START_TIMEOUT_MS: 60_000,
       API_RUNTIME_RUN_TIMEOUT_MS: 120_000,
     });
@@ -242,6 +250,7 @@ describe("runtime service", () => {
       AIF_RUNTIME_MODULES: ["@org/runtime-a", "file:///runtime-b.mjs"],
       AIF_DEFAULT_RUNTIME_ID: "claude",
       AIF_DEFAULT_PROVIDER_ID: "anthropic",
+      AIF_USAGE_LIMITS_ENABLED: true,
       API_RUNTIME_START_TIMEOUT_MS: 60_000,
       API_RUNTIME_RUN_TIMEOUT_MS: 120_000,
     });
@@ -608,6 +617,7 @@ describe("runtime service", () => {
       AIF_RUNTIME_MODULES: [],
       AIF_DEFAULT_RUNTIME_ID: "claude",
       AIF_DEFAULT_PROVIDER_ID: "anthropic",
+      AIF_USAGE_LIMITS_ENABLED: true,
       API_RUNTIME_START_TIMEOUT_MS: 90_000,
       API_RUNTIME_RUN_TIMEOUT_MS: 240_000,
     });

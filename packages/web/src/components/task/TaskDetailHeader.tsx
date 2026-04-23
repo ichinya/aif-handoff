@@ -10,6 +10,7 @@ import { formatTokenCount, formatUsd } from "@/lib/formatters";
 import { Tabs } from "@/components/ui/tabs";
 import { AlertBox } from "@/components/ui/alert-box";
 import { getRuntimeLimitDisplay } from "@/lib/runtimeLimits";
+import { useUsageLimitsEnabled } from "@/hooks/useSettings";
 
 export type TaskDetailTab = "implementation" | "review" | "comments" | "activity";
 
@@ -79,10 +80,13 @@ export function TaskDetailHeader({
   const visibleActions = (ACTION_BUTTONS_BY_STATUS[task.status] ?? []).filter(
     (action) => action.visible?.(task) ?? true,
   );
-  const runtimeLimitDisplay = getRuntimeLimitDisplay(task.runtimeLimitSnapshot, {
-    taskRetryAfter: task.retryAfter ?? null,
-    checkedAt: task.runtimeLimitUpdatedAt ?? null,
-  });
+  const usageLimitsEnabled = useUsageLimitsEnabled();
+  const runtimeLimitDisplay = usageLimitsEnabled
+    ? getRuntimeLimitDisplay(task.runtimeLimitSnapshot, {
+        taskRetryAfter: task.retryAfter ?? null,
+        checkedAt: task.runtimeLimitUpdatedAt ?? null,
+      })
+    : null;
   // Pause is also shown in `backlog` so users can park a task that auto-queue
   // would otherwise advance — paused backlog tasks are skipped by both the
   // scheduler and the auto-queue advancer.

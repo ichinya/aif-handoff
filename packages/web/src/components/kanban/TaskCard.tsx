@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { TaskTagsList } from "@/components/ui/task-tags-list";
 import { timeAgo } from "@/lib/utils";
 import { getRuntimeLimitDisplay } from "@/lib/runtimeLimits";
+import { useUsageLimitsEnabled } from "@/hooks/useSettings";
 
 const PRIORITY_LABELS: Record<number, { label: string; className: string }> = {
   0: { label: "None", className: "hidden" },
@@ -47,10 +48,13 @@ export function TaskCard({
   const showReorder =
     task.status === "backlog" && (onMoveUp !== undefined || onMoveDown !== undefined);
   const showPauseToggle = task.status === "backlog" && onTogglePause !== undefined;
-  const runtimeLimitDisplay = getRuntimeLimitDisplay(task.runtimeLimitSnapshot, {
-    taskRetryAfter: task.retryAfter ?? null,
-    checkedAt: task.runtimeLimitUpdatedAt ?? null,
-  });
+  const usageLimitsEnabled = useUsageLimitsEnabled();
+  const runtimeLimitDisplay = usageLimitsEnabled
+    ? getRuntimeLimitDisplay(task.runtimeLimitSnapshot, {
+        taskRetryAfter: task.retryAfter ?? null,
+        checkedAt: task.runtimeLimitUpdatedAt ?? null,
+      })
+    : null;
 
   const stop = (e: MouseEvent) => {
     e.stopPropagation();
