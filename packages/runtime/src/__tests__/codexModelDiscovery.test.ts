@@ -58,31 +58,37 @@ describe("codex app-server model discovery env", () => {
 describe("codex app-server startup retry", () => {
   function getRetryWarnings(logger: { warn: ReturnType<typeof vi.fn> }) {
     return logger.warn.mock.calls.filter(
-      (call) =>
-        call[1] === "WARN [runtime:codex] Codex app-server port handoff failed, retrying startup",
+      (call) => call[1] === "WARN [runtime:codex] Codex app-server stdio startup failed, retrying",
     );
   }
 
-  it("retries startup when the first reserved port handoff fails", async () => {
-    const reservePort = vi.fn().mockResolvedValueOnce(41001).mockResolvedValueOnce(41002);
+  it("retries startup when the first stdio initialize attempt fails", async () => {
+    const firstLaunch = {
+      process: { pid: 101 } as never,
+      stderrTail: ["first failure details"],
+      executablePath: "codex",
+      args: ["app-server"],
+      cwd: undefined,
+    };
+    const secondLaunch = {
+      process: { pid: 102 } as never,
+      stderrTail: [],
+      executablePath: "codex",
+      args: ["app-server"],
+      cwd: undefined,
+    };
     const spawnCodexAppServer = vi
       .fn()
-      .mockReturnValueOnce({
-        process: { pid: 101 } as never,
-        stderr: ["first failure details"],
-      })
-      .mockReturnValueOnce({
-        process: { pid: 102 } as never,
-        stderr: [],
-      });
+      .mockReturnValueOnce(firstLaunch)
+      .mockReturnValueOnce(secondLaunch);
     const connectJsonRpcClient = vi
       .fn()
-      .mockRejectedValueOnce(new Error("websocket connect failed"))
+      .mockRejectedValueOnce(new Error("stdio connect failed"))
       .mockResolvedValueOnce({
-        request: vi.fn(),
+        request: vi.fn().mockResolvedValue({}),
         close: vi.fn(),
       });
-    const terminateProcess = vi.fn();
+    const terminateProcess = vi.fn().mockResolvedValue(undefined);
     const sleep = vi.fn().mockResolvedValue(undefined);
     const logger = {
       debug: vi.fn(),
@@ -91,7 +97,6 @@ describe("codex app-server startup retry", () => {
     };
 
     const startup = await startCodexAppServerWithRetry(createModelDiscoveryInput(), logger, {
-      reservePort,
       spawnCodexAppServer,
       connectJsonRpcClient,
       terminateProcess,
@@ -99,23 +104,27 @@ describe("codex app-server startup retry", () => {
     });
 
     expect(startup.attempt).toBe(2);
-    expect(startup.listenPort).toBe(41002);
-    expect(startup.listenUrl).toBe("ws://127.0.0.1:41002");
+    expect(startup.executablePath).toBe("codex");
     expect(terminateProcess).toHaveBeenCalledTimes(1);
-    expect(terminateProcess).toHaveBeenCalledWith(expect.objectContaining({ pid: 101 }));
+    expect(terminateProcess).toHaveBeenCalledWith(firstLaunch);
     expect(getRetryWarnings(logger)).toHaveLength(1);
     expect(logger.error).not.toHaveBeenCalled();
     expect(sleep).toHaveBeenCalledTimes(1);
   });
 
   it("logs error and throws after startup retries are exhausted", async () => {
-    const reservePort = vi.fn().mockResolvedValue(43000);
-    const spawnCodexAppServer = vi.fn().mockReturnValue({
+    const launch = {
       process: { pid: 777 } as never,
-      stderr: ["fatal startup stderr"],
+      stderrTail: ["fatal startup stderr"],
+      executablePath: "codex",
+      args: ["app-server"],
+      cwd: undefined,
+    };
+    const spawnCodexAppServer = vi.fn().mockReturnValue({
+      ...launch,
     });
-    const connectJsonRpcClient = vi.fn().mockRejectedValue(new Error("connect timeout"));
-    const terminateProcess = vi.fn();
+    const connectJsonRpcClient = vi.fn().mockRejectedValue(new Error("initialize timeout"));
+    const terminateProcess = vi.fn().mockResolvedValue(undefined);
     const sleep = vi.fn().mockResolvedValue(undefined);
     const logger = {
       debug: vi.fn(),
@@ -125,7 +134,6 @@ describe("codex app-server startup retry", () => {
 
     await expect(
       startCodexAppServerWithRetry(createModelDiscoveryInput(), logger, {
-        reservePort,
         spawnCodexAppServer,
         connectJsonRpcClient,
         terminateProcess,

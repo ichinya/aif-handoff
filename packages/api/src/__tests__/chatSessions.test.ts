@@ -209,6 +209,48 @@ describe("chat session API", () => {
       expect(body.some((row: { id: string }) => row.id.startsWith("sdk:"))).toBe(true);
     });
 
+    it("uses runtime-prefixed ids for non-sdk session discovery and marks app-server as local source", async () => {
+      mockResolveApiRuntimeContext.mockResolvedValueOnce({
+        project: { id: "proj-1", rootPath: "/tmp/proj" },
+        adapter: runtimeAdapter,
+        resolvedProfile: {
+          source: "project_default",
+          profileId: "profile-codex-app-server",
+          runtimeId: "codex",
+          providerId: "openai",
+          transport: "app-server",
+          model: null,
+          baseUrl: null,
+          apiKey: null,
+          apiKeyEnvVar: null,
+          headers: {},
+          options: {},
+        },
+        selectionSource: "project_default",
+      });
+      mockListSessions.mockResolvedValue([
+        {
+          id: "thread-123",
+          title: "Codex App Server Session",
+          createdAt: "2026-04-01T12:00:00Z",
+          updatedAt: "2026-04-02T00:00:00Z",
+        },
+      ]);
+
+      const res = await app.request("/chat/sessions?projectId=proj-1");
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const runtimeSession = body.find((row: { id: string }) => row.id.includes("thread-123"));
+      expect(runtimeSession).toBeDefined();
+      expect(runtimeSession.id).toBe("runtime:codex:thread-123");
+      expect(runtimeSession.source).toBe("cli");
+      expect(mockListSessions).toHaveBeenCalledWith(
+        expect.objectContaining({
+          transport: "app-server",
+        }),
+      );
+    });
+
     it("filters out already linked runtime sessions", async () => {
       mockListChatSessions.mockReturnValue([
         { ...SESSION_ROW, runtimeSessionId: "runtime-linked" },
@@ -383,6 +425,39 @@ describe("chat session API", () => {
       expect(body.title).toBe("Runtime Session");
     });
 
+    it("marks runtime-prefixed codex app-server sessions as local source", async () => {
+      mockFindRuntimeProfileById.mockReturnValue({
+        id: "profile-codex-app-server",
+        projectId: "proj-1",
+        name: "Codex App Server",
+        runtimeId: "codex",
+        providerId: "openai",
+        transport: "app-server",
+        baseUrl: null,
+        apiKeyEnvVar: "OPENAI_API_KEY",
+        defaultModel: "gpt-5.4",
+        headersJson: JSON.stringify({}),
+        optionsJson: JSON.stringify({}),
+        enabled: 1,
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      });
+      mockGetSession.mockResolvedValue({
+        id: "thread-123",
+        title: "Codex App Server Session",
+        createdAt: "2026-04-01T00:00:00Z",
+        updatedAt: "2026-04-01T12:00:00Z",
+      });
+
+      const res = await app.request(
+        "/chat/sessions/runtime:codex:thread-123?projectId=proj-1&runtimeProfileId=profile-codex-app-server",
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.id).toBe("runtime:codex:thread-123");
+      expect(body.source).toBe("cli");
+    });
+
     it("passes runtime profile context to virtual session lookup", async () => {
       mockFindRuntimeProfileById.mockReturnValue({
         id: "profile-claude",
@@ -417,6 +492,7 @@ describe("chat session API", () => {
           runtimeId: "claude",
           providerId: "anthropic",
           profileId: "profile-claude",
+          transport: "sdk",
           sessionId: "abc-123",
           options: expect.objectContaining({
             region: "us",
@@ -522,6 +598,7 @@ describe("chat session API", () => {
           runtimeId: "claude",
           providerId: "anthropic",
           profileId: "profile-claude",
+          transport: "sdk",
           sessionId: "abc-123",
           options: expect.objectContaining({
             region: "us",

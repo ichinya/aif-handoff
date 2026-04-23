@@ -73,6 +73,27 @@ describe("validateResolvedRuntimeProfile", () => {
     expect(result.warnings.some((w) => w.includes("API key"))).toBe(false);
   });
 
+  it("app-server transport warns when codexCliPath missing", () => {
+    const result = validateResolvedRuntimeProfile(
+      profile({
+        transport: RuntimeTransport.APP_SERVER,
+        options: {},
+      }),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.warnings.some((w) => w.includes("codexCliPath"))).toBe(true);
+  });
+
+  it("app-server transport passes with codexCliPath", () => {
+    const result = validateResolvedRuntimeProfile(
+      profile({
+        transport: RuntimeTransport.APP_SERVER,
+        options: { codexCliPath: "/usr/bin/codex" },
+      }),
+    );
+    expect(result.ok).toBe(true);
+  });
+
   it("API transport warns when API key missing", () => {
     const result = validateResolvedRuntimeProfile(
       profile({

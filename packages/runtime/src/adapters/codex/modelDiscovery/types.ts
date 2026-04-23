@@ -1,35 +1,30 @@
-import type { ChildProcess } from "node:child_process";
+import type { RuntimeModelListInput } from "../../../types.js";
+import type { JsonRpcNotificationEnvelope } from "../appServer/protocol.js";
+import type { CodexAppServerLogger, CodexAppServerProcessContext } from "../appServer/process.js";
 
-export interface CodexModelDiscoveryLogger {
-  debug?(context: Record<string, unknown>, message: string): void;
-  info?(context: Record<string, unknown>, message: string): void;
-  warn?(context: Record<string, unknown>, message: string): void;
-  error?(context: Record<string, unknown>, message: string): void;
-}
+export type CodexModelDiscoveryLogger = CodexAppServerLogger;
 
 export interface JsonRpcClient {
-  request(method: string, params: Record<string, unknown>, timeoutMs: number): Promise<unknown>;
-  close(): Promise<void>;
+  request(method: string, params?: unknown, timeoutMs?: number): Promise<unknown>;
+  notify?(method: string, params?: unknown): Promise<void>;
+  close(reason?: string): void;
 }
 
-export interface AppServerLaunchContext {
-  process: ChildProcess;
-  stderr: string[];
+export interface JsonRpcClientConnectOptions {
+  runtimeId: string;
+  profileId?: string | null;
+  transport?: string;
+  requestTimeoutMs?: number;
+  logger?: CodexModelDiscoveryLogger;
+  onNotification?: (notification: JsonRpcNotificationEnvelope) => void;
 }
 
 export interface CodexModelDiscoveryStartupDeps {
-  reservePort: () => Promise<number>;
-  spawnCodexAppServer: (
-    executablePath: string,
-    listenUrl: string,
-    cwd: string | undefined,
-    env: Record<string, string>,
-  ) => AppServerLaunchContext;
+  spawnCodexAppServer: (input: RuntimeModelListInput) => CodexAppServerProcessContext;
   connectJsonRpcClient: (
-    listenUrl: string,
-    launch: AppServerLaunchContext,
-    timeoutMs: number,
+    launch: CodexAppServerProcessContext,
+    options: JsonRpcClientConnectOptions,
   ) => Promise<JsonRpcClient>;
-  terminateProcess: (process: ChildProcess) => void;
+  terminateProcess: (context: CodexAppServerProcessContext) => Promise<void>;
   sleep: (ms: number) => Promise<void>;
 }

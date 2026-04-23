@@ -5,6 +5,7 @@ import { TEST_USAGE_CONTEXT } from "./helpers/usageContext.js";
 const runCodexCliMock = vi.fn();
 const runCodexAgentApiMock = vi.fn();
 const runCodexSdkMock = vi.fn();
+const runCodexAppServerMock = vi.fn();
 const validateCodexAgentApiConnectionMock = vi.fn();
 const listCodexAppServerModelsMock = vi.fn();
 
@@ -31,6 +32,9 @@ vi.mock("../adapters/codex/modelDiscovery.js", async () => {
 
 vi.mock("../adapters/codex/sdk.js", () => ({
   runCodexSdk: (...args: unknown[]) => runCodexSdkMock(...args),
+}));
+vi.mock("../adapters/codex/appServer/run.js", () => ({
+  runCodexAppServer: (...args: unknown[]) => runCodexAppServerMock(...args),
 }));
 
 vi.mock("../adapters/codex/sessions.js", () => ({
@@ -60,6 +64,11 @@ describe("Codex adapter — SDK transport and capabilities", () => {
     runCodexCliMock.mockResolvedValue({ outputText: "cli-output", sessionId: null });
     runCodexAgentApiMock.mockResolvedValue({ outputText: "api-output", sessionId: null });
     runCodexSdkMock.mockResolvedValue({ outputText: "sdk-output", sessionId: "thread-1" });
+    runCodexAppServerMock.mockResolvedValue({
+      outputText: "app-server-output",
+      sessionId: "thread-app-1",
+      usage: null,
+    });
     validateCodexAgentApiConnectionMock.mockResolvedValue({ ok: true });
     listCodexAppServerModelsMock.mockReset();
     listCodexAppServerModelsMock.mockResolvedValue([]);
@@ -91,6 +100,15 @@ describe("Codex adapter — SDK transport and capabilities", () => {
       expect(result.outputText).toBe("api-output");
       expect(runCodexAgentApiMock).toHaveBeenCalledTimes(1);
     });
+
+    it("routes to app-server transport when transport is 'app-server'", async () => {
+      const adapter = createCodexRuntimeAdapter();
+      const result = await adapter.run(createRunInput({ transport: "app-server" }));
+
+      expect(result.outputText).toBe("app-server-output");
+      expect(runCodexAppServerMock).toHaveBeenCalledTimes(1);
+      expect(runCodexCliMock).not.toHaveBeenCalled();
+    });
   });
 
   describe("getEffectiveCapabilities", () => {
@@ -121,6 +139,17 @@ describe("Codex adapter — SDK transport and capabilities", () => {
       expect(caps.supportsSessionList).toBe(false);
     });
 
+    it("returns app-server capabilities with approvals and partial usage reporting", () => {
+      const adapter = createCodexRuntimeAdapter();
+      const caps = adapter.getEffectiveCapabilities!(RuntimeTransport.APP_SERVER);
+
+      expect(caps.supportsResume).toBe(true);
+      expect(caps.supportsSessionList).toBe(true);
+      expect(caps.supportsStreaming).toBe(true);
+      expect(caps.supportsApprovals).toBe(true);
+      expect(caps.usageReporting).toBe("partial");
+    });
+
     it("descriptor.capabilities matches CLI default transport", () => {
       const adapter = createCodexRuntimeAdapter();
       expect(adapter.descriptor.capabilities.supportsResume).toBe(true);
@@ -129,11 +158,12 @@ describe("Codex adapter — SDK transport and capabilities", () => {
   });
 
   describe("supported transports", () => {
-    it("lists SDK, CLI, and API as supported", () => {
+    it("lists SDK, CLI, app-server, and API as supported", () => {
       const adapter = createCodexRuntimeAdapter();
       expect(adapter.descriptor.supportedTransports).toEqual([
         RuntimeTransport.SDK,
         RuntimeTransport.CLI,
+        RuntimeTransport.APP_SERVER,
         RuntimeTransport.API,
       ]);
     });

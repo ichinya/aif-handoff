@@ -64,6 +64,11 @@ describe("Timeout coverage guard", () => {
       const cli = readAdapterSource("codex/cli.ts");
       expect(hasAnyPattern(cli, PROCESS_TIMEOUT_PATTERNS)).toBe(true);
     });
+
+    it("Codex app-server (appServer/run.ts)", () => {
+      const appServerRun = readAdapterSource("codex/appServer/run.ts");
+      expect(hasAnyPattern(appServerRun, PROCESS_TIMEOUT_PATTERNS)).toBe(true);
+    });
   });
 
   describe("HTTP transports must support runTimeoutMs", () => {
@@ -86,6 +91,7 @@ describe("Timeout coverage guard", () => {
   describe("All adapters import from shared timeouts or have equivalent", () => {
     const TIMEOUT_IMPORT_PATTERNS = [
       'from "../../timeouts.js"',
+      'from "../../../timeouts.js"',
       "resolveRequestTimeoutMs", // OpenCode has its own equivalent
     ];
 
@@ -94,6 +100,7 @@ describe("Timeout coverage guard", () => {
       "Claude CLI": ["claude/cli.ts"],
       "Codex SDK": ["codex/sdk.ts"],
       "Codex CLI": ["codex/cli.ts"],
+      "Codex app-server": ["codex/appServer/run.ts"],
       "Codex API": ["codex/api.ts"],
       "OpenRouter API": ["openrouter/api.ts"],
     })) {

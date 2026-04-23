@@ -38,7 +38,7 @@ export function normalizeCodexSandboxMode(value: unknown): CodexSandboxMode | nu
 export function warnOnInvalidCodexPermissionOverride(input: {
   logger?: CodexPermissionLogger;
   runtimeId: string;
-  transport: "cli" | "sdk";
+  transport: "cli" | "sdk" | "app-server";
   field: "approvalPolicy" | "sandboxMode";
   rawValue: string | null;
   normalizedValue: string | null;

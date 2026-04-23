@@ -599,6 +599,116 @@ describe("Header", () => {
     expect(screen.getByText("441,684")).toBeDefined();
   });
 
+  it("treats Codex app-server transport as local account usage for grouping and heading labels", () => {
+    mockRuntimeProfiles = [
+      {
+        id: "profile-codex-sdk",
+        projectId: "project-1",
+        name: "SDK gpt-5.4",
+        runtimeId: "codex",
+        providerId: "openai",
+        transport: "sdk",
+        baseUrl: null,
+        apiKeyEnvVar: "OPENAI_API_KEY",
+        defaultModel: "gpt-5.4",
+        headers: {},
+        options: {},
+        enabled: true,
+        runtimeLimitSnapshot: {
+          source: "sdk_event",
+          status: "ok",
+          precision: "exact",
+          checkedAt: "2026-04-18T05:24:00.000Z",
+          providerId: "openai",
+          runtimeId: "codex",
+          profileId: "profile-codex-sdk",
+          primaryScope: "time",
+          resetAt: "2099-04-18T07:02:00.000Z",
+          warningThreshold: 10,
+          windows: [
+            {
+              scope: "time",
+              name: "5h",
+              percentRemaining: 96,
+              resetAt: "2099-04-18T07:02:00.000Z",
+            },
+          ],
+          providerMeta: {
+            accountId: "account-codex-1",
+            accountName: "Anton Ageev",
+            planType: "pro",
+            limitId: "codex",
+          },
+        },
+        runtimeLimitUpdatedAt: "2026-04-18T05:24:00.000Z",
+        lastUsage: {
+          inputTokens: 435229,
+          outputTokens: 6455,
+          totalTokens: 441684,
+        },
+        lastUsageAt: "2026-04-18T05:24:00.000Z",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        id: "profile-codex-app-server",
+        projectId: "project-1",
+        name: "App Server gpt-5.4",
+        runtimeId: "codex",
+        providerId: "openai",
+        transport: "app-server",
+        baseUrl: null,
+        apiKeyEnvVar: "OPENAI_API_KEY",
+        defaultModel: "gpt-5.4",
+        headers: {},
+        options: {},
+        enabled: true,
+        runtimeLimitSnapshot: {
+          source: "sdk_event",
+          status: "ok",
+          precision: "exact",
+          checkedAt: "2026-04-18T05:26:00.000Z",
+          providerId: "openai",
+          runtimeId: "codex",
+          profileId: "profile-codex-app-server",
+          primaryScope: "time",
+          resetAt: "2099-04-18T07:02:00.000Z",
+          warningThreshold: 10,
+          windows: [
+            {
+              scope: "time",
+              name: "5h",
+              percentRemaining: 95,
+              resetAt: "2099-04-18T07:02:00.000Z",
+            },
+          ],
+          providerMeta: {
+            accountId: "account-codex-1",
+            accountName: "Anton Ageev",
+            planType: "pro",
+            limitId: "codex",
+          },
+        },
+        runtimeLimitUpdatedAt: "2026-04-18T05:26:00.000Z",
+        lastUsage: {
+          inputTokens: 900,
+          outputTokens: 100,
+          totalTokens: 1000,
+        },
+        lastUsageAt: "2026-04-18T05:26:00.000Z",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+    ];
+
+    renderHeader();
+
+    fireEvent.click(screen.getByRole("button", { name: "Runtime usage" }));
+
+    expect(screen.getAllByText("Anton Ageev Pro codex/openai sdk/app-server")).toHaveLength(1);
+    expect(screen.getByText("Profiles: App Server gpt-5.4, SDK gpt-5.4")).toBeDefined();
+  });
+
   it("keeps local Codex profiles separate when account is shared but limit pool differs", () => {
     mockRuntimeProfiles = [
       {

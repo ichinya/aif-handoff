@@ -8,6 +8,7 @@ import {
   redactResolvedRuntimeProfile,
   resolveClaudeProviderIdentity,
   resolveRuntimeProfile,
+  RuntimeTransport,
 } from "@aif/runtime";
 import {
   getEnv,
@@ -110,9 +111,11 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isLocalCodexProfile(profile: { runtimeId: string; transport?: string | null }): boolean {
-  return (
-    profile.runtimeId === "codex" && (profile.transport === "sdk" || profile.transport === "cli")
-  );
+  return profile.runtimeId === "codex"
+    ? profile.transport === RuntimeTransport.SDK ||
+        profile.transport === RuntimeTransport.CLI ||
+        profile.transport === RuntimeTransport.APP_SERVER
+    : false;
 }
 
 function isClaudeProfile(profile: { runtimeId: string }): boolean {

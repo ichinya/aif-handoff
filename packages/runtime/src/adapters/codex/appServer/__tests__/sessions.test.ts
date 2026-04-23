@@ -1,0 +1,126 @@
+import { once } from "node:events";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { RuntimeTransport } from "../../../../types.js";
+
+const FIXTURE_PATH = fileURLToPath(
+  new URL("./fixtures/fake-codex-app-server.mjs", import.meta.url),
+);
+
+const activeChildren = new Set<ChildProcessWithoutNullStreams>();
+const spawnCodexAppServerProcessMock = vi.fn();
+const terminateCodexAppServerProcessMock = vi.fn();
+
+vi.mock("../process.js", () => ({
+  spawnCodexAppServerProcess: (...args: unknown[]) => spawnCodexAppServerProcessMock(...args),
+  terminateCodexAppServerProcess: (...args: unknown[]) =>
+    terminateCodexAppServerProcessMock(...args),
+}));
+
+const { getCodexAppServerSession, listCodexAppServerSessionEvents, listCodexAppServerSessions } =
+  await import("../sessions.js");
+
+function spawnFixtureProcess(): ChildProcessWithoutNullStreams {
+  const child = spawn(process.execPath, [FIXTURE_PATH], {
+    stdio: "pipe",
+    env: {
+      ...process.env,
+      FAKE_CODEX_SCENARIO: "session-discovery",
+    },
+  });
+  activeChildren.add(child);
+  return child;
+}
+
+async function terminateFixtureProcess(child: ChildProcessWithoutNullStreams): Promise<void> {
+  activeChildren.delete(child);
+  if (child.exitCode != null) {
+    return;
+  }
+  child.kill();
+  await once(child, "exit").catch(() => undefined);
+}
+
+beforeEach(() => {
+  spawnCodexAppServerProcessMock.mockReset();
+  terminateCodexAppServerProcessMock.mockReset();
+  spawnCodexAppServerProcessMock.mockImplementation(() => {
+    const child = spawnFixtureProcess();
+    return {
+      process: child,
+      stderrTail: [],
+      executablePath: process.execPath,
+      args: [FIXTURE_PATH],
+      cwd: undefined,
+    };
+  });
+  terminateCodexAppServerProcessMock.mockImplementation(
+    async (context: { process: ChildProcessWithoutNullStreams }) => {
+      await terminateFixtureProcess(context.process);
+    },
+  );
+});
+
+afterEach(async () => {
+  await Promise.all([...activeChildren].map((child) => terminateFixtureProcess(child)));
+});
+
+describe("codex app-server session discovery", () => {
+  it("lists threads via app-server thread/list", async () => {
+    const sessions = await listCodexAppServerSessions({
+      runtimeId: "codex",
+      providerId: "openai",
+      profileId: "profile-1",
+      projectRoot: "/tmp/fake",
+      transport: RuntimeTransport.APP_SERVER,
+      limit: 10,
+      options: {},
+    });
+
+    expect(sessions).toEqual([
+      expect.objectContaining({
+        id: "thread-1",
+        runtimeId: "codex",
+        providerId: "openai",
+        profileId: "profile-1",
+        title: "Stored Codex Thread",
+      }),
+    ]);
+  });
+
+  it("reads a thread and maps stored user/assistant messages", async () => {
+    const session = await getCodexAppServerSession({
+      runtimeId: "codex",
+      providerId: "openai",
+      profileId: "profile-1",
+      projectRoot: "/tmp/fake",
+      transport: RuntimeTransport.APP_SERVER,
+      sessionId: "thread-read",
+      options: {},
+    });
+    const events = await listCodexAppServerSessionEvents({
+      runtimeId: "codex",
+      providerId: "openai",
+      profileId: "profile-1",
+      projectRoot: "/tmp/fake",
+      transport: RuntimeTransport.APP_SERVER,
+      sessionId: "thread-read",
+      options: {},
+    });
+
+    expect(session?.id).toBe("thread-read");
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: "session-message",
+        message: "Stored user prompt",
+        data: expect.objectContaining({ role: "user" }),
+      }),
+      expect.objectContaining({
+        type: "session-message",
+        message: "Stored assistant answer",
+        data: expect.objectContaining({ role: "assistant" }),
+      }),
+    ]);
+  });
+});

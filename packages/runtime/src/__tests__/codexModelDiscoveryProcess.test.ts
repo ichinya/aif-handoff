@@ -1,11 +1,8 @@
-import { createServer } from "node:net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RuntimeTransport } from "../types.js";
 import {
   buildCodexAppServerDiscoveryEnvWithStats,
-  reservePort,
   resolveDiscoveryExecutable,
-  terminateProcess,
 } from "../adapters/codex/modelDiscovery/process.js";
 
 function createModelDiscoveryInput(overrides: Record<string, unknown> = {}) {
@@ -157,60 +154,5 @@ describe("codex model discovery process helpers", () => {
       expect(resolved).toBeTruthy();
       expect(resolved!.toLowerCase()).toContain("codex");
     }
-  });
-
-  it("reserves a loopback port that can be bound immediately afterwards", async () => {
-    let port: number;
-    try {
-      port = await reservePort();
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException)?.code;
-      // Some sandboxed CI/runtime environments disallow opening local sockets.
-      // In that case the behavior is environment-constrained, not a reservePort bug.
-      if (code === "EPERM" || code === "EACCES") {
-        return;
-      }
-      throw error;
-    }
-    expect(port).toBeGreaterThan(0);
-
-    await new Promise<void>((resolve, reject) => {
-      const server = createServer();
-      server.once("error", (error) => {
-        const code = (error as NodeJS.ErrnoException).code;
-        if (code === "EPERM" || code === "EACCES") {
-          resolve();
-          return;
-        }
-        reject(error);
-      });
-      server.listen(port, "127.0.0.1", () => {
-        server.close((error) => {
-          if (error) {
-            reject(error);
-            return;
-          }
-          resolve();
-        });
-      });
-    });
-  });
-
-  it("only kills live child processes and safely ignores kill errors", () => {
-    const alreadyExited = {
-      exitCode: 0,
-      kill: vi.fn(),
-    };
-    terminateProcess(alreadyExited as never);
-    expect(alreadyExited.kill).not.toHaveBeenCalled();
-
-    const live = {
-      exitCode: null,
-      kill: vi.fn(() => {
-        throw new Error("kill failed");
-      }),
-    };
-    expect(() => terminateProcess(live as never)).not.toThrow();
-    expect(live.kill).toHaveBeenCalledTimes(1);
   });
 });

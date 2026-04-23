@@ -6,8 +6,6 @@ import {
 } from "./modelDiscovery/modelCatalog.js";
 import {
   buildCodexAppServerDiscoveryEnv,
-  buildCodexAppServerDiscoveryEnvWithStats,
-  reservePort,
   resolveDiscoveryExecutable,
   spawnCodexAppServer,
   terminateProcess,
@@ -22,6 +20,7 @@ import type {
 const DEFAULT_APP_SERVER_CONNECT_TIMEOUT_MS = 5_000;
 const DEFAULT_APP_SERVER_STARTUP_ATTEMPTS = 3;
 const DEFAULT_APP_SERVER_STARTUP_RETRY_DELAY_MS = 150;
+const MAX_MODEL_LIST_PAGES = 10;
 
 export { buildCodexAppServerDiscoveryEnv, enrichCodexDiscoveredModels, getDefaultCodexModels };
 export type { CodexModelDiscoveryLogger };
@@ -30,7 +29,6 @@ export async function startCodexAppServerWithRetry(
   input: RuntimeModelListInput,
   logger?: CodexModelDiscoveryLogger,
   deps: CodexModelDiscoveryStartupDeps = {
-    reservePort,
     spawnCodexAppServer,
     connectJsonRpcClient,
     terminateProcess,
@@ -38,57 +36,14 @@ export async function startCodexAppServerWithRetry(
   },
 ): Promise<{
   attempt: number;
-  listenPort: number;
-  listenUrl: string;
   launch: Awaited<ReturnType<typeof spawnCodexAppServer>>;
   client: JsonRpcClient;
   executablePath: string;
 }> {
   const executablePath = resolveDiscoveryExecutable(input);
-  const envResult = buildCodexAppServerDiscoveryEnvWithStats(input);
-  const env = envResult.env;
-  logger?.debug?.(
-    {
-      runtimeId: input.runtimeId,
-      profileId: input.profileId ?? null,
-      transport: input.transport ?? RuntimeTransport.CLI,
-      forwardedEnvCount: envResult.forwardedCount,
-      filteredEnvCount: envResult.filteredCount,
-      blockedEnvCount: envResult.blockedCount,
-      droppedDisallowedPrefixCount: envResult.droppedDisallowedPrefixKeys.length,
-    },
-    "[runtime:codex] Built app-server discovery environment from curated allowlist",
-  );
-  if (envResult.droppedDisallowedPrefixKeys.length > 0) {
-    logger?.warn?.(
-      {
-        runtimeId: input.runtimeId,
-        profileId: input.profileId ?? null,
-        transport: input.transport ?? RuntimeTransport.CLI,
-        droppedDisallowedPrefixKeys: envResult.droppedDisallowedPrefixKeys.slice(0, 10),
-      },
-      "WARN [runtime:codex] Dropped disallowed environment prefix keys while building app-server discovery environment",
-    );
-  }
-
   let lastError: Error | null = null;
   for (let attempt = 1; attempt <= DEFAULT_APP_SERVER_STARTUP_ATTEMPTS; attempt += 1) {
-    const listenPort = await deps.reservePort();
-    const listenUrl = `ws://127.0.0.1:${listenPort}`;
-    logger?.debug?.(
-      {
-        runtimeId: input.runtimeId,
-        profileId: input.profileId ?? null,
-        transport: input.transport ?? RuntimeTransport.CLI,
-        executablePath,
-        reservedPort: listenPort,
-        attempt,
-        maxAttempts: DEFAULT_APP_SERVER_STARTUP_ATTEMPTS,
-      },
-      "[runtime:codex] Reserved Codex app-server startup port",
-    );
-
-    const launch = deps.spawnCodexAppServer(executablePath, listenUrl, input.projectRoot, env);
+    const launch = deps.spawnCodexAppServer(input);
     logger?.debug?.(
       {
         runtimeId: input.runtimeId,
@@ -99,33 +54,60 @@ export async function startCodexAppServerWithRetry(
           typeof asRecord(input.options).codexCliPath === "string" ||
           typeof process.env.CODEX_CLI_PATH === "string",
         projectRoot: input.projectRoot ?? null,
-        listenPort,
         attempt,
         maxAttempts: DEFAULT_APP_SERVER_STARTUP_ATTEMPTS,
       },
-      "[runtime:codex] Starting Codex app-server model discovery",
+      "DEBUG [runtime:codex] Starting Codex app-server model discovery over stdio",
     );
 
     try {
-      const client = await deps.connectJsonRpcClient(
-        listenUrl,
-        launch,
+      const client = await deps.connectJsonRpcClient(launch, {
+        runtimeId: input.runtimeId,
+        profileId: input.profileId ?? null,
+        transport: input.transport ?? RuntimeTransport.CLI,
+        requestTimeoutMs: DEFAULT_APP_SERVER_CONNECT_TIMEOUT_MS,
+        logger,
+      });
+
+      await client.request(
+        "initialize",
+        {
+          clientInfo: {
+            name: "aif-runtime-codex-model-discovery",
+            title: "AIF Runtime Codex Model Discovery",
+            version: "1.0",
+          },
+          capabilities: {
+            experimentalApi: false,
+          },
+        },
         DEFAULT_APP_SERVER_CONNECT_TIMEOUT_MS,
       );
+      await client.notify?.("initialized");
+
+      logger?.debug?.(
+        {
+          runtimeId: input.runtimeId,
+          profileId: input.profileId ?? null,
+          transport: input.transport ?? RuntimeTransport.CLI,
+          attempt,
+          maxAttempts: DEFAULT_APP_SERVER_STARTUP_ATTEMPTS,
+        },
+        "DEBUG [runtime:codex] Codex app-server initialize handshake completed",
+      );
+
       return {
         attempt,
-        listenPort,
-        listenUrl,
         launch,
         client,
         executablePath,
       };
     } catch (error) {
-      const details = launch.stderr.join("").trim();
+      const details = launch.stderrTail.join("").trim();
       const message = error instanceof Error ? error.message : String(error);
       const startupError = new Error(details ? `${message} (${details})` : message);
       lastError = startupError;
-      deps.terminateProcess(launch.process);
+      await deps.terminateProcess(launch);
 
       if (attempt < DEFAULT_APP_SERVER_STARTUP_ATTEMPTS) {
         logger?.warn?.(
@@ -136,12 +118,11 @@ export async function startCodexAppServerWithRetry(
             executablePath,
             attempt,
             maxAttempts: DEFAULT_APP_SERVER_STARTUP_ATTEMPTS,
-            reservedPort: listenPort,
             error: startupError.message,
             retryDelayMs: DEFAULT_APP_SERVER_STARTUP_RETRY_DELAY_MS,
             nextAttempt: attempt + 1,
           },
-          "WARN [runtime:codex] Codex app-server port handoff failed, retrying startup",
+          "WARN [runtime:codex] Codex app-server stdio startup failed, retrying",
         );
         await deps.sleep(DEFAULT_APP_SERVER_STARTUP_RETRY_DELAY_MS);
         continue;
@@ -155,7 +136,6 @@ export async function startCodexAppServerWithRetry(
           executablePath,
           attempt,
           maxAttempts: DEFAULT_APP_SERVER_STARTUP_ATTEMPTS,
-          reservedPort: listenPort,
           error: startupError.message,
         },
         "ERROR [runtime:codex] Codex app-server startup retries exhausted",
@@ -165,7 +145,7 @@ export async function startCodexAppServerWithRetry(
 
   throw (
     lastError ??
-    new Error("Codex app-server startup failed before websocket initialization could complete")
+    new Error("Codex app-server startup failed before initialize handshake could complete")
   );
 }
 
@@ -177,24 +157,10 @@ export async function listCodexAppServerModels(
   const { client, launch, executablePath } = startup;
 
   try {
-    await client.request(
-      "initialize",
-      {
-        clientInfo: {
-          name: "aif-runtime-codex-model-discovery",
-          version: "1.0",
-        },
-        capabilities: {
-          experimentalApi: true,
-        },
-      },
-      5_000,
-    );
-
     const discovered: RuntimeModel[] = [];
     let cursor: string | null = null;
 
-    for (let page = 0; page < 10; page += 1) {
+    for (let page = 0; page < MAX_MODEL_LIST_PAGES; page += 1) {
       const result = asRecord(
         await client.request(
           "model/list",
@@ -203,7 +169,7 @@ export async function listCodexAppServerModels(
             includeHidden: false,
             limit: 100,
           },
-          5_000,
+          DEFAULT_APP_SERVER_CONNECT_TIMEOUT_MS,
         ),
       );
       const models = Array.isArray(result.data) ? result.data : [];
@@ -228,19 +194,19 @@ export async function listCodexAppServerModels(
         executablePath,
         modelCount: discovered.length,
       },
-      "[runtime:codex] Fetched model list from Codex app-server",
+      "DEBUG [runtime:codex] Fetched model list from Codex app-server",
     );
 
     return enrichCodexDiscoveredModels(discovered);
   } catch (error) {
-    const details = launch.stderr.join("").trim();
+    const details = launch.stderrTail.join("").trim();
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(details ? `${message} (${details})` : message);
   } finally {
     try {
-      await client.close();
+      client.close();
     } finally {
-      terminateProcess(launch.process);
+      await terminateProcess(launch);
     }
   }
 }
