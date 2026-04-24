@@ -269,4 +269,153 @@ describe("gitBranch helpers", () => {
       }
     }
   });
+
+  it("validateBranchName rejects empty string", async () => {
+    initRepo(root);
+    const { validateBranchName, isBranchIsolationError } = await import("../gitBranch.js");
+    try {
+      validateBranchName(root, "");
+      throw new Error("expected throw");
+    } catch (err) {
+      expect(isBranchIsolationError(err)).toBe(true);
+      if (isBranchIsolationError(err)) {
+        expect(err.kind).toBe("invalid_branch_name");
+      }
+    }
+  });
+
+  it("validateBranchName rejects leading and trailing slashes and double slashes", async () => {
+    initRepo(root);
+    const { validateBranchName, isBranchIsolationError } = await import("../gitBranch.js");
+    for (const bad of ["/foo", "foo/", "feature//bar"]) {
+      try {
+        validateBranchName(root, bad);
+        throw new Error(`expected throw for ${bad}`);
+      } catch (err) {
+        expect(isBranchIsolationError(err)).toBe(true);
+        if (isBranchIsolationError(err)) {
+          expect(err.kind).toBe("invalid_branch_name");
+        }
+      }
+    }
+  });
+
+  it("validateBranchName rejects Git-special refspec like @{-1}", async () => {
+    initRepo(root);
+    const { validateBranchName, isBranchIsolationError } = await import("../gitBranch.js");
+    try {
+      validateBranchName(root, "@{-1}");
+      throw new Error("expected throw");
+    } catch (err) {
+      expect(isBranchIsolationError(err)).toBe(true);
+      if (isBranchIsolationError(err)) {
+        expect(err.kind).toBe("invalid_branch_name");
+      }
+    }
+  });
+
+  it("validateBranchName accepts conventional feature branch names", async () => {
+    initRepo(root);
+    const { validateBranchName } = await import("../gitBranch.js");
+    expect(() => validateBranchName(root, "feature/add-login-123")).not.toThrow();
+    expect(() => validateBranchName(root, "fix/urgent-bug")).not.toThrow();
+  });
+
+  it("ensureFeatureBranch throws invalid_branch_name when prefix is empty", async () => {
+    initRepo(root);
+    // Write a config with branch_prefix=""
+    const dir = join(root, ".ai-factory");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "config.yaml"),
+      'git:\n  enabled: true\n  base_branch: main\n  create_branches: true\n  branch_prefix: ""\n',
+    );
+    commitAll(root, "config");
+    const { ensureFeatureBranch: fn, isBranchIsolationError } = await import("../gitBranch.js");
+    try {
+      fn({ projectRoot: root, taskId: "t1", title: "Sample" });
+      throw new Error("expected throw");
+    } catch (err) {
+      expect(isBranchIsolationError(err)).toBe(true);
+      if (isBranchIsolationError(err)) {
+        expect(err.kind).toBe("invalid_branch_name");
+      }
+    }
+  });
+
+  it("restorePersistedBranch throws git_disabled_with_persisted_branch when config drifts off", async () => {
+    initRepo(root);
+    execFileSync("git", ["checkout", "-b", "feature/persisted"], { cwd: root, stdio: "ignore" });
+    execFileSync("git", ["checkout", "main"], { cwd: root, stdio: "ignore" });
+    writeConfig(
+      root,
+      "git:\n  enabled: false\n  base_branch: main\n  create_branches: true\n  branch_prefix: feature/\n",
+    );
+    commitAll(root, "disable git");
+    const { restorePersistedBranch, isBranchIsolationError } = await import("../gitBranch.js");
+    try {
+      restorePersistedBranch({
+        projectRoot: root,
+        taskId: "t1",
+        persistedBranchName: "feature/persisted",
+      });
+      throw new Error("expected throw");
+    } catch (err) {
+      expect(isBranchIsolationError(err)).toBe(true);
+      if (isBranchIsolationError(err)) {
+        expect(err.kind).toBe("git_disabled_with_persisted_branch");
+      }
+    }
+  });
+
+  it("restorePersistedBranch throws branch_missing when branch was deleted", async () => {
+    initRepo(root);
+    const { restorePersistedBranch, isBranchIsolationError } = await import("../gitBranch.js");
+    try {
+      restorePersistedBranch({
+        projectRoot: root,
+        taskId: "t1",
+        persistedBranchName: "feature/never",
+      });
+      throw new Error("expected throw");
+    } catch (err) {
+      expect(isBranchIsolationError(err)).toBe(true);
+      if (isBranchIsolationError(err)) {
+        expect(err.kind).toBe("branch_missing");
+      }
+    }
+  });
+
+  it("restorePersistedBranch switches and is idempotent", async () => {
+    initRepo(root);
+    execFileSync("git", ["checkout", "-b", "feature/ok"], { cwd: root, stdio: "ignore" });
+    execFileSync("git", ["checkout", "main"], { cwd: root, stdio: "ignore" });
+    const { restorePersistedBranch, getCurrentBranch: curr } = await import("../gitBranch.js");
+    restorePersistedBranch({ projectRoot: root, taskId: "t1", persistedBranchName: "feature/ok" });
+    expect(curr(root)).toBe("feature/ok");
+    // Idempotent
+    restorePersistedBranch({ projectRoot: root, taskId: "t1", persistedBranchName: "feature/ok" });
+    expect(curr(root)).toBe("feature/ok");
+  });
+
+  it("restorePersistedBranch throws dirty_worktree before switching", async () => {
+    initRepo(root);
+    execFileSync("git", ["checkout", "-b", "feature/ok"], { cwd: root, stdio: "ignore" });
+    execFileSync("git", ["checkout", "main"], { cwd: root, stdio: "ignore" });
+    writeFileSync(join(root, "dirty.txt"), "dirty\n");
+    const { restorePersistedBranch, isBranchIsolationError } = await import("../gitBranch.js");
+    try {
+      restorePersistedBranch({
+        projectRoot: root,
+        taskId: "t1",
+        persistedBranchName: "feature/ok",
+      });
+      throw new Error("expected throw");
+    } catch (err) {
+      expect(isBranchIsolationError(err)).toBe(true);
+      if (isBranchIsolationError(err)) {
+        expect(err.kind).toBe("dirty_worktree");
+      }
+    }
+  });
 });

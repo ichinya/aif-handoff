@@ -10,8 +10,11 @@ export {
   isBranchIsolationError,
   isGitRepo,
   projectUsesSharedBranchIsolation,
+  restorePersistedBranch,
   slugifyTitle,
+  validateBranchName,
   workingTreeClean,
   type EnsureFeatureBranchInput,
   type EnsureFeatureBranchResult,
+  type RestorePersistedBranchInput,
 } from "@aif/shared";

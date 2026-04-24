@@ -557,4 +557,37 @@ describe("runImplementer feature branch routing", () => {
     // Subagent was NOT invoked — stage aborted before prompt build
     expect(queryMock).not.toHaveBeenCalled();
   });
+
+  it("throws branch_drift when subagent switches HEAD mid-run", async () => {
+    const db = testDb.current;
+    db.insert(tasks)
+      .values({
+        id: "task-b-drift",
+        projectId: "project-b",
+        title: "Drift implementer",
+        description: "",
+        status: "implementing",
+        plan: "## Plan\n- [ ] work",
+        branchName: "feature/my-task",
+      })
+      .run();
+
+    // Simulate subagent switching HEAD off the task branch during its run
+    queryMock.mockReset();
+    queryMock.mockImplementation(() => {
+      execFileSync("git", ["checkout", "main"], { cwd: projectRoot, stdio: "ignore" });
+      return streamSuccess("Implementation done");
+    });
+
+    const { isBranchIsolationError } = await import("../gitBranch.js");
+    try {
+      await runImplementer("task-b-drift", projectRoot);
+      throw new Error("expected throw");
+    } catch (err) {
+      expect(isBranchIsolationError(err)).toBe(true);
+      if (isBranchIsolationError(err)) {
+        expect(err.kind).toBe("branch_drift");
+      }
+    }
+  });
 });

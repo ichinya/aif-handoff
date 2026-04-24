@@ -13,7 +13,10 @@ export class BranchIsolationError extends Error {
     | "branch_drift"
     | "base_branch_unavailable"
     | "checkout_failed"
-    | "create_failed";
+    | "create_failed"
+    | "invalid_branch_name"
+    | "git_disabled_with_persisted_branch"
+    | "not_a_repo_with_persisted_branch";
   readonly branchName: string | null;
   readonly projectRoot: string;
 
@@ -162,6 +165,44 @@ export function assertCurrentBranch(projectRoot: string, expected: string): void
   }
 }
 
+/**
+ * Validate a string as a usable git branch name via `git check-ref-format
+ * --branch`. Rejects empty prefixes ("" → "/slug"), double slashes,
+ * Git-special refspecs like `@{-1}`, and everything else git won't let you
+ * `checkout -b`. Normalising at this layer turns surprising `checkout_failed`
+ * / `create_failed` errors mid-flow into a deterministic `invalid_branch_name`
+ * blocker before any state changes.
+ */
+export function validateBranchName(projectRoot: string, branchName: string): void {
+  if (!branchName || branchName.trim().length === 0) {
+    throw new BranchIsolationError(
+      "invalid_branch_name",
+      `Branch name is empty or whitespace-only.`,
+      projectRoot,
+      branchName || null,
+    );
+  }
+  if (branchName.startsWith("/") || branchName.endsWith("/") || branchName.includes("//")) {
+    throw new BranchIsolationError(
+      "invalid_branch_name",
+      `Branch name "${branchName}" has invalid slashes.`,
+      projectRoot,
+      branchName,
+    );
+  }
+  const { status, stderr } = runGit(projectRoot, ["check-ref-format", "--branch", branchName], {
+    ignoreExit: true,
+  });
+  if (status !== 0) {
+    throw new BranchIsolationError(
+      "invalid_branch_name",
+      `Branch name "${branchName}" is not a valid git ref: ${stderr || "rejected by git check-ref-format"}.`,
+      projectRoot,
+      branchName,
+    );
+  }
+}
+
 function resolveGitConfig(projectRoot: string): AifProjectGit {
   return getProjectConfig(projectRoot).git;
 }
@@ -188,6 +229,8 @@ export function ensureFeatureBranch(input: EnsureFeatureBranchInput): EnsureFeat
   const branchName = explicitBranchName?.trim()
     ? explicitBranchName.trim()
     : buildBranchName(config.branch_prefix, title, taskId);
+
+  validateBranchName(projectRoot, branchName);
 
   const current = getCurrentBranch(projectRoot);
   if (current === branchName) {
@@ -276,4 +319,84 @@ export function ensureFeatureBranch(input: EnsureFeatureBranchInput): EnsureFeat
 
   log.info({ projectRoot, branchName, previous: current, taskId }, "Created feature branch");
   return { action: "created", branchName };
+}
+
+/**
+ * Restore HEAD to a branch a previous stage already persisted on the task.
+ * Unlike `ensureFeatureBranch`, this treats `task.branchName` as a
+ * source-of-truth contract: once planner stored it, every subsequent stage
+ * MUST land on that branch or fail loud. Config flipping to `git.enabled=false`
+ * or `git.create_branches=false` after a task was branched does not retroactively
+ * release the stage to run on whatever HEAD happens to be.
+ *
+ * Failures throw `BranchIsolationError` with a kind the coordinator classifies
+ * as `blocked_external`:
+ *  - `git_disabled_with_persisted_branch` — config toggled off between stages
+ *  - `not_a_repo_with_persisted_branch`  — repo was deleted / moved
+ *  - `invalid_branch_name`               — persisted value is not a ref git accepts
+ *  - `branch_missing`                    — branch was deleted between stages
+ *  - `dirty_worktree`                    — switch would clobber uncommitted changes
+ *  - `checkout_failed`                   — git refused the switch
+ */
+export interface RestorePersistedBranchInput {
+  projectRoot: string;
+  taskId: string;
+  persistedBranchName: string;
+}
+
+export function restorePersistedBranch(input: RestorePersistedBranchInput): void {
+  const { projectRoot, taskId, persistedBranchName } = input;
+  const config = resolveGitConfig(projectRoot);
+
+  if (!config.enabled) {
+    throw new BranchIsolationError(
+      "git_disabled_with_persisted_branch",
+      `Task has persisted feature branch ${persistedBranchName} but git.enabled=false. Config drift between stages is not allowed — re-enable git or clear the branch binding before continuing.`,
+      projectRoot,
+      persistedBranchName,
+    );
+  }
+  if (!isGitRepo(projectRoot)) {
+    throw new BranchIsolationError(
+      "not_a_repo_with_persisted_branch",
+      `Task has persisted feature branch ${persistedBranchName} but ${projectRoot} is not a git work tree.`,
+      projectRoot,
+      persistedBranchName,
+    );
+  }
+
+  validateBranchName(projectRoot, persistedBranchName);
+
+  const current = getCurrentBranch(projectRoot);
+  if (current === persistedBranchName) {
+    return;
+  }
+
+  if (!branchExists(projectRoot, persistedBranchName)) {
+    throw new BranchIsolationError(
+      "branch_missing",
+      `Expected feature branch ${persistedBranchName} is missing from ${projectRoot}. It was deleted between stages.`,
+      projectRoot,
+      persistedBranchName,
+    );
+  }
+
+  assertWorkingTreeClean(projectRoot, persistedBranchName);
+
+  const { status, stderr } = runGit(projectRoot, ["checkout", persistedBranchName], {
+    ignoreExit: true,
+  });
+  if (status !== 0) {
+    throw new BranchIsolationError(
+      "checkout_failed",
+      `git checkout ${persistedBranchName} failed: ${stderr || "unknown error"}`,
+      projectRoot,
+      persistedBranchName,
+    );
+  }
+
+  log.info(
+    { projectRoot, branchName: persistedBranchName, previous: current, taskId },
+    "Restored persisted feature branch",
+  );
 }

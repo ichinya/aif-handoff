@@ -1,7 +1,7 @@
 import { findProjectById, findTaskById, setTaskFields } from "@aif/data";
 import { createRuntimeWorkflowSpec, type RuntimeWorkflowSpec } from "@aif/runtime";
 import { getEnv, logger, formatAttachmentsForPrompt } from "@aif/shared";
-import { ensureFeatureBranch } from "../gitBranch.js";
+import { assertCurrentBranch, restorePersistedBranch } from "../gitBranch.js";
 import { logActivity } from "../hooks.js";
 import { executeSubagentQuery, startHeartbeat } from "../subagentQuery.js";
 import {
@@ -47,18 +47,14 @@ export async function runReviewer(taskId: string, projectRoot: string): Promise<
   }
 
   // Reviewer must diff against the task's feature branch — not whatever HEAD
-  // happens to be. Same switchOnly contract as implementer/plan-checker.
+  // happens to be. Same mandatory-restore contract as implementer/plan-checker.
   if (task.branchName && !task.isFix) {
-    const branchResult = ensureFeatureBranch({
+    restorePersistedBranch({
       projectRoot,
       taskId,
-      title: task.title,
-      explicitBranchName: task.branchName,
-      switchOnly: true,
+      persistedBranchName: task.branchName,
     });
-    if (branchResult.action === "switched") {
-      logActivity(taskId, "Agent", `Switched to feature branch: ${branchResult.branchName}`);
-    }
+    logActivity(taskId, "Agent", `Restored feature branch: ${task.branchName}`);
   }
 
   const project = findProjectById(task.projectId);
@@ -234,6 +230,11 @@ ${reviewOutputContract}`;
       } catch {
         /* safety guard */
       }
+    }
+
+    // Post-run drift check: review sidecars must not have switched HEAD.
+    if (task.branchName && !task.isFix) {
+      assertCurrentBranch(projectRoot, task.branchName);
     }
 
     log.info({ taskId }, "Review and security sidecars completed");

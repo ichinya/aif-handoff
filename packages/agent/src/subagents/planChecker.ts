@@ -1,7 +1,7 @@
 import { findProjectById, findTaskById, persistTaskPlanForTask } from "@aif/data";
 import { logger, looksLikeFullPlanUpdate } from "@aif/shared";
 import { executeSubagentQuery } from "../subagentQuery.js";
-import { ensureFeatureBranch } from "../gitBranch.js";
+import { assertCurrentBranch, restorePersistedBranch } from "../gitBranch.js";
 import { logActivity } from "../hooks.js";
 
 const log = logger("plan-checker");
@@ -54,16 +54,12 @@ export async function runPlanChecker(taskId: string, projectRoot: string): Promi
   // Same branch-restore contract as implementer/reviewer: must run before any
   // repo read or plan persist. BranchIsolationError → blocked_external.
   if (task.branchName && !task.isFix) {
-    const branchResult = ensureFeatureBranch({
+    restorePersistedBranch({
       projectRoot,
       taskId,
-      title: task.title,
-      explicitBranchName: task.branchName,
-      switchOnly: true,
+      persistedBranchName: task.branchName,
     });
-    if (branchResult.action === "switched") {
-      logActivity(taskId, "Agent", `Switched to feature branch: ${branchResult.branchName}`);
-    }
+    logActivity(taskId, "Agent", `Restored feature branch: ${task.branchName}`);
   }
 
   if (!task.plan || task.plan.trim().length === 0) {
@@ -126,6 +122,11 @@ Requirements:
     profileMode: "plan",
     maxBudgetUsd: planCheckerBudget,
   });
+
+  // Post-run drift check: subagent must not have switched HEAD.
+  if (task.branchName && !task.isFix) {
+    assertCurrentBranch(projectRoot, task.branchName);
+  }
 
   const normalizedPlan = normalizeMarkdownFence(resultText);
   if (normalizedPlan.length === 0) {

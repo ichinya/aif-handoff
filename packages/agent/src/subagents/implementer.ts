@@ -18,7 +18,7 @@ import { createRuntimeWorkflowSpec } from "@aif/runtime";
 import { logActivity } from "../hooks.js";
 import { executeSubagentQuery } from "../subagentQuery.js";
 import { computePendingPlanLayers, computePlanLayers } from "../planLayers.js";
-import { ensureFeatureBranch } from "../gitBranch.js";
+import { assertCurrentBranch, restorePersistedBranch } from "../gitBranch.js";
 
 const log = logger("implementer");
 const AGENT_NAME = "implement-coordinator";
@@ -179,22 +179,19 @@ export async function runImplementer(taskId: string, projectRoot: string): Promi
   // action) moved HEAD between stages, every downstream read — config,
   // canonical plan, pending-task detection, no-op early return — would
   // operate on the wrong branch and silently ship incorrect state.
-  // Branch-restore failures throw BranchIsolationError → coordinator
-  // classifies as blocked_external with retryAfter=null.
+  //
+  // `task.branchName` is a source-of-truth contract: once planner set it,
+  // every subsequent stage MUST land on that branch or fail loud. Config
+  // drift (git.enabled / create_branches toggled off between stages) cannot
+  // release us to the current HEAD — `restorePersistedBranch` throws instead
+  // of the "skipped" shortcut `ensureFeatureBranch` uses.
   if (task.branchName && !task.isFix) {
-    const branchResult = ensureFeatureBranch({
+    restorePersistedBranch({
       projectRoot,
       taskId,
-      title: task.title,
-      explicitBranchName: task.branchName,
-      switchOnly: true,
+      persistedBranchName: task.branchName,
     });
-    if (branchResult.action === "switched") {
-      logActivity(taskId, "Agent", `Switched to feature branch: ${branchResult.branchName}`);
-    } else if (branchResult.action === "skipped") {
-      // git disabled or not a repo — nothing to restore.
-      log.debug({ taskId, reason: branchResult.reason }, "Branch restore skipped");
-    }
+    logActivity(taskId, "Agent", `Restored feature branch: ${task.branchName}`);
   }
 
   const project = findProjectById(task.projectId);
@@ -351,6 +348,14 @@ Execution rules:
     workflowKind: "implementer",
     fallbackSlashCommand: implementSlashCommand,
   });
+
+  // Post-run drift check: if the subagent switched branches during execution
+  // (e.g. a rogue skill ran `git checkout` or plan-polisher followed legacy
+  // Step 1.4), we MUST block before persisting plan/log — otherwise we
+  // attribute diffs from a different branch to this task.
+  if (task.branchName && !task.isFix) {
+    assertCurrentBranch(projectRoot, task.branchName);
+  }
 
   let finalResultText = resultText;
 

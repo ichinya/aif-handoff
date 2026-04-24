@@ -228,6 +228,37 @@ function handleAcceptExistingPlan(input: EventHandlerInput): EventHandlerResult 
     return { ok: false, status: 409, error: "Plan file is empty" };
   }
 
+  // Branch binding: accept_existing_plan is a back-door route into the
+  // autonomous pipeline that bypasses the planner. If the project has
+  // branch isolation enabled and the task has no bound branch yet, create
+  // one now — otherwise implementer/reviewer stages will run on whatever
+  // HEAD happens to be. Fix tasks keep the legacy behavior (no branch).
+  let boundBranchName: string | null = task.branchName ?? null;
+  if (!task.isFix && !boundBranchName) {
+    try {
+      const branchResult = ensureFeatureBranch({
+        projectRoot: project.rootPath,
+        taskId: task.id,
+        title: task.title,
+      });
+      if (branchResult.action !== "skipped" && branchResult.branchName) {
+        boundBranchName = branchResult.branchName;
+      }
+    } catch (err) {
+      const error = isBranchIsolationError(err)
+        ? `Branch isolation failure (${err.kind}): ${err.message}`
+        : err instanceof Error
+          ? err.message
+          : String(err);
+      return { ok: false, status: 409, error };
+    }
+  } else if (boundBranchName && !task.isFix) {
+    // Task already has a bound branch: make sure HEAD is on it before we
+    // read/persist the plan.
+    const branchError = restoreTaskBranchForMutation(task, project.rootPath);
+    if (branchError) return branchError;
+  }
+
   const nowIso = new Date().toISOString();
   persistTaskPlanForTask({
     taskId: input.taskId,
@@ -248,6 +279,7 @@ function handleAcceptExistingPlan(input: EventHandlerInput): EventHandlerResult 
     reviewIterationCount: 0,
     manualReviewRequired: false,
     autoReviewState: null,
+    branchName: boundBranchName,
     lastHeartbeatAt: nowIso,
     updatedAt: nowIso,
   });
