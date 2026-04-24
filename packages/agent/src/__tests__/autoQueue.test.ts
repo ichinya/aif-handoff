@@ -346,5 +346,35 @@ describe("processAutoQueueAdvance", () => {
       expect(processAutoQueueAdvance()).toBe(1);
       expect(findTaskById("t-clean-1")?.status).toBe("planning");
     });
+
+    it("forces parallel auto-queue to one task for branch-isolated git projects", () => {
+      const root = mkdtempSync(join(tmpdir(), "autoqueue-parallel-branch-"));
+      execFileSync("git", ["init", "--initial-branch=main"], { cwd: root, stdio: "ignore" });
+      execFileSync("git", ["config", "user.email", "t@t.local"], { cwd: root, stdio: "ignore" });
+      execFileSync("git", ["config", "user.name", "T"], { cwd: root, stdio: "ignore" });
+      execFileSync("git", ["config", "commit.gpgsign", "false"], { cwd: root, stdio: "ignore" });
+      writeFileSync(join(root, "README.md"), "# t\n");
+      execFileSync("git", ["add", "README.md"], { cwd: root, stdio: "ignore" });
+      execFileSync("git", ["commit", "-m", "init", "--no-verify"], { cwd: root, stdio: "ignore" });
+
+      testDb.current
+        .insert(projects)
+        .values({
+          id: "parallel-branch",
+          name: "parallel-branch",
+          rootPath: root,
+          parallelEnabled: true,
+          autoQueueMode: true,
+        })
+        .run();
+      seedTask("t-branch-1", "parallel-branch", 100);
+      seedTask("t-branch-2", "parallel-branch", 200);
+      seedTask("t-branch-3", "parallel-branch", 300);
+
+      expect(processAutoQueueAdvance()).toBe(1);
+      expect(findTaskById("t-branch-1")?.status).toBe("planning");
+      expect(findTaskById("t-branch-2")?.status).toBe("backlog");
+      expect(findTaskById("t-branch-3")?.status).toBe("backlog");
+    });
   });
 });

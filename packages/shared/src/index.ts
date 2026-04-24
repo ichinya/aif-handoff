@@ -116,6 +116,25 @@ export { persistTaskPlan } from "./taskPlan.js";
 // Path validation
 export { validateProjectRootPath } from "./pathValidation.js";
 
+// Git/worktree isolation utilities (Node-only)
+export {
+  BranchIsolationError,
+  assertCurrentBranch,
+  assertWorkingTreeClean,
+  branchExists,
+  buildBranchName,
+  describeDirtyWorkingTree,
+  ensureFeatureBranch,
+  getCurrentBranch,
+  isBranchIsolationError,
+  isGitRepo,
+  projectUsesSharedBranchIsolation,
+  slugifyTitle,
+  workingTreeClean,
+  type EnsureFeatureBranchInput,
+  type EnsureFeatureBranchResult,
+} from "./gitIsolation.js";
+
 // Attachment utilities
 export {
   parseAttachments,

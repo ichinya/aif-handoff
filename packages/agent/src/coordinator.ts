@@ -27,7 +27,11 @@ import { runPlanner } from "./subagents/planner.js";
 import { runPlanChecker } from "./subagents/planChecker.js";
 import { runImplementer } from "./subagents/implementer.js";
 import { runReviewer } from "./subagents/reviewer.js";
-import { describeDirtyWorkingTree, isGitRepo } from "./gitBranch.js";
+import {
+  describeDirtyWorkingTree,
+  isGitRepo,
+  projectUsesSharedBranchIsolation,
+} from "./gitBranch.js";
 import { flushActivityQueue } from "./hooks.js";
 import {
   notifyTaskBroadcast,
@@ -625,7 +629,17 @@ export function processAutoQueueAdvance(): number {
 
   let advanced = 0;
   for (const project of projects) {
-    const limit = project.parallelEnabled ? env.COORDINATOR_MAX_CONCURRENT_TASKS : 1;
+    const usesSharedBranchIsolation = projectUsesSharedBranchIsolation(project.rootPath);
+    if (project.parallelEnabled && usesSharedBranchIsolation) {
+      log.warn(
+        { projectId: project.id, projectRoot: project.rootPath },
+        "Auto-queue parallel pool disabled for git.create_branches project until per-task worktrees are available",
+      );
+    }
+    const limit =
+      project.parallelEnabled && !usesSharedBranchIsolation
+        ? env.COORDINATOR_MAX_CONCURRENT_TASKS
+        : 1;
     let active = countActivePipelineTasksForProject(project.id);
 
     if (active >= limit) {
@@ -741,14 +755,29 @@ export async function pollAndProcess(): Promise<void> {
   // Track tasks that failed in this cycle — prevent re-picking in downstream stages
   const failedInCycle = new Set<string>();
 
-  // Cache project parallel settings to avoid repeated lookups
-  const projectParallelCache = new Map<string, boolean>();
-  function isProjectParallel(projectId: string): boolean {
-    let cached = projectParallelCache.get(projectId);
+  // Cache effective project concurrency settings to avoid repeated lookups.
+  // Branch-per-task isolation still mutates one shared projectRoot, so it must
+  // be serial until #86 introduces task-specific worktrees.
+  const projectConcurrencyCache = new Map<string, { parallel: boolean; max: number }>();
+  function resolveProjectConcurrency(projectId: string): { parallel: boolean; max: number } {
+    let cached = projectConcurrencyCache.get(projectId);
     if (cached === undefined) {
       const project = findProjectById(projectId);
-      cached = project?.parallelEnabled ?? false;
-      projectParallelCache.set(projectId, cached);
+      const configuredParallel = project?.parallelEnabled ?? false;
+      const usesSharedBranchIsolation = project
+        ? projectUsesSharedBranchIsolation(project.rootPath)
+        : false;
+      cached = {
+        parallel: configuredParallel && !usesSharedBranchIsolation,
+        max: configuredParallel && !usesSharedBranchIsolation ? globalMax : 1,
+      };
+      if (configuredParallel && usesSharedBranchIsolation) {
+        log.warn(
+          { projectId, projectRoot: project?.rootPath },
+          "Project parallel execution forced to serial because git.create_branches uses a shared worktree",
+        );
+      }
+      projectConcurrencyCache.set(projectId, cached);
     }
     return cached;
   }
@@ -800,8 +829,9 @@ export async function pollAndProcess(): Promise<void> {
 
     for (const task of candidates) {
       // Per-project concurrency: non-parallel projects limited to 1 task at a time
-      const parallel = isProjectParallel(task.projectId);
-      const projectMax = parallel ? globalMax : 1;
+      const concurrency = resolveProjectConcurrency(task.projectId);
+      const parallel = concurrency.parallel;
+      const projectMax = concurrency.max;
       const projectCount = projectSpawnCount.get(task.projectId) ?? 0;
       if (projectCount >= projectMax) {
         log.debug(

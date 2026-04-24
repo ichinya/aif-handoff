@@ -2,6 +2,8 @@ import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   applyHumanTaskEvent,
+  ensureFeatureBranch,
+  isBranchIsolationError,
   looksLikeFullPlanUpdate,
   getProjectConfig,
   type TaskEvent,
@@ -25,6 +27,30 @@ interface EventHandlerInput {
 export type EventHandlerResult =
   | { ok: false; status: number; error: string }
   | { ok: true; task: TaskRow; broadcastType: "task:moved" | "task:updated" };
+
+function restoreTaskBranchForMutation(
+  task: TaskRow,
+  projectRoot: string,
+): EventHandlerResult | null {
+  if (!task.branchName || task.isFix) return null;
+  try {
+    ensureFeatureBranch({
+      projectRoot,
+      taskId: task.id,
+      title: task.title,
+      explicitBranchName: task.branchName,
+      switchOnly: true,
+    });
+    return null;
+  } catch (err) {
+    const error = isBranchIsolationError(err)
+      ? `Branch isolation failure (${err.kind}): ${err.message}`
+      : err instanceof Error
+        ? err.message
+        : String(err);
+    return { ok: false, status: 409, error };
+  }
+}
 
 async function handleFastFix(input: EventHandlerInput): Promise<EventHandlerResult> {
   const task = findTaskById(input.taskId);
@@ -51,6 +77,9 @@ async function handleFastFix(input: EventHandlerInput): Promise<EventHandlerResu
   if (!project) {
     return { ok: false, status: 404, error: "Project not found for task" };
   }
+
+  const branchError = restoreTaskBranchForMutation(task, project.rootPath);
+  if (branchError) return branchError;
 
   const previousPlan = task.plan?.trim() ?? "";
   if (!previousPlan) {
@@ -144,6 +173,9 @@ function handleRegularTransition(input: EventHandlerInput): EventHandlerResult {
     if (!project) {
       return { ok: false, status: 404, error: "Project not found for task" };
     }
+
+    const branchError = restoreTaskBranchForMutation(task, project.rootPath);
+    if (branchError) return branchError;
 
     // For fix tasks, always remove canonical FIX_PLAN.md.
     // For regular tasks, use configured planPath (defaults from config.yaml).

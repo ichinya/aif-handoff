@@ -1,5 +1,5 @@
-import { getProjectConfig, logger } from "@aif/shared";
-import { findProjectById } from "@aif/data";
+import { ensureFeatureBranch, getProjectConfig, isBranchIsolationError, logger } from "@aif/shared";
+import { findProjectById, findTaskById } from "@aif/data";
 import { UsageSource } from "@aif/runtime";
 import { runApiRuntimeOneShot } from "./runtime.js";
 
@@ -65,6 +65,30 @@ export async function runCommitQuery(input: RunCommitQueryInput): Promise<RunCom
     const msg = `Project not found: ${projectId}`;
     log.error({ projectId }, msg);
     return { ok: false, error: msg };
+  }
+
+  const task = taskId ? findTaskById(taskId) : null;
+  if (task?.branchName && !task.isFix) {
+    try {
+      ensureFeatureBranch({
+        projectRoot: project.rootPath,
+        taskId: task.id,
+        title: task.title,
+        explicitBranchName: task.branchName,
+        switchOnly: true,
+      });
+    } catch (err) {
+      const message = isBranchIsolationError(err)
+        ? `Branch isolation failure (${err.kind}): ${err.message}`
+        : err instanceof Error
+          ? err.message
+          : String(err);
+      log.error(
+        { err, projectId, taskId, branchName: task.branchName },
+        "Commit runtime aborted before start due to branch isolation failure",
+      );
+      return { ok: false, error: message };
+    }
   }
 
   const { git } = getProjectConfig(project.rootPath);

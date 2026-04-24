@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockRunApiRuntimeOneShot = vi.fn();
 const mockFindProjectById = vi.fn();
+const mockFindTaskById = vi.fn();
 const mockGetProjectConfig = vi.fn();
+const mockEnsureFeatureBranch = vi.fn();
 
 vi.mock("../services/runtime.js", () => ({
   runApiRuntimeOneShot: (...args: unknown[]) => mockRunApiRuntimeOneShot(...args),
@@ -10,12 +12,14 @@ vi.mock("../services/runtime.js", () => ({
 
 vi.mock("@aif/data", () => ({
   findProjectById: (id: string) => mockFindProjectById(id),
+  findTaskById: (id: string) => mockFindTaskById(id),
 }));
 
 vi.mock("@aif/shared", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@aif/shared")>();
   return {
     ...actual,
+    ensureFeatureBranch: (...args: unknown[]) => mockEnsureFeatureBranch(...args),
     getProjectConfig: (...args: unknown[]) => mockGetProjectConfig(...args),
   };
 });
@@ -61,8 +65,11 @@ describe("runCommitQuery", () => {
   beforeEach(() => {
     mockRunApiRuntimeOneShot.mockReset();
     mockFindProjectById.mockReset();
+    mockFindTaskById.mockReset();
     mockGetProjectConfig.mockReset();
+    mockEnsureFeatureBranch.mockReset();
     mockFindProjectById.mockReturnValue({ id: "p1", rootPath: "/tmp/p1" });
+    mockFindTaskById.mockReturnValue(null);
   });
 
   it("returns ok:false when project not found", async () => {
@@ -85,6 +92,31 @@ describe("runCommitQuery", () => {
     expect(callArg.prompt).toContain("git add -A");
     expect(callArg.prompt).toContain("git push");
     expect(callArg.prompt).not.toMatch(/Do NOT push/i);
+  });
+
+  it("restores task branch before commit runtime starts", async () => {
+    mockGetProjectConfig.mockReturnValue(gitConfig(false));
+    mockFindTaskById.mockReturnValue({
+      id: "t1",
+      title: "Task title",
+      branchName: "feature/task-title-t1",
+      isFix: false,
+    });
+    mockRunApiRuntimeOneShot.mockResolvedValue({ result: { outputText: "ok" }, context: {} });
+
+    const res = await runCommitQuery({ projectId: "p1", taskId: "t1" });
+
+    expect(res.ok).toBe(true);
+    expect(mockEnsureFeatureBranch).toHaveBeenCalledWith({
+      projectRoot: "/tmp/p1",
+      taskId: "t1",
+      title: "Task title",
+      explicitBranchName: "feature/task-title-t1",
+      switchOnly: true,
+    });
+    expect(mockEnsureFeatureBranch.mock.invocationCallOrder[0]).toBeLessThan(
+      mockRunApiRuntimeOneShot.mock.invocationCallOrder[0],
+    );
   });
 
   it("sends no-push prompt when skip_push_after_commit=true", async () => {
