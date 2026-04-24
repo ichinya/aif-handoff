@@ -797,6 +797,9 @@ describe("Codex SDK session store parsing", () => {
     const files = await sessionsModule.listCodexSessionFileInfos();
     expect(files[0]?.filePath).toBe(alternatePoolFile);
 
+    const newestTwoFiles = await sessionsModule.listCodexSessionFileInfos({ limitNewest: 2 });
+    expect(newestTwoFiles.map((file) => file.filePath)).toEqual([alternatePoolFile, newerFile]);
+
     const meta = await sessionsModule.readCodexSessionMetaFromFile(files[0]!);
     expect(meta?.id).toBe(alternatePoolSessionId);
 

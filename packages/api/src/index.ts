@@ -10,6 +10,7 @@ import { runtimeProfilesRouter } from "./routes/runtimeProfiles.js";
 import { codexAuthRouter } from "./routes/codexAuth.js";
 import { setupWebSocket, closeAllWebSocketClients } from "./ws.js";
 import { requestLogger } from "./middleware/logger.js";
+import { trackApiLoad } from "./middleware/apiLoad.js";
 import { startServer } from "./serverBootstrap.js";
 import { createCodexIndexService } from "./services/codexIndex.js";
 import { createGracefulShutdownHandler } from "./shutdown.js";
@@ -29,6 +30,7 @@ app.use(
     origin: process.env.CORS_ORIGIN || "http://localhost:5180",
   }),
 );
+app.use("*", trackApiLoad);
 app.use("*", requestLogger);
 
 // Health check

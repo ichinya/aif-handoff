@@ -529,8 +529,14 @@ async function listSessionFileInfos(dir: string): Promise<CodexSessionFileInfo[]
 
 export async function listCodexSessionFileInfos(input?: {
   sessionsDir?: string;
+  limitNewest?: number;
 }): Promise<CodexSessionFileInfo[]> {
-  return await listSessionFileInfos(input?.sessionsDir ?? SESSIONS_DIR);
+  const files = await listSessionFileInfos(input?.sessionsDir ?? SESSIONS_DIR);
+  const limitNewest =
+    typeof input?.limitNewest === "number" && Number.isFinite(input.limitNewest)
+      ? Math.max(0, Math.trunc(input.limitNewest))
+      : null;
+  return limitNewest == null ? files : files.slice(0, limitNewest);
 }
 
 // Cap streamed-meta reads: session_meta/turn_context sit on the first handful

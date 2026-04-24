@@ -14,10 +14,13 @@ const mockDeleteCodexLimitHistoryByFilePaths = vi.fn(() => 0);
 const mockDeleteCodexSessionsByFilePaths = vi.fn(() => 0);
 const mockListCodexLimitHeadScopesByFilePaths = vi.fn(() => [] as Array<Record<string, unknown>>);
 const mockListCodexSessionFileStates = vi.fn(() => [] as Array<Record<string, unknown>>);
+const mockListCodexSessionFileStatesByPaths = vi.fn(() => [] as Array<Record<string, unknown>>);
+const mockListCodexLimitHeadsForOverlay = vi.fn(() => [] as Array<Record<string, unknown>>);
 const mockListProjects = vi.fn(() => [] as Array<Record<string, unknown>>);
 const mockListRuntimeProfileResponses = vi.fn(
   (..._args: any[]) => [] as Array<Record<string, unknown>>,
 );
+const mockPruneCodexLimitHistoryByHead = vi.fn(() => 0);
 const mockPruneCodexLimitHistoryRetention = vi.fn(() => 0);
 const mockUpsertCodexIndexCursor = vi.fn(() => undefined);
 const mockUpsertCodexLimitHeads = vi.fn(() => 0);
@@ -36,6 +39,7 @@ const mockReadCodexSessionLimitSnapshotsFromFile = vi.fn(async (): Promise<any[]
 const mockReadCodexSessionMetaFromFile = vi.fn(async (): Promise<any> => null);
 const mockReadCodexSnapshotAccountFingerprint = vi.fn(() => null);
 const mockReadLatestCodexSessionLimitSnapshotFromFile = vi.fn(async (): Promise<any> => null);
+const mockIsApiIdle = vi.fn(() => true);
 
 vi.mock("@aif/shared", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@aif/shared")>();
@@ -52,9 +56,12 @@ vi.mock("@aif/data", () => ({
   deleteCodexLimitHistoryByFilePaths: mockDeleteCodexLimitHistoryByFilePaths,
   deleteCodexSessionsByFilePaths: mockDeleteCodexSessionsByFilePaths,
   listCodexLimitHeadScopesByFilePaths: mockListCodexLimitHeadScopesByFilePaths,
+  listCodexLimitHeadsForOverlay: mockListCodexLimitHeadsForOverlay,
   listCodexSessionFileStates: mockListCodexSessionFileStates,
+  listCodexSessionFileStatesByPaths: mockListCodexSessionFileStatesByPaths,
   listProjects: mockListProjects,
   listRuntimeProfileResponses: mockListRuntimeProfileResponses,
+  pruneCodexLimitHistoryByHead: mockPruneCodexLimitHistoryByHead,
   pruneCodexLimitHistoryRetention: mockPruneCodexLimitHistoryRetention,
   upsertCodexIndexCursor: mockUpsertCodexIndexCursor,
   upsertCodexLimitHeads: mockUpsertCodexLimitHeads,
@@ -86,6 +93,10 @@ vi.mock("../services/runtime.js", () => ({
   notifyRuntimeLimitProjectUpdate: mockNotifyRuntimeLimitProjectUpdate,
 }));
 
+vi.mock("../middleware/apiLoad.js", () => ({
+  isApiIdle: mockIsApiIdle,
+}));
+
 async function loadService() {
   return import("../services/codexIndex.js");
 }
@@ -94,7 +105,9 @@ describe("codex index service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
+    mockIsApiIdle.mockReturnValue(true);
     mockListCodexSessionFileStates.mockReturnValue([]);
+    mockListCodexSessionFileStatesByPaths.mockReturnValue([]);
     mockListCodexSessionFileInfos.mockResolvedValue([]);
     mockClassifyCodexSessionFileStatus.mockReturnValue("new");
     mockReadCodexSessionLimitSnapshotsFromAppend.mockResolvedValue({
@@ -111,19 +124,68 @@ describe("codex index service", () => {
     vi.useRealTimers();
   });
 
-  it("starts once, performs warm-up reconcile, and schedules loop ticks", async () => {
+  it("starts once, schedules non-blocking head warm-up, and schedules idle backfill", async () => {
     const { createCodexIndexService } = await loadService();
-    const service = createCodexIndexService({ reconcileIntervalMs: 1000 });
+    const service = createCodexIndexService({
+      headFileLimit: 3,
+      backfillIntervalMs: 1000,
+    });
 
     await service.start();
     await service.start();
 
     expect(service.isRunning()).toBe(true);
-    expect(mockListCodexSessionFileInfos).toHaveBeenCalledTimes(1);
+    expect(mockListCodexSessionFileInfos).not.toHaveBeenCalled();
+
+    await vi.runOnlyPendingTimersAsync();
+    expect(mockListCodexSessionFileInfos).toHaveBeenCalledWith({ limitNewest: 3 });
 
     vi.advanceTimersByTime(1000);
     await vi.runOnlyPendingTimersAsync();
-    expect(mockListCodexSessionFileInfos.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(mockListCodexSessionFileInfos).toHaveBeenCalledWith();
+  });
+
+  it("head reconcile scans only newest files and reads prior state by those paths", async () => {
+    const { createCodexIndexService } = await loadService();
+    const fileInfo = {
+      filePath: "/tmp/codex/head.jsonl",
+      birthtimeMs: 100,
+      mtimeMs: 200,
+      size: 300,
+    };
+    mockListCodexSessionFileInfos.mockResolvedValue([fileInfo]);
+    mockReadCodexSessionMetaFromFile.mockResolvedValue({
+      id: "session-head",
+      model: "gpt-5.4",
+      prompt: "Prompt",
+      cwd: "/tmp/project",
+      createdAt: "2026-04-23T00:00:00.000Z",
+      updatedAt: "2026-04-23T00:00:01.000Z",
+      filePath: fileInfo.filePath,
+    });
+
+    const service = createCodexIndexService({ headFileLimit: 1 });
+    await service.runReconcileOnce("manual-head", "head");
+
+    expect(mockListCodexSessionFileInfos).toHaveBeenCalledWith({ limitNewest: 1 });
+    expect(mockListCodexSessionFileStatesByPaths).toHaveBeenCalledWith([fileInfo.filePath]);
+    expect(mockListCodexSessionFileStates).not.toHaveBeenCalled();
+    expect(mockDeleteCodexSessionsByFilePaths).not.toHaveBeenCalled();
+    expect(mockDeleteCodexLimitHeadsByFilePaths).not.toHaveBeenCalled();
+    expect(mockDeleteCodexLimitHistoryByFilePaths).not.toHaveBeenCalled();
+  });
+
+  it("backfill skips filesystem and SQLite work while the API is busy", async () => {
+    const { createCodexIndexService } = await loadService();
+    mockIsApiIdle.mockReturnValue(false);
+
+    const service = createCodexIndexService({ minIdleMs: 1000 });
+    const summary = await service.runReconcileOnce("manual-backfill", "backfill");
+
+    expect(summary.scannedFiles).toBe(0);
+    expect(summary.skippedForLoad).toBe(true);
+    expect(mockListCodexSessionFileInfos).not.toHaveBeenCalled();
+    expect(mockListCodexSessionFileStates).not.toHaveBeenCalled();
   });
 
   it("returns the same in-flight reconcile promise when called concurrently", async () => {
@@ -481,6 +543,58 @@ describe("codex index service", () => {
         runtimeProfileId: "profile-codex-1",
       }),
     );
+  });
+
+  it("prunes retention only for touched limit heads", async () => {
+    const { createCodexIndexService } = await loadService();
+    mockBuildCodexLimitHeadKey.mockReturnValue("head-key-touched");
+    mockListCodexSessionFileInfos.mockResolvedValue([
+      {
+        filePath: "/tmp/project-1/.codex/sessions/a.jsonl",
+        birthtimeMs: 100,
+        mtimeMs: 200,
+        size: 300,
+      },
+    ]);
+    mockReadCodexSessionMetaFromFile.mockResolvedValue({
+      id: "codex-session-1",
+      model: "gpt-5.4",
+      prompt: "Prompt",
+      cwd: "/tmp/project-1",
+      createdAt: "2026-04-23T00:00:00.000Z",
+      updatedAt: "2026-04-23T00:00:01.000Z",
+      filePath: "/tmp/project-1/.codex/sessions/a.jsonl",
+    });
+    mockReadCodexSessionLimitSnapshotsFromAppend.mockResolvedValue({
+      snapshots: [
+        {
+          source: "sdk_event",
+          status: "ok",
+          precision: "exact",
+          checkedAt: "2026-04-23T00:00:02.000Z",
+          providerId: "openai",
+          runtimeId: "codex",
+          profileId: null,
+          primaryScope: "time",
+          resetAt: "2026-04-23T02:00:00.000Z",
+          retryAfterSeconds: null,
+          warningThreshold: 10,
+          windows: [],
+          providerMeta: { limitId: "codex" },
+        },
+      ],
+      parsedOffset: 300,
+      pendingTail: "",
+    });
+
+    const service = createCodexIndexService({ historyRetentionPerHead: 3 });
+    await service.runReconcileOnce("manual");
+
+    expect(mockPruneCodexLimitHistoryByHead).toHaveBeenCalledWith({
+      headKey: "head-key-touched",
+      keepLatest: 3,
+    });
+    expect(mockPruneCodexLimitHistoryRetention).not.toHaveBeenCalled();
   });
 
   it("normalizes Codex project roots before notifying visible project profiles", async () => {

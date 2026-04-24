@@ -8,7 +8,6 @@ import {
   redactResolvedRuntimeProfile,
   resolveClaudeProviderIdentity,
   resolveRuntimeProfile,
-  selectPreferredCodexLimitSnapshot,
 } from "@aif/runtime";
 import {
   getEnv,
@@ -20,7 +19,6 @@ import {
   createRuntimeProfile,
   deleteRuntimeProfile,
   findRuntimeProfileById,
-  listCodexLimitHeadsForOverlay,
   findProjectById,
   findTaskById,
   getRuntimeProfileResponseById,
@@ -38,6 +36,7 @@ import {
   updateRuntimeProfileSchema,
 } from "../schemas.js";
 import { getApiRuntimeModelDiscoveryService, getApiRuntimeRegistry } from "../services/runtime.js";
+import { resolveCachedCodexOverlaySnapshot } from "../services/codexOverlayCache.js";
 import { createRateLimiter } from "../middleware/rateLimit.js";
 import { jsonValidator, queryValidator } from "../middleware/zodValidator.js";
 
@@ -211,7 +210,6 @@ function applyCodexSnapshotToProfile<T extends RuntimeLimitSnapshot>(
 }
 
 function createCodexIndexedSnapshotLookup() {
-  const cache = new Map<string, Promise<RuntimeLimitSnapshot[]>>();
   let authFingerprintPromise: Promise<string | null> | null = null;
 
   const readAuthFingerprint = async (): Promise<string | null> => {
@@ -234,35 +232,18 @@ function createCodexIndexedSnapshotLookup() {
       }
       return await readAuthFingerprint();
     },
-    async get(input: {
+    getSelected(input: {
       accountFingerprint: string;
       projectRoot?: string | null;
-    }): Promise<RuntimeLimitSnapshot[]> {
-      const key = `${input.accountFingerprint}|${input.projectRoot ?? "__global__"}`;
-      const cached = cache.get(key);
-      if (cached) {
-        return await cached;
-      }
-
-      const request = Promise.resolve(
-        listCodexLimitHeadsForOverlay({
-          accountFingerprint: input.accountFingerprint,
-          projectRoot: input.projectRoot ?? null,
-          includeGlobalFallback: true,
-          limit: 50,
-        }),
-      )
-        .then((rows) =>
-          rows
-            .map((row) => row.snapshot)
-            .filter((snapshot): snapshot is RuntimeLimitSnapshot => Boolean(snapshot)),
-        )
-        .catch((error) => {
-          cache.delete(key);
-          throw error;
-        });
-      cache.set(key, request);
-      return await request;
+      preferredLimitId?: string | null;
+      model?: string | null;
+    }): RuntimeLimitSnapshot | null {
+      return resolveCachedCodexOverlaySnapshot({
+        accountFingerprint: input.accountFingerprint,
+        projectRoot: input.projectRoot ?? null,
+        preferredLimitId: input.preferredLimitId ?? null,
+        model: input.model ?? null,
+      });
     },
   };
 }
@@ -309,11 +290,11 @@ async function refreshProfileWithIndexedCodexLimit<T extends LocalCodexAccountPr
     return profile;
   }
 
-  const indexedSnapshots = await snapshotLookup.get({ accountFingerprint, projectRoot });
-  const selectedSnapshot = selectPreferredCodexLimitSnapshot({
-    model,
-    snapshots: indexedSnapshots,
+  const selectedSnapshot = snapshotLookup.getSelected({
+    accountFingerprint,
+    projectRoot,
     preferredLimitId: persistedLimitId,
+    model,
   });
   if (!selectedSnapshot) {
     log.debug(
@@ -321,7 +302,6 @@ async function refreshProfileWithIndexedCodexLimit<T extends LocalCodexAccountPr
         profileId: profile.id,
         projectId: effectiveProjectId,
         projectRoot,
-        overlayCount: indexedSnapshots.length,
       },
       "DEBUG [runtime-profile-route] No indexed Codex overlay snapshot selected for profile",
     );
@@ -338,7 +318,6 @@ async function refreshProfileWithIndexedCodexLimit<T extends LocalCodexAccountPr
       profileId: profile.id,
       projectId: effectiveProjectId,
       projectRoot,
-      overlayCount: indexedSnapshots.length,
       persistedAtMs: Number.isFinite(persistedAtMs) ? persistedAtMs : null,
       indexedCheckedAtMs: Number.isFinite(indexedCheckedAtMs) ? indexedCheckedAtMs : null,
     },

@@ -20,12 +20,26 @@ const mockListRuntimes = vi.fn();
 const mockGetCodexAuthIdentity = vi.fn();
 const mockBuildCodexAuthFingerprint = vi.fn();
 const mockResolveClaudeProviderIdentity = vi.fn();
+const mockListCodexLimitHeadsForOverlayCall = vi.fn();
 
 vi.mock("@aif/shared/server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@aif/shared/server")>();
   return {
     ...actual,
     getDb: () => testDb.current,
+  };
+});
+
+vi.mock("@aif/data", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@aif/data")>();
+  return {
+    ...actual,
+    listCodexLimitHeadsForOverlay: (
+      ...args: Parameters<typeof actual.listCodexLimitHeadsForOverlay>
+    ) => {
+      mockListCodexLimitHeadsForOverlayCall(...args);
+      return actual.listCodexLimitHeadsForOverlay(...args);
+    },
   };
 });
 
@@ -53,6 +67,8 @@ vi.mock("../services/runtime.js", () => ({
 }));
 
 const { runtimeProfilesRouter } = await import("../routes/runtimeProfiles.js");
+const { clearCodexOverlayCache, invalidateCodexOverlayCache } =
+  await import("../services/codexOverlayCache.js");
 
 function createApp() {
   const app = new Hono();
@@ -125,6 +141,8 @@ describe("runtimeProfiles API", () => {
     mockGetCodexAuthIdentity.mockReset();
     mockBuildCodexAuthFingerprint.mockReset();
     mockResolveClaudeProviderIdentity.mockReset();
+    mockListCodexLimitHeadsForOverlayCall.mockReset();
+    clearCodexOverlayCache();
     mockGetCodexAuthIdentity.mockResolvedValue(null);
     mockBuildCodexAuthFingerprint.mockReturnValue("codex-fp-default");
     mockResolveClaudeProviderIdentity.mockResolvedValue({
@@ -565,6 +583,127 @@ describe("runtimeProfiles API", () => {
         }),
       }),
     );
+  });
+
+  it("caches indexed Codex overlays across runtime profile requests until invalidated", async () => {
+    mockBuildCodexAuthFingerprint.mockReturnValue("codex-fp-1");
+
+    const db = testDb.current;
+    db.insert(projects)
+      .values({
+        id: "project-1",
+        name: "Project One",
+        rootPath: "/tmp/project-1",
+      })
+      .run();
+    db.insert(runtimeProfiles)
+      .values({
+        id: "profile-codex-cache",
+        projectId: "project-1",
+        name: "Codex Cached",
+        runtimeId: "codex",
+        providerId: "openai",
+        transport: "sdk",
+        defaultModel: "gpt-5.4",
+        enabled: true,
+      })
+      .run();
+    db.insert(codexLimitHeads)
+      .values({
+        headKey: buildCodexHeadKey({
+          accountFingerprint: "codex-fp-1",
+          projectRoot: "/tmp/project-1",
+          limitId: "codex",
+          model: "gpt-5.4",
+        }),
+        accountFingerprint: "codex-fp-1",
+        projectRoot: "/tmp/project-1",
+        limitId: "codex",
+        model: "gpt-5.4",
+        source: "codex",
+        snapshotJson: JSON.stringify(
+          buildCodexSnapshot({
+            checkedAt: "2026-04-19T09:26:34.000Z",
+            profileId: null,
+            limitId: "codex",
+            windows: [
+              {
+                scope: "time",
+                name: "5h",
+                percentRemaining: 100,
+                resetAt: "2026-04-19T12:16:40.000Z",
+              },
+            ],
+          }),
+        ),
+        observedAt: "2026-04-19T09:26:34.000Z",
+        sessionId: "codex-session-cache",
+        filePath: "/tmp/project-1/.codex/sessions/cache.jsonl",
+      })
+      .run();
+
+    const first = await app.request("/runtime-profiles?projectId=project-1&includeGlobal=true");
+    const second = await app.request("/runtime-profiles?projectId=project-1&includeGlobal=true");
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(mockListCodexLimitHeadsForOverlayCall).toHaveBeenCalledTimes(1);
+
+    invalidateCodexOverlayCache();
+    const third = await app.request("/runtime-profiles?projectId=project-1&includeGlobal=true");
+    expect(third.status).toBe(200);
+    expect(mockListCodexLimitHeadsForOverlayCall).toHaveBeenCalledTimes(2);
+  });
+
+  it("falls back to the persisted Codex profile snapshot when no indexed overlay is ready", async () => {
+    mockBuildCodexAuthFingerprint.mockReturnValue("codex-fp-1");
+
+    const db = testDb.current;
+    db.insert(projects)
+      .values({
+        id: "project-1",
+        name: "Project One",
+        rootPath: "/tmp/project-1",
+      })
+      .run();
+    db.insert(runtimeProfiles)
+      .values({
+        id: "profile-codex-stale",
+        projectId: "project-1",
+        name: "Codex Stale",
+        runtimeId: "codex",
+        providerId: "openai",
+        transport: "sdk",
+        defaultModel: "gpt-5.4",
+        enabled: true,
+        runtimeLimitSnapshotJson: JSON.stringify(
+          buildCodexSnapshot({
+            checkedAt: "2026-04-18T09:00:00.000Z",
+            profileId: "profile-codex-stale",
+            limitId: "codex",
+            windows: [
+              {
+                scope: "time",
+                name: "5h",
+                percentRemaining: 42,
+                resetAt: "2026-04-18T12:00:00.000Z",
+              },
+            ],
+          }),
+        ),
+        runtimeLimitUpdatedAt: "2026-04-18T09:00:00.000Z",
+      })
+      .run();
+
+    const res = await app.request("/runtime-profiles?projectId=project-1&includeGlobal=true");
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body[0].runtimeLimitSnapshot).toEqual(
+      expect.objectContaining({
+        checkedAt: "2026-04-18T09:00:00.000Z",
+        profileId: "profile-codex-stale",
+      }),
+    );
+    expect(mockListCodexLimitHeadsForOverlayCall).toHaveBeenCalledTimes(1);
   });
 
   it("prefers the non-default indexed Codex pool for Spark profiles when multiple pools are available", async () => {

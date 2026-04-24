@@ -6,9 +6,10 @@ import {
   deleteCodexSessionsByFilePaths,
   listCodexLimitHeadScopesByFilePaths,
   listCodexSessionFileStates,
+  listCodexSessionFileStatesByPaths,
   listProjects,
   listRuntimeProfileResponses,
-  pruneCodexLimitHistoryRetention,
+  pruneCodexLimitHistoryByHead,
   upsertCodexIndexCursor,
   upsertCodexLimitHeads,
   upsertCodexSessionFiles,
@@ -32,15 +33,25 @@ import {
   type RuntimeLimitSnapshot,
 } from "@aif/runtime";
 import { logger } from "@aif/shared";
+import { isApiIdle } from "../middleware/apiLoad.js";
+import { invalidateCodexOverlayCache } from "./codexOverlayCache.js";
 import { notifyRuntimeLimitProjectUpdate } from "./runtime.js";
 
 const log = logger("api-codex-index");
 
 const DEFAULT_RUNTIME_ID = "codex";
 const DEFAULT_PROVIDER_ID = "openai";
-const DEFAULT_RECONCILE_INTERVAL_MS = 30_000;
+const DEFAULT_BACKFILL_INTERVAL_MS = 10 * 60_000;
 const DEFAULT_HISTORY_RETENTION_PER_HEAD = 20;
 const DEFAULT_IMPORT_VERSION = 1;
+const DEFAULT_HEAD_FILE_LIMIT = 200;
+const DEFAULT_HEAD_TIME_BUDGET_MS = 150;
+const DEFAULT_BACKFILL_SLICE_MS = 30;
+const DEFAULT_BACKFILL_FILES_PER_SLICE = 20;
+const DEFAULT_MIN_IDLE_MS = 1000;
+const DEFAULT_HEAD_WARMUP_DELAY_MS = 0;
+const DEFAULT_IDLE_RETRY_MS = 250;
+const DEFAULT_DB_FLUSH_BATCH_SIZE = 20;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === "object" && !Array.isArray(value);
@@ -88,6 +99,13 @@ function parseTimestampMs(value: string | null | undefined): number {
   return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY;
 }
 
+function readPositiveInteger(value: number | undefined, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.max(1, Math.trunc(value));
+}
+
 export interface CodexIndexReconcileSummary {
   reason: string;
   scannedFiles: number;
@@ -99,19 +117,35 @@ export interface CodexIndexReconcileSummary {
   historyRowsAppended: number;
   headRowsDeleted: number;
   historyRowsDeleted: number;
+  skippedForLoad?: boolean;
+  truncated?: boolean;
 }
+
+export type CodexIndexReconcileMode = "head" | "backfill";
 
 export interface CodexIndexService {
   start(): Promise<void>;
   stop(): Promise<void>;
   isRunning(): boolean;
-  runReconcileOnce(reason?: string): Promise<CodexIndexReconcileSummary>;
+  runReconcileOnce(
+    reason?: string,
+    mode?: CodexIndexReconcileMode,
+  ): Promise<CodexIndexReconcileSummary>;
 }
 
 export interface CreateCodexIndexServiceOptions {
   runtimeId?: string;
   providerId?: string;
   reconcileIntervalMs?: number;
+  backfillIntervalMs?: number;
+  headFileLimit?: number;
+  headTimeBudgetMs?: number;
+  backfillSliceMs?: number;
+  backfillFilesPerSlice?: number;
+  minIdleMs?: number;
+  headWarmupDelayMs?: number;
+  idleRetryMs?: number;
+  dbFlushBatchSize?: number;
   historyRetentionPerHead?: number;
   importVersion?: number;
 }
@@ -121,24 +155,83 @@ export function createCodexIndexService(
 ): CodexIndexService {
   const runtimeId = options.runtimeId ?? DEFAULT_RUNTIME_ID;
   const providerId = options.providerId ?? DEFAULT_PROVIDER_ID;
-  const reconcileIntervalMs = options.reconcileIntervalMs ?? DEFAULT_RECONCILE_INTERVAL_MS;
+  const backfillIntervalMs = readPositiveInteger(
+    options.backfillIntervalMs ?? options.reconcileIntervalMs,
+    DEFAULT_BACKFILL_INTERVAL_MS,
+  );
+  const headFileLimit = readPositiveInteger(options.headFileLimit, DEFAULT_HEAD_FILE_LIMIT);
+  const headTimeBudgetMs = readPositiveInteger(
+    options.headTimeBudgetMs,
+    DEFAULT_HEAD_TIME_BUDGET_MS,
+  );
+  const backfillSliceMs = readPositiveInteger(options.backfillSliceMs, DEFAULT_BACKFILL_SLICE_MS);
+  const backfillFilesPerSlice = readPositiveInteger(
+    options.backfillFilesPerSlice,
+    DEFAULT_BACKFILL_FILES_PER_SLICE,
+  );
+  const minIdleMs = readPositiveInteger(options.minIdleMs, DEFAULT_MIN_IDLE_MS);
+  const headWarmupDelayMs = Math.max(
+    0,
+    Math.trunc(options.headWarmupDelayMs ?? DEFAULT_HEAD_WARMUP_DELAY_MS),
+  );
+  const idleRetryMs = readPositiveInteger(options.idleRetryMs, DEFAULT_IDLE_RETRY_MS);
+  const dbFlushBatchSize = readPositiveInteger(
+    options.dbFlushBatchSize,
+    DEFAULT_DB_FLUSH_BATCH_SIZE,
+  );
   const historyRetentionPerHead =
     options.historyRetentionPerHead ?? DEFAULT_HISTORY_RETENTION_PER_HEAD;
   const importVersion = options.importVersion ?? DEFAULT_IMPORT_VERSION;
 
   let running = false;
-  let reconcileTimer: ReturnType<typeof setTimeout> | null = null;
+  let headWarmupTimer: ReturnType<typeof setTimeout> | null = null;
+  let backfillTimer: ReturnType<typeof setTimeout> | null = null;
   let inFlight: Promise<CodexIndexReconcileSummary> | null = null;
 
-  const scheduleNext = () => {
+  const scheduleHeadWarmupSoon = (delayMs = headWarmupDelayMs) => {
     if (!running) {
       return;
     }
-    reconcileTimer = setTimeout(() => {
-      void runReconcileOnce("scheduled").finally(() => {
-        scheduleNext();
-      });
-    }, reconcileIntervalMs);
+    if (headWarmupTimer) {
+      clearTimeout(headWarmupTimer);
+    }
+    headWarmupTimer = setTimeout(() => {
+      headWarmupTimer = null;
+      void runReconcileOnce("head-warmup", "head")
+        .then((summary) => {
+          if (running && (summary.skippedForLoad || summary.truncated)) {
+            scheduleHeadWarmupSoon(idleRetryMs);
+          }
+        })
+        .catch((error) => {
+          log.warn({ err: error, runtimeId, providerId }, "Codex head warm-up failed");
+          if (running) {
+            scheduleHeadWarmupSoon(idleRetryMs);
+          }
+        });
+    }, delayMs);
+  };
+
+  const scheduleIdleBackfillLater = (delayMs = backfillIntervalMs) => {
+    if (!running) {
+      return;
+    }
+    if (backfillTimer) {
+      clearTimeout(backfillTimer);
+    }
+    backfillTimer = setTimeout(() => {
+      backfillTimer = null;
+      void runReconcileOnce("idle-backfill", "backfill")
+        .then((summary) => {
+          scheduleIdleBackfillLater(
+            summary.skippedForLoad || summary.truncated ? idleRetryMs : backfillIntervalMs,
+          );
+        })
+        .catch((error) => {
+          log.warn({ err: error, runtimeId, providerId }, "Codex idle backfill failed");
+          scheduleIdleBackfillLater(idleRetryMs);
+        });
+    }, delayMs);
   };
 
   const notifyVisibleProjectsWithCodexLimitUpdate = (input: {
@@ -244,13 +337,71 @@ export function createCodexIndexService(
     );
   };
 
-  const reconcile = async (reason: string): Promise<CodexIndexReconcileSummary> => {
+  const emptySummary = (
+    reason: string,
+    extra: Pick<CodexIndexReconcileSummary, "skippedForLoad" | "truncated"> = {},
+  ): CodexIndexReconcileSummary => ({
+    reason,
+    scannedFiles: 0,
+    changedFiles: 0,
+    missingFiles: 0,
+    sessionRowsUpserted: 0,
+    fileRowsUpserted: 0,
+    headRowsUpserted: 0,
+    historyRowsAppended: 0,
+    headRowsDeleted: 0,
+    historyRowsDeleted: 0,
+    ...extra,
+  });
+
+  const yieldToEventLoop = async (): Promise<void> => {
+    await Promise.resolve();
+  };
+
+  const shouldPauseForLoad = (): boolean => !isApiIdle(minIdleMs);
+
+  const writeRowsInBatches = async <T>(
+    rows: T[],
+    writer: (chunk: T[]) => number,
+  ): Promise<{ written: number; interrupted: boolean }> => {
+    let written = 0;
+    for (let i = 0; i < rows.length; i += dbFlushBatchSize) {
+      if (shouldPauseForLoad()) {
+        return { written, interrupted: true };
+      }
+      written += writer(rows.slice(i, i + dbFlushBatchSize));
+      await yieldToEventLoop();
+    }
+    return { written, interrupted: false };
+  };
+
+  const reconcile = async (
+    reason: string,
+    mode: CodexIndexReconcileMode,
+  ): Promise<CodexIndexReconcileSummary> => {
     const startedAt = Date.now();
+    if (shouldPauseForLoad()) {
+      log.debug({ reason, mode, minIdleMs }, "Codex index reconcile skipped due API load");
+      return emptySummary(reason, { skippedForLoad: true });
+    }
+
     const nowIso = new Date().toISOString();
     const authIdentity = await getCodexAuthIdentity();
     const fallbackAccountFingerprint = buildCodexAuthFingerprint(authIdentity);
-    const files = await listCodexSessionFileInfos();
-    const previousStates = listCodexSessionFileStates();
+
+    if (shouldPauseForLoad()) {
+      log.debug({ reason, mode, minIdleMs }, "Codex index reconcile paused before file scan");
+      return emptySummary(reason, { skippedForLoad: true });
+    }
+
+    const files =
+      mode === "head"
+        ? await listCodexSessionFileInfos({ limitNewest: headFileLimit })
+        : await listCodexSessionFileInfos();
+    const previousStates =
+      mode === "head"
+        ? listCodexSessionFileStatesByPaths(files.map((file) => file.filePath))
+        : listCodexSessionFileStates();
     const previousByPath = new Map(previousStates.map((row) => [row.filePath, row]));
     const currentPathSet = new Set(files.map((file) => file.filePath));
 
@@ -261,8 +412,26 @@ export function createCodexIndexService(
     const staleLimitFilePaths: string[] = [];
 
     let changedFiles = 0;
+    let truncated = false;
+    let skippedForLoad = false;
 
     for (const fileInfo of files) {
+      if (shouldPauseForLoad()) {
+        skippedForLoad = true;
+        break;
+      }
+      if (mode === "head" && Date.now() - startedAt >= headTimeBudgetMs) {
+        truncated = true;
+        break;
+      }
+      if (
+        mode === "backfill" &&
+        (changedFiles >= backfillFilesPerSlice || Date.now() - startedAt >= backfillSliceMs)
+      ) {
+        truncated = true;
+        break;
+      }
+
       const previous = previousByPath.get(fileInfo.filePath);
       const status = classifyCodexSessionFileStatus({
         previous: previous
@@ -280,7 +449,7 @@ export function createCodexIndexService(
         continue;
       }
       changedFiles += 1;
-      if (status !== "appended") {
+      if (status !== "appended" && previous && !previous.missing) {
         staleLimitFilePaths.push(fileInfo.filePath);
       }
 
@@ -364,9 +533,14 @@ export function createCodexIndexService(
       fileRows.push(nextFileState);
     }
 
-    const missingPaths = previousStates
-      .filter((row) => !currentPathSet.has(row.filePath))
-      .map((row) => row.filePath);
+    const remainingBackfillFileBudget = Math.max(0, backfillFilesPerSlice - changedFiles);
+    const missingPaths =
+      mode === "backfill" && remainingBackfillFileBudget > 0
+        ? previousStates
+            .filter((row) => !row.missing && !currentPathSet.has(row.filePath))
+            .slice(0, remainingBackfillFileBudget)
+            .map((row) => row.filePath)
+        : [];
     if (missingPaths.length > 0) {
       changedFiles += missingPaths.length;
       const missingRows = previousStates
@@ -383,23 +557,47 @@ export function createCodexIndexService(
           lastSeenAt: nowIso,
         }));
       fileRows.push(...missingRows);
-      deleteCodexSessionsByFilePaths(missingPaths);
       staleLimitFilePaths.push(...missingPaths);
     }
 
     const uniqueStaleLimitFilePaths = [...new Set(staleLimitFilePaths)];
+    if (skippedForLoad || shouldPauseForLoad()) {
+      return {
+        ...emptySummary(reason, { skippedForLoad: true, truncated }),
+        scannedFiles: files.length,
+        changedFiles,
+        missingFiles: missingPaths.length,
+      };
+    }
+
     const deletedLimitScopes =
       uniqueStaleLimitFilePaths.length > 0
         ? listCodexLimitHeadScopesByFilePaths(uniqueStaleLimitFilePaths)
         : [];
+    if (uniqueStaleLimitFilePaths.length > 0) {
+      await yieldToEventLoop();
+    }
+    const sessionRowsDeleted =
+      uniqueStaleLimitFilePaths.length > 0
+        ? deleteCodexSessionsByFilePaths(uniqueStaleLimitFilePaths)
+        : 0;
+    if (sessionRowsDeleted > 0) {
+      await yieldToEventLoop();
+    }
     const headRowsDeleted =
       uniqueStaleLimitFilePaths.length > 0
         ? deleteCodexLimitHeadsByFilePaths(uniqueStaleLimitFilePaths)
         : 0;
+    if (headRowsDeleted > 0) {
+      await yieldToEventLoop();
+    }
     const staleHistoryRowsDeleted =
       uniqueStaleLimitFilePaths.length > 0
         ? deleteCodexLimitHistoryByFilePaths(uniqueStaleLimitFilePaths)
         : 0;
+    if (staleHistoryRowsDeleted > 0) {
+      await yieldToEventLoop();
+    }
     if (uniqueStaleLimitFilePaths.length > 0) {
       log.debug(
         {
@@ -413,12 +611,38 @@ export function createCodexIndexService(
       );
     }
 
-    const sessionRowsUpserted = sessionRows.length > 0 ? upsertCodexSessions(sessionRows) : 0;
-    const fileRowsUpserted = fileRows.length > 0 ? upsertCodexSessionFiles(fileRows) : 0;
-    const headRowsUpserted = headRows.length > 0 ? upsertCodexLimitHeads(headRows) : 0;
-    const historyRowsAppended = historyRows.length > 0 ? appendCodexLimitHistory(historyRows) : 0;
-    const retainedHistoryRowsDeleted =
-      historyRetentionPerHead > 0 ? pruneCodexLimitHistoryRetention(historyRetentionPerHead) : 0;
+    const sessionWrite = await writeRowsInBatches(sessionRows, upsertCodexSessions);
+    const fileWrite = await writeRowsInBatches(fileRows, upsertCodexSessionFiles);
+    const headWrite = await writeRowsInBatches(headRows, upsertCodexLimitHeads);
+    const historyWrite = await writeRowsInBatches(historyRows, appendCodexLimitHistory);
+    const interrupted =
+      sessionWrite.interrupted ||
+      fileWrite.interrupted ||
+      headWrite.interrupted ||
+      historyWrite.interrupted;
+    const sessionRowsUpserted = sessionWrite.written;
+    const fileRowsUpserted = fileWrite.written;
+    const headRowsUpserted = headWrite.written;
+    const historyRowsAppended = historyWrite.written;
+    let retainedHistoryRowsDeleted = 0;
+    if (!interrupted && historyRetentionPerHead > 0) {
+      const touchedHeadKeys = new Set(
+        historyRows
+          .map((row) => row.headKey)
+          .filter((headKey): headKey is string => Boolean(headKey)),
+      );
+      for (const headKey of touchedHeadKeys) {
+        if (shouldPauseForLoad()) {
+          skippedForLoad = true;
+          break;
+        }
+        retainedHistoryRowsDeleted += pruneCodexLimitHistoryByHead({
+          headKey,
+          keepLatest: historyRetentionPerHead,
+        });
+        await yieldToEventLoop();
+      }
+    }
     const historyRowsDeleted = staleHistoryRowsDeleted + retainedHistoryRowsDeleted;
 
     const summary: CodexIndexReconcileSummary = {
@@ -432,20 +656,28 @@ export function createCodexIndexService(
       historyRowsAppended,
       headRowsDeleted,
       historyRowsDeleted,
+      ...(skippedForLoad || interrupted ? { skippedForLoad: true } : {}),
+      ...(truncated ? { truncated: true } : {}),
     };
 
-    upsertCodexIndexCursor({
-      cursorKey: "codex:index:last_reconcile",
-      cursorValue: nowIso,
-      cursorJson: {
-        runtimeId,
-        providerId,
-        importVersion,
-        durationMs: Date.now() - startedAt,
-        ...summary,
-      },
-      updatedAt: nowIso,
-    });
+    if (!summary.skippedForLoad && !interrupted) {
+      upsertCodexIndexCursor({
+        cursorKey: "codex:index:last_reconcile",
+        cursorValue: nowIso,
+        cursorJson: {
+          runtimeId,
+          providerId,
+          importVersion,
+          durationMs: Date.now() - startedAt,
+          mode,
+          ...summary,
+        },
+        updatedAt: nowIso,
+      });
+    }
+    if (summary.headRowsUpserted > 0 || summary.headRowsDeleted > 0) {
+      invalidateCodexOverlayCache();
+    }
     notifyVisibleProjectsWithCodexLimitUpdate({
       headRows,
       deletedScopes: deletedLimitScopes,
@@ -475,12 +707,15 @@ export function createCodexIndexService(
     return summary;
   };
 
-  const runReconcileOnce = async (reason = "manual"): Promise<CodexIndexReconcileSummary> => {
+  const runReconcileOnce = async (
+    reason = "manual",
+    mode: CodexIndexReconcileMode = "backfill",
+  ): Promise<CodexIndexReconcileSummary> => {
     if (inFlight) {
-      log.debug({ reason }, "Codex index reconcile skipped because another pass is running");
+      log.debug({ reason, mode }, "Codex index reconcile skipped because another pass is running");
       return inFlight;
     }
-    inFlight = reconcile(reason).finally(() => {
+    inFlight = reconcile(reason, mode).finally(() => {
       inFlight = null;
     });
     return inFlight;
@@ -494,16 +729,11 @@ export function createCodexIndexService(
 
     running = true;
     log.info({ runtimeId, providerId }, "Codex indexer start");
-    try {
-      await runReconcileOnce("warmup");
-      log.info({ runtimeId, providerId }, "Codex indexer warm-up done");
-    } catch (error) {
-      log.error({ err: error, runtimeId, providerId }, "Codex indexer warm-up failed");
-    }
-    scheduleNext();
+    scheduleHeadWarmupSoon();
+    scheduleIdleBackfillLater();
     log.info(
-      { runtimeId, providerId, reconcileIntervalMs },
-      "Codex indexer reconcile loop started",
+      { runtimeId, providerId, headFileLimit, backfillIntervalMs, minIdleMs },
+      "Codex indexer idle reconcile loop started",
     );
   };
 
@@ -514,9 +744,13 @@ export function createCodexIndexService(
     }
 
     running = false;
-    if (reconcileTimer) {
-      clearTimeout(reconcileTimer);
-      reconcileTimer = null;
+    if (headWarmupTimer) {
+      clearTimeout(headWarmupTimer);
+      headWarmupTimer = null;
+    }
+    if (backfillTimer) {
+      clearTimeout(backfillTimer);
+      backfillTimer = null;
     }
     log.info({ runtimeId, providerId }, "Codex indexer stop requested");
     try {
