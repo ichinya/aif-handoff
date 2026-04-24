@@ -1,6 +1,8 @@
 import {
   appendCodexLimitHistory,
   buildCodexLimitHeadKey,
+  deleteCodexLimitHeadsByFilePaths,
+  deleteCodexLimitHistoryByFilePaths,
   deleteCodexSessionsByFilePaths,
   listCodexSessionFileStates,
   listProjects,
@@ -22,7 +24,6 @@ import {
   listCodexSessionFileInfos,
   normalizeCodexProjectPath,
   readCodexSessionLimitSnapshotsFromAppend,
-  readCodexSessionLimitSnapshotsFromFile,
   readCodexSessionMetaFromFile,
   readCodexSnapshotAccountFingerprint,
   type CodexSessionFileInfo,
@@ -94,6 +95,7 @@ export interface CodexIndexReconcileSummary {
   fileRowsUpserted: number;
   headRowsUpserted: number;
   historyRowsAppended: number;
+  headRowsDeleted: number;
   historyRowsDeleted: number;
 }
 
@@ -237,6 +239,7 @@ export function createCodexIndexService(
     const fileRows: UpsertCodexSessionFileInput[] = [];
     const headRows: UpsertCodexLimitHeadInput[] = [];
     const historyRows: AppendCodexLimitHistoryInput[] = [];
+    const staleLimitFilePaths: string[] = [];
 
     let changedFiles = 0;
 
@@ -258,6 +261,9 @@ export function createCodexIndexService(
         continue;
       }
       changedFiles += 1;
+      if (status !== "appended") {
+        staleLimitFilePaths.push(fileInfo.filePath);
+      }
 
       const sessionMeta = await readCodexSessionMetaFromFile(fileInfo);
       if (sessionMeta) {
@@ -277,40 +283,33 @@ export function createCodexIndexService(
         });
       }
 
-      let nextParsedOffset = fileInfo.size;
-      let nextPendingTail = "";
-      const snapshots =
+      const appendStartOffset =
+        status === "appended" ? (previous?.parsedOffset ?? previous?.sizeBytes ?? 0) : 0;
+      const appendPendingTail = status === "appended" ? (previous?.pendingTail ?? "") : "";
+      const snapshotParseResult = await readCodexSessionLimitSnapshotsFromAppend({
+        fileInfo,
+        startOffset: appendStartOffset,
+        pendingTail: appendPendingTail,
+        runtimeId,
+        providerId,
+        profileId: null,
+        authIdentity,
+      });
+      const nextParsedOffset = snapshotParseResult.parsedOffset;
+      const nextPendingTail = snapshotParseResult.pendingTail;
+      const snapshots = snapshotParseResult.snapshots;
+      log.debug(
+        {
+          reason,
+          status,
+          parsedBytes: Math.max(0, snapshotParseResult.parsedOffset - appendStartOffset),
+          pendingTailBytes: snapshotParseResult.pendingTail.length,
+          snapshotCount: snapshotParseResult.snapshots.length,
+        },
         status === "appended"
-          ? await readCodexSessionLimitSnapshotsFromAppend({
-              fileInfo,
-              startOffset: previous?.parsedOffset ?? previous?.sizeBytes ?? 0,
-              pendingTail: previous?.pendingTail ?? "",
-              runtimeId,
-              providerId,
-              profileId: null,
-              authIdentity,
-            }).then((result) => {
-              nextParsedOffset = result.parsedOffset;
-              nextPendingTail = result.pendingTail;
-              log.debug(
-                {
-                  reason,
-                  status,
-                  parsedBytes: Math.max(0, result.parsedOffset - (previous?.parsedOffset ?? 0)),
-                  pendingTailBytes: result.pendingTail.length,
-                  snapshotCount: result.snapshots.length,
-                },
-                "DEBUG [FIX:codex-index-append] Parsed Codex appended session range",
-              );
-              return result.snapshots;
-            })
-          : await readCodexSessionLimitSnapshotsFromFile(fileInfo, {
-              runtimeId,
-              providerId,
-              profileId: null,
-              authIdentity,
-              fast: false,
-            });
+          ? "DEBUG [FIX:codex-index-append] Parsed Codex appended session range"
+          : "DEBUG [FIX:codex-index-full-range] Parsed Codex full session range with cursor state",
+      );
 
       for (const snapshot of snapshots) {
         const accountFingerprint =
@@ -366,14 +365,37 @@ export function createCodexIndexService(
         }));
       fileRows.push(...missingRows);
       deleteCodexSessionsByFilePaths(missingPaths);
+      staleLimitFilePaths.push(...missingPaths);
+    }
+
+    const uniqueStaleLimitFilePaths = [...new Set(staleLimitFilePaths)];
+    const headRowsDeleted =
+      uniqueStaleLimitFilePaths.length > 0
+        ? deleteCodexLimitHeadsByFilePaths(uniqueStaleLimitFilePaths)
+        : 0;
+    const staleHistoryRowsDeleted =
+      uniqueStaleLimitFilePaths.length > 0
+        ? deleteCodexLimitHistoryByFilePaths(uniqueStaleLimitFilePaths)
+        : 0;
+    if (uniqueStaleLimitFilePaths.length > 0) {
+      log.debug(
+        {
+          reason,
+          staleFileCount: uniqueStaleLimitFilePaths.length,
+          headRowsDeleted,
+          historyRowsDeleted: staleHistoryRowsDeleted,
+        },
+        "DEBUG [FIX:codex-index-cleanup] Deleted stale Codex limit rows for changed files",
+      );
     }
 
     const sessionRowsUpserted = sessionRows.length > 0 ? upsertCodexSessions(sessionRows) : 0;
     const fileRowsUpserted = fileRows.length > 0 ? upsertCodexSessionFiles(fileRows) : 0;
     const headRowsUpserted = headRows.length > 0 ? upsertCodexLimitHeads(headRows) : 0;
     const historyRowsAppended = historyRows.length > 0 ? appendCodexLimitHistory(historyRows) : 0;
-    const historyRowsDeleted =
+    const retainedHistoryRowsDeleted =
       historyRetentionPerHead > 0 ? pruneCodexLimitHistoryRetention(historyRetentionPerHead) : 0;
+    const historyRowsDeleted = staleHistoryRowsDeleted + retainedHistoryRowsDeleted;
 
     const summary: CodexIndexReconcileSummary = {
       reason,
@@ -384,6 +406,7 @@ export function createCodexIndexService(
       fileRowsUpserted,
       headRowsUpserted,
       historyRowsAppended,
+      headRowsDeleted,
       historyRowsDeleted,
     };
 
@@ -418,6 +441,7 @@ export function createCodexIndexService(
         fileRowsUpserted: summary.fileRowsUpserted,
         headRowsUpserted: summary.headRowsUpserted,
         historyRowsAppended: summary.historyRowsAppended,
+        headRowsDeleted: summary.headRowsDeleted,
         historyRowsDeleted: summary.historyRowsDeleted,
       },
       "Codex index reconcile finished",

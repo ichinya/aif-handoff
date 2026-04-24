@@ -2844,6 +2844,36 @@ export function deleteCodexSessionsByFilePaths(filePaths: string[]): number {
   return result.changes;
 }
 
+export function deleteCodexLimitHeadsByFilePaths(filePaths: string[]): number {
+  if (filePaths.length === 0) {
+    return 0;
+  }
+  const result = getDb()
+    .delete(codexLimitHeads)
+    .where(inArray(codexLimitHeads.filePath, filePaths))
+    .run();
+  log.debug(
+    { requestedCount: filePaths.length, deletedRows: result.changes },
+    "Deleted codex limit-head rows by file paths",
+  );
+  return result.changes;
+}
+
+export function deleteCodexLimitHistoryByFilePaths(filePaths: string[]): number {
+  if (filePaths.length === 0) {
+    return 0;
+  }
+  const result = getDb()
+    .delete(codexLimitHistory)
+    .where(inArray(codexLimitHistory.filePath, filePaths))
+    .run();
+  log.debug(
+    { requestedCount: filePaths.length, deletedRows: result.changes },
+    "Deleted codex limit-history rows by file paths",
+  );
+  return result.changes;
+}
+
 export function upsertCodexLimitHeads(rows: UpsertCodexLimitHeadInput[]): number {
   if (rows.length === 0) {
     log.debug({ requestedCount: 0 }, "Skipping codex limit-head upsert (empty batch)");

@@ -65,6 +65,8 @@ const {
   appendCodexLimitHistory,
   pruneCodexLimitHistoryByHead,
   pruneCodexLimitHistoryRetention,
+  deleteCodexLimitHeadsByFilePaths,
+  deleteCodexLimitHistoryByFilePaths,
   upsertCodexIndexCursor,
   findCodexIndexCursor,
   listCodexSessionFileStates,
@@ -1300,6 +1302,38 @@ describe("data layer", () => {
       ]);
       const deletedByGlobalRetention = pruneCodexLimitHistoryRetention(2);
       expect(deletedByGlobalRetention).toBeGreaterThanOrEqual(1);
+    });
+
+    it("deletes stale limit heads and history by source file path", () => {
+      const snapshot = makeCodexSnapshot("2026-04-23T10:00:00.000Z");
+      upsertCodexLimitHeads([
+        {
+          accountFingerprint: "acct-1",
+          projectRoot: "/tmp/test",
+          limitId: "codex",
+          snapshot,
+          observedAt: snapshot.checkedAt,
+          filePath: "/tmp/codex/stale.jsonl",
+        },
+      ]);
+      appendCodexLimitHistory([
+        {
+          accountFingerprint: "acct-1",
+          projectRoot: "/tmp/test",
+          limitId: "codex",
+          snapshot,
+          observedAt: snapshot.checkedAt,
+          filePath: "/tmp/codex/stale.jsonl",
+        },
+      ]);
+
+      expect(deleteCodexLimitHeadsByFilePaths(["/tmp/codex/stale.jsonl"])).toBe(1);
+      expect(deleteCodexLimitHistoryByFilePaths(["/tmp/codex/stale.jsonl"])).toBe(1);
+
+      const remainingHeads = testDb.current.select().from(codexLimitHeads).all();
+      const remainingHistory = testDb.current.select().from(codexLimitHistory).all();
+      expect(remainingHeads).toHaveLength(0);
+      expect(remainingHistory).toHaveLength(0);
     });
 
     it("upserts and resolves index cursors with parsed JSON", () => {

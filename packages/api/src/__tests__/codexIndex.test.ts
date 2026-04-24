@@ -9,6 +9,8 @@ const mockLog = {
 
 const mockAppendCodexLimitHistory = vi.fn(() => 0);
 const mockBuildCodexLimitHeadKey = vi.fn(() => "head-key");
+const mockDeleteCodexLimitHeadsByFilePaths = vi.fn(() => 0);
+const mockDeleteCodexLimitHistoryByFilePaths = vi.fn(() => 0);
 const mockDeleteCodexSessionsByFilePaths = vi.fn(() => 0);
 const mockListCodexSessionFileStates = vi.fn(() => [] as Array<Record<string, unknown>>);
 const mockListProjects = vi.fn(() => [] as Array<Record<string, unknown>>);
@@ -45,6 +47,8 @@ vi.mock("@aif/shared", async (importOriginal) => {
 vi.mock("@aif/data", () => ({
   appendCodexLimitHistory: mockAppendCodexLimitHistory,
   buildCodexLimitHeadKey: mockBuildCodexLimitHeadKey,
+  deleteCodexLimitHeadsByFilePaths: mockDeleteCodexLimitHeadsByFilePaths,
+  deleteCodexLimitHistoryByFilePaths: mockDeleteCodexLimitHistoryByFilePaths,
   deleteCodexSessionsByFilePaths: mockDeleteCodexSessionsByFilePaths,
   listCodexSessionFileStates: mockListCodexSessionFileStates,
   listProjects: mockListProjects,
@@ -169,6 +173,10 @@ describe("codex index service", () => {
 
     expect(summary.missingFiles).toBe(1);
     expect(mockDeleteCodexSessionsByFilePaths).toHaveBeenCalledWith(["/tmp/codex/missing.jsonl"]);
+    expect(mockDeleteCodexLimitHeadsByFilePaths).toHaveBeenCalledWith(["/tmp/codex/missing.jsonl"]);
+    expect(mockDeleteCodexLimitHistoryByFilePaths).toHaveBeenCalledWith([
+      "/tmp/codex/missing.jsonl",
+    ]);
     expect(mockUpsertCodexSessionFiles).toHaveBeenCalledWith(
       expect.arrayContaining([
         expect.objectContaining({
@@ -260,7 +268,7 @@ describe("codex index service", () => {
     );
   });
 
-  it("fully reparses rewritten Codex session files instead of using append cursors", async () => {
+  it("fully reparses rewritten Codex session files while preserving cursor tails", async () => {
     const { createCodexIndexService } = await loadService();
     const fileInfo = {
       filePath: "/tmp/codex/rewritten.jsonl",
@@ -294,20 +302,37 @@ describe("codex index service", () => {
       updatedAt: "2026-04-23T00:00:01.000Z",
       filePath: fileInfo.filePath,
     });
+    mockReadCodexSessionLimitSnapshotsFromAppend.mockResolvedValue({
+      snapshots: [],
+      parsedOffset: 80,
+      pendingTail: '{"timestamp":',
+    });
 
     const service = createCodexIndexService();
     await service.runReconcileOnce("manual");
 
-    expect(mockReadCodexSessionLimitSnapshotsFromFile).toHaveBeenCalledWith(
-      fileInfo,
+    expect(mockReadCodexSessionLimitSnapshotsFromAppend).toHaveBeenCalledWith(
       expect.objectContaining({
+        fileInfo,
+        startOffset: 0,
+        pendingTail: "",
         runtimeId: "codex",
         providerId: "openai",
-        fast: false,
       }),
     );
-    expect(mockReadCodexSessionLimitSnapshotsFromAppend).not.toHaveBeenCalled();
+    expect(mockReadCodexSessionLimitSnapshotsFromFile).not.toHaveBeenCalled();
     expect(mockReadLatestCodexSessionLimitSnapshotFromFile).not.toHaveBeenCalled();
+    expect(mockDeleteCodexLimitHeadsByFilePaths).toHaveBeenCalledWith([fileInfo.filePath]);
+    expect(mockDeleteCodexLimitHistoryByFilePaths).toHaveBeenCalledWith([fileInfo.filePath]);
+    expect(mockUpsertCodexSessionFiles).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          filePath: fileInfo.filePath,
+          parsedOffset: 80,
+          pendingTail: '{"timestamp":',
+        }),
+      ]),
+    );
   });
 
   it("stops the reconcile loop and is idempotent", async () => {
@@ -345,23 +370,27 @@ describe("codex index service", () => {
       updatedAt: "2026-04-23T00:00:01.000Z",
       filePath: "/tmp/project-1/.codex/sessions/a.jsonl",
     });
-    mockReadCodexSessionLimitSnapshotsFromFile.mockResolvedValue([
-      {
-        source: "sdk_event",
-        status: "ok",
-        precision: "exact",
-        checkedAt: "2026-04-23T00:00:02.000Z",
-        providerId: "openai",
-        runtimeId: "codex",
-        profileId: null,
-        primaryScope: "time",
-        resetAt: "2026-04-23T02:00:00.000Z",
-        retryAfterSeconds: null,
-        warningThreshold: 10,
-        windows: [],
-        providerMeta: { limitId: "codex" },
-      },
-    ]);
+    mockReadCodexSessionLimitSnapshotsFromAppend.mockResolvedValue({
+      snapshots: [
+        {
+          source: "sdk_event",
+          status: "ok",
+          precision: "exact",
+          checkedAt: "2026-04-23T00:00:02.000Z",
+          providerId: "openai",
+          runtimeId: "codex",
+          profileId: null,
+          primaryScope: "time",
+          resetAt: "2026-04-23T02:00:00.000Z",
+          retryAfterSeconds: null,
+          warningThreshold: 10,
+          windows: [],
+          providerMeta: { limitId: "codex" },
+        },
+      ],
+      parsedOffset: 300,
+      pendingTail: "",
+    });
     mockListProjects.mockReturnValue([
       { id: "project-1", rootPath: "/tmp/project-1" },
       { id: "project-2", rootPath: "/tmp/project-2" },
@@ -410,23 +439,27 @@ describe("codex index service", () => {
       updatedAt: "2026-04-23T00:00:01.000Z",
       filePath: "C:/Projects/One/.codex/sessions/a.jsonl",
     });
-    mockReadCodexSessionLimitSnapshotsFromFile.mockResolvedValue([
-      {
-        source: "sdk_event",
-        status: "ok",
-        precision: "exact",
-        checkedAt: "2026-04-23T00:00:02.000Z",
-        providerId: "openai",
-        runtimeId: "codex",
-        profileId: null,
-        primaryScope: "time",
-        resetAt: "2026-04-23T02:00:00.000Z",
-        retryAfterSeconds: null,
-        warningThreshold: 10,
-        windows: [],
-        providerMeta: { limitId: "codex" },
-      },
-    ]);
+    mockReadCodexSessionLimitSnapshotsFromAppend.mockResolvedValue({
+      snapshots: [
+        {
+          source: "sdk_event",
+          status: "ok",
+          precision: "exact",
+          checkedAt: "2026-04-23T00:00:02.000Z",
+          providerId: "openai",
+          runtimeId: "codex",
+          profileId: null,
+          primaryScope: "time",
+          resetAt: "2026-04-23T02:00:00.000Z",
+          retryAfterSeconds: null,
+          warningThreshold: 10,
+          windows: [],
+          providerMeta: { limitId: "codex" },
+        },
+      ],
+      parsedOffset: 300,
+      pendingTail: "",
+    });
     mockListProjects.mockReturnValue([{ id: "project-1", rootPath: "c:/projects/one" }]);
     mockListRuntimeProfileResponses.mockReturnValue([
       {
