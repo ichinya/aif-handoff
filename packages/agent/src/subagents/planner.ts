@@ -10,7 +10,7 @@ import {
 import { createRuntimeWorkflowSpec } from "@aif/runtime";
 import { logger, formatAttachmentsForPrompt, getProjectConfig } from "@aif/shared";
 import { executeSubagentQuery } from "../subagentQuery.js";
-import { ensureFeatureBranch } from "../gitBranch.js";
+import { assertCurrentBranch, ensureFeatureBranch } from "../gitBranch.js";
 import { logActivity } from "../hooks.js";
 
 const log = logger("planner");
@@ -148,39 +148,34 @@ export async function runPlanner(taskId: string, projectRoot: string): Promise<v
   // Deterministic branch creation — runs regardless of whether the subagent
   // skill honors Step 1.4. Only activates for full-mode plans; fast mode stays
   // on current branch by design. See aif-handoff#83.
+  //
+  // Failures throw BranchIsolationError (dirty worktree, missing base branch,
+  // checkout failure). The coordinator classifies it as blocked_external with
+  // retryAfter=null so an operator can inspect the work tree instead of the
+  // stage silently reverting into a bad state.
+  let preparedBranch: string | null = task.branchName ?? null;
   if (plannerMode === "full" && !task.isFix) {
-    try {
-      const branchResult = ensureFeatureBranch({
-        projectRoot,
-        taskId,
-        title: task.title,
-        explicitBranchName: task.branchName ?? null,
-      });
-      if (branchResult.action !== "skipped" && branchResult.branchName) {
-        if (task.branchName !== branchResult.branchName) {
-          setTaskFields(taskId, {
-            branchName: branchResult.branchName,
-            updatedAt: new Date().toISOString(),
-          });
-        }
-        logActivity(
-          taskId,
-          "Agent",
-          `Feature branch ${branchResult.action}: ${branchResult.branchName}`,
-        );
-      } else if (branchResult.reason) {
-        log.debug({ taskId, reason: branchResult.reason }, "Branch creation skipped");
+    const branchResult = ensureFeatureBranch({
+      projectRoot,
+      taskId,
+      title: task.title,
+      explicitBranchName: task.branchName ?? null,
+    });
+    if (branchResult.action !== "skipped" && branchResult.branchName) {
+      preparedBranch = branchResult.branchName;
+      if (task.branchName !== branchResult.branchName) {
+        setTaskFields(taskId, {
+          branchName: branchResult.branchName,
+          updatedAt: new Date().toISOString(),
+        });
       }
-    } catch (err) {
-      log.warn(
-        { taskId, err: err instanceof Error ? err.message : String(err) },
-        "Feature branch creation failed — continuing on current branch",
-      );
       logActivity(
         taskId,
         "Agent",
-        `Branch creation failed: ${err instanceof Error ? err.message : String(err)}`,
+        `Feature branch ${branchResult.action}: ${branchResult.branchName}`,
       );
+    } else if (branchResult.reason) {
+      log.debug({ taskId, reason: branchResult.reason }, "Branch creation skipped");
     }
   }
 
@@ -192,7 +187,15 @@ User comments and replanning feedback:
 ${commentsForPrompt}`;
   let prompt: string;
   let workflowSpec: ReturnType<typeof createRuntimeWorkflowSpec>;
-  const handoffContext = `HANDOFF_MODE: 1\nHANDOFF_TASK_ID: ${taskId}`;
+  // HANDOFF_BRANCH_PREPARED=1 tells the aif-plan / plan-polisher skill that
+  // Handoff already owns branch creation for this run. The skill MUST NOT
+  // execute its own `git checkout -b`; it should validate that the current
+  // branch matches HANDOFF_BRANCH_NAME and report a blocker if not. See
+  // ai-factory#96.
+  const handoffBranchLines = preparedBranch
+    ? `\nHANDOFF_BRANCH_PREPARED: 1\nHANDOFF_BRANCH_NAME: ${preparedBranch}`
+    : "";
+  const handoffContext = `HANDOFF_MODE: 1\nHANDOFF_TASK_ID: ${taskId}${handoffBranchLines}`;
   const scopeConstraint = `IMPORTANT: Your working directory is ${projectRoot}\nAll files must be created and modified inside this directory. Do NOT navigate to parent directories or other projects.`;
   const plannerSlashCommand = `/aif-plan ${plannerMode} @${planPath} docs:${planDocs} tests:${planTests}`;
 
@@ -263,6 +266,15 @@ ${taskContext}`;
     workflowKind: "planner",
     fallbackSlashCommand: task.isFix ? undefined : plannerSlashCommand,
   });
+
+  // Detect skill-level branch drift: if the planner subagent (or its
+  // nested plan-polisher) silently created or switched to a different
+  // branch than the one we prepared, the plan we're about to persist
+  // belongs to the wrong HEAD. Surface as BranchIsolationError so the
+  // coordinator blocks the task instead of committing the drift.
+  if (preparedBranch) {
+    assertCurrentBranch(projectRoot, preparedBranch);
+  }
 
   const diskPlan = readPlanFromDisk(projectRoot, rawResult, !!task.isFix, planPath);
   const resultText = diskPlan ?? normalizePlannerResult(rawResult);

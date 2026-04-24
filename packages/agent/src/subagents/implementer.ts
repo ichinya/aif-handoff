@@ -173,6 +173,30 @@ export async function runImplementer(taskId: string, projectRoot: string): Promi
     log.error({ taskId }, "Task not found for implementation");
     throw new Error(`Task ${taskId} not found`);
   }
+
+  // Branch restore MUST happen before any repo/config/plan read. If the
+  // planner prepared a feature branch but auto-queue (or a chat/manual
+  // action) moved HEAD between stages, every downstream read — config,
+  // canonical plan, pending-task detection, no-op early return — would
+  // operate on the wrong branch and silently ship incorrect state.
+  // Branch-restore failures throw BranchIsolationError → coordinator
+  // classifies as blocked_external with retryAfter=null.
+  if (task.branchName && !task.isFix) {
+    const branchResult = ensureFeatureBranch({
+      projectRoot,
+      taskId,
+      title: task.title,
+      explicitBranchName: task.branchName,
+      switchOnly: true,
+    });
+    if (branchResult.action === "switched") {
+      logActivity(taskId, "Agent", `Switched to feature branch: ${branchResult.branchName}`);
+    } else if (branchResult.action === "skipped") {
+      // git disabled or not a repo — nothing to restore.
+      log.debug({ taskId, reason: branchResult.reason }, "Branch restore skipped");
+    }
+  }
+
   const project = findProjectById(task.projectId);
   const implementerBudget = project?.implementerMaxBudgetUsd ?? null;
   const useSubagents = task.useSubagents;
@@ -221,40 +245,6 @@ export async function runImplementer(taskId: string, projectRoot: string): Promi
   }
 
   log.info({ taskId, title: task.title, useSubagents }, "Starting implementation stage");
-
-  // If the task has a persisted feature branch (set by planner), ensure HEAD
-  // is on it before the implementer runs. Auto-queue may have switched branches
-  // between stages; without this, the implementer would write into whichever
-  // branch happens to be current.
-  if (task.branchName && !task.isFix) {
-    try {
-      const branchResult = ensureFeatureBranch({
-        projectRoot,
-        taskId,
-        title: task.title,
-        explicitBranchName: task.branchName,
-        switchOnly: true,
-      });
-      if (branchResult.action === "switched") {
-        logActivity(taskId, "Agent", `Switched to feature branch: ${branchResult.branchName}`);
-      } else if (branchResult.action === "created") {
-        logActivity(
-          taskId,
-          "Agent",
-          `Recreated missing feature branch: ${branchResult.branchName}`,
-        );
-      }
-    } catch (err) {
-      log.warn(
-        {
-          taskId,
-          branchName: task.branchName,
-          err: err instanceof Error ? err.message : String(err),
-        },
-        "Could not restore task feature branch — continuing on current branch",
-      );
-    }
-  }
 
   const scopeConstraint = `IMPORTANT: Your working directory is ${projectRoot}
 All files must be created and modified inside this directory. Do NOT create files outside of it.`;

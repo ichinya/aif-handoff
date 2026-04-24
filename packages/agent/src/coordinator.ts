@@ -27,6 +27,7 @@ import { runPlanner } from "./subagents/planner.js";
 import { runPlanChecker } from "./subagents/planChecker.js";
 import { runImplementer } from "./subagents/implementer.js";
 import { runReviewer } from "./subagents/reviewer.js";
+import { describeDirtyWorkingTree, isGitRepo } from "./gitBranch.js";
 import { flushActivityQueue } from "./hooks.js";
 import {
   notifyTaskBroadcast,
@@ -633,6 +634,23 @@ export function processAutoQueueAdvance(): number {
         "Auto-queue: project pipeline at capacity, skipping",
       );
       continue;
+    }
+
+    // Dirty-worktree gate. Terminal statuses (done/verified) don't
+    // guarantee the previous task's diff was committed — manual-review
+    // pauses the pipeline with a clean-status but dirty repo. Advancing
+    // the next task now would let its planner create a feature branch
+    // on top of stale changes (or fail checkout outright). Pause
+    // auto-queue advance for this project until the work tree is clean.
+    if (isGitRepo(project.rootPath)) {
+      const dirty = describeDirtyWorkingTree(project.rootPath);
+      if (dirty) {
+        log.warn(
+          { projectId: project.id, projectRoot: project.rootPath, dirtyPreview: dirty },
+          "Auto-queue paused: work tree has uncommitted changes from previous task",
+        );
+        continue;
+      }
     }
 
     // Fill the pool up to the limit in this single tick. Loop bound keeps it

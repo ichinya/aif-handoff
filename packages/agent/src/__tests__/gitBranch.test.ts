@@ -34,6 +34,13 @@ function writeConfig(root: string, yaml: string): void {
   writeFileSync(join(dir, "config.yaml"), yaml);
 }
 
+/** Stage + commit any pending changes so the work tree is clean before
+ *  exercising `ensureFeatureBranch` (which now hard-gates on dirty). */
+function commitAll(root: string, message: string): void {
+  execFileSync("git", ["add", "-A"], { cwd: root, stdio: "ignore" });
+  execFileSync("git", ["commit", "-m", message, "--no-verify"], { cwd: root, stdio: "ignore" });
+}
+
 describe("gitBranch helpers", () => {
   let root: string;
 
@@ -86,6 +93,7 @@ describe("gitBranch helpers", () => {
       root,
       "git:\n  enabled: true\n  base_branch: main\n  create_branches: false\n  branch_prefix: feature/\n",
     );
+    commitAll(root, "config");
     const result = ensureFeatureBranch({
       projectRoot: root,
       taskId: "t1",
@@ -162,11 +170,103 @@ describe("gitBranch helpers", () => {
       root,
       "git:\n  enabled: true\n  base_branch: main\n  create_branches: true\n  branch_prefix: fix/\n",
     );
+    commitAll(root, "config");
     const result = ensureFeatureBranch({
       projectRoot: root,
       taskId: "11111111",
       title: "Bug report",
     });
     expect(result.branchName?.startsWith("fix/")).toBe(true);
+  });
+
+  it("ensureFeatureBranch throws BranchIsolationError(dirty_worktree) when tree is dirty", async () => {
+    initRepo(root);
+    // Introduce an uncommitted change
+    writeFileSync(join(root, "dirty.txt"), "dirty\n");
+    const { ensureFeatureBranch: fn, BranchIsolationError } = await import("../gitBranch.js");
+    expect(() => fn({ projectRoot: root, taskId: "t1", title: "X" })).toThrow(BranchIsolationError);
+    try {
+      fn({ projectRoot: root, taskId: "t1", title: "X" });
+    } catch (err) {
+      const { isBranchIsolationError } = await import("../gitBranch.js");
+      expect(isBranchIsolationError(err)).toBe(true);
+      if (isBranchIsolationError(err)) {
+        expect(err.kind).toBe("dirty_worktree");
+      }
+    }
+  });
+
+  it("ensureFeatureBranch(switchOnly) throws branch_missing instead of creating", async () => {
+    initRepo(root);
+    const {
+      ensureFeatureBranch: fn,
+      BranchIsolationError,
+      isBranchIsolationError,
+    } = await import("../gitBranch.js");
+    try {
+      fn({
+        projectRoot: root,
+        taskId: "t1",
+        title: "anything",
+        explicitBranchName: "feature/does-not-exist",
+        switchOnly: true,
+      });
+      throw new Error("expected throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(BranchIsolationError);
+      if (isBranchIsolationError(err)) {
+        expect(err.kind).toBe("branch_missing");
+      }
+    }
+    // HEAD must still be on main — no silent create
+    expect(getCurrentBranch(root)).toBe("main");
+  });
+
+  it("ensureFeatureBranch(switchOnly) works when branch already exists", async () => {
+    initRepo(root);
+    execFileSync("git", ["checkout", "-b", "feature/has"], { cwd: root, stdio: "ignore" });
+    execFileSync("git", ["checkout", "main"], { cwd: root, stdio: "ignore" });
+    const { ensureFeatureBranch: fn } = await import("../gitBranch.js");
+    const result = fn({
+      projectRoot: root,
+      taskId: "t1",
+      title: "x",
+      explicitBranchName: "feature/has",
+      switchOnly: true,
+    });
+    expect(result.action).toBe("switched");
+    expect(getCurrentBranch(root)).toBe("feature/has");
+  });
+
+  it("assertCurrentBranch throws branch_drift when HEAD moved", async () => {
+    initRepo(root);
+    execFileSync("git", ["checkout", "-b", "feature/a"], { cwd: root, stdio: "ignore" });
+    const { assertCurrentBranch, isBranchIsolationError } = await import("../gitBranch.js");
+    execFileSync("git", ["checkout", "main"], { cwd: root, stdio: "ignore" });
+    try {
+      assertCurrentBranch(root, "feature/a");
+      throw new Error("expected throw");
+    } catch (err) {
+      expect(isBranchIsolationError(err)).toBe(true);
+      if (isBranchIsolationError(err)) {
+        expect(err.kind).toBe("branch_drift");
+      }
+    }
+  });
+
+  it("ensureFeatureBranch throws base_branch_unavailable when base is missing", async () => {
+    initRepo(root);
+    // rename main away so base can't be found
+    execFileSync("git", ["branch", "-m", "main", "trunk"], { cwd: root, stdio: "ignore" });
+    const { ensureFeatureBranch: fn, isBranchIsolationError } = await import("../gitBranch.js");
+    try {
+      fn({ projectRoot: root, taskId: "t1", title: "x" });
+      throw new Error("expected throw");
+    } catch (err) {
+      expect(isBranchIsolationError(err)).toBe(true);
+      if (isBranchIsolationError(err)) {
+        expect(err.kind).toBe("base_branch_unavailable");
+      }
+    }
   });
 });

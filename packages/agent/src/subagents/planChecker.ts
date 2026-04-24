@@ -1,6 +1,8 @@
 import { findProjectById, findTaskById, persistTaskPlanForTask } from "@aif/data";
 import { logger, looksLikeFullPlanUpdate } from "@aif/shared";
 import { executeSubagentQuery } from "../subagentQuery.js";
+import { ensureFeatureBranch } from "../gitBranch.js";
+import { logActivity } from "../hooks.js";
 
 const log = logger("plan-checker");
 const AGENT_NAME = "plan-checker";
@@ -47,6 +49,21 @@ export async function runPlanChecker(taskId: string, projectRoot: string): Promi
   if (!task) {
     log.error({ taskId }, "Task not found for plan checklist verification");
     throw new Error(`Task ${taskId} not found`);
+  }
+
+  // Same branch-restore contract as implementer/reviewer: must run before any
+  // repo read or plan persist. BranchIsolationError → blocked_external.
+  if (task.branchName && !task.isFix) {
+    const branchResult = ensureFeatureBranch({
+      projectRoot,
+      taskId,
+      title: task.title,
+      explicitBranchName: task.branchName,
+      switchOnly: true,
+    });
+    if (branchResult.action === "switched") {
+      logActivity(taskId, "Agent", `Switched to feature branch: ${branchResult.branchName}`);
+    }
   }
 
   if (!task.plan || task.plan.trim().length === 0) {

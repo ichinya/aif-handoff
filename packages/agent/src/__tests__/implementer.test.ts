@@ -493,4 +493,68 @@ describe("runImplementer feature branch routing", () => {
     }).trim();
     expect(after).toBe("main");
   });
+
+  it("restores branch BEFORE no-op early return (so plan is read from the right branch)", async () => {
+    const db = testDb.current;
+    // Plan text on feature branch shows pending work; plan text on main
+    // (current HEAD before implementer runs) would be "all done" — if we
+    // evaluated pending-task count on main, we'd wrongly early-return.
+    db.insert(tasks)
+      .values({
+        id: "task-b-3",
+        projectId: "project-b",
+        title: "Must switch first",
+        description: "",
+        status: "implementing",
+        plan: "## Plan\n- [ ] still pending\n- [x] already done",
+        branchName: "feature/my-task",
+      })
+      .run();
+
+    // HEAD on main — restore must happen before any config/plan read.
+    const before = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+      cwd: projectRoot,
+      encoding: "utf8",
+    }).trim();
+    expect(before).toBe("main");
+
+    await runImplementer("task-b-3", projectRoot);
+
+    const after = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+      cwd: projectRoot,
+      encoding: "utf8",
+    }).trim();
+    expect(after).toBe("feature/my-task");
+    // Subagent WAS invoked (pending task remains) — if branch restore ran
+    // after the no-op check on a stale plan, the test would see 0 calls.
+    expect(queryMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("throws BranchIsolationError when task.branchName is missing from git", async () => {
+    const db = testDb.current;
+    db.insert(tasks)
+      .values({
+        id: "task-b-missing",
+        projectId: "project-b",
+        title: "Branch gone",
+        description: "",
+        status: "implementing",
+        plan: "## Plan\n- [ ] work",
+        branchName: "feature/never-existed",
+      })
+      .run();
+
+    const { isBranchIsolationError } = await import("../gitBranch.js");
+    try {
+      await runImplementer("task-b-missing", projectRoot);
+      throw new Error("expected throw");
+    } catch (err) {
+      expect(isBranchIsolationError(err)).toBe(true);
+      if (isBranchIsolationError(err)) {
+        expect(err.kind).toBe("branch_missing");
+      }
+    }
+    // Subagent was NOT invoked — stage aborted before prompt build
+    expect(queryMock).not.toHaveBeenCalled();
+  });
 });

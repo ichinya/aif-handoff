@@ -1,6 +1,7 @@
 import { findProjectById, findTaskById, setTaskFields } from "@aif/data";
 import { createRuntimeWorkflowSpec, type RuntimeWorkflowSpec } from "@aif/runtime";
 import { getEnv, logger, formatAttachmentsForPrompt } from "@aif/shared";
+import { ensureFeatureBranch } from "../gitBranch.js";
 import { logActivity } from "../hooks.js";
 import { executeSubagentQuery, startHeartbeat } from "../subagentQuery.js";
 import {
@@ -43,6 +44,21 @@ export async function runReviewer(taskId: string, projectRoot: string): Promise<
   if (!task) {
     log.error({ taskId }, "Task not found for review");
     throw new Error(`Task ${taskId} not found`);
+  }
+
+  // Reviewer must diff against the task's feature branch — not whatever HEAD
+  // happens to be. Same switchOnly contract as implementer/plan-checker.
+  if (task.branchName && !task.isFix) {
+    const branchResult = ensureFeatureBranch({
+      projectRoot,
+      taskId,
+      title: task.title,
+      explicitBranchName: task.branchName,
+      switchOnly: true,
+    });
+    if (branchResult.action === "switched") {
+      logActivity(taskId, "Agent", `Switched to feature branch: ${branchResult.branchName}`);
+    }
   }
 
   const project = findProjectById(task.projectId);
