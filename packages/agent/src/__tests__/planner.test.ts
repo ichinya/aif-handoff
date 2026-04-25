@@ -268,6 +268,63 @@ describe("runPlanner comment selection", () => {
     expect(updatedTask?.branchName).toBe(branch);
   });
 
+  it("restores persisted branch in fast plannerMode for already-bound task (mode-drift safe)", async () => {
+    const db = testDb.current;
+    const projectRoot = mkdtempSync(join(tmpdir(), "planner-mode-drift-"));
+    execFileSync("git", ["init", "--initial-branch=main"], { cwd: projectRoot, stdio: "ignore" });
+    execFileSync("git", ["config", "user.email", "t@t.local"], {
+      cwd: projectRoot,
+      stdio: "ignore",
+    });
+    execFileSync("git", ["config", "user.name", "T"], { cwd: projectRoot, stdio: "ignore" });
+    execFileSync("git", ["config", "commit.gpgsign", "false"], {
+      cwd: projectRoot,
+      stdio: "ignore",
+    });
+    writeFileSync(join(projectRoot, "README.md"), "# t\n");
+    execFileSync("git", ["add", "README.md"], { cwd: projectRoot, stdio: "ignore" });
+    execFileSync("git", ["commit", "-m", "init", "--no-verify"], {
+      cwd: projectRoot,
+      stdio: "ignore",
+    });
+    // Bind a feature branch then drift HEAD back to main.
+    execFileSync("git", ["checkout", "-b", "feature/bound-fast"], {
+      cwd: projectRoot,
+      stdio: "ignore",
+    });
+    execFileSync("git", ["checkout", "main"], { cwd: projectRoot, stdio: "ignore" });
+
+    db.insert(projects)
+      .values({ id: "project-mode-drift", name: "Mode drift", rootPath: projectRoot })
+      .run();
+    db.insert(tasks)
+      .values({
+        id: "task-mode-drift-1",
+        projectId: "project-mode-drift",
+        title: "Mode drift",
+        description: "",
+        status: "planning",
+        // FAST mode + persisted branchName = the dangerous case the previous
+        // gating broke: restore must still happen, otherwise the planner
+        // writes plan/log on whatever HEAD happens to be.
+        plannerMode: "fast",
+        useSubagents: false,
+        branchName: "feature/bound-fast",
+      })
+      .run();
+
+    queryMock.mockReset();
+    queryMock.mockReturnValue(streamSuccess("## Plan\n- [ ] x"));
+
+    await runPlanner("task-mode-drift-1", projectRoot);
+
+    const branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+      cwd: projectRoot,
+      encoding: "utf8",
+    }).trim();
+    expect(branch).toBe("feature/bound-fast");
+  });
+
   it("throws BranchIsolationError when subagent silently switched branches (drift)", async () => {
     const db = testDb.current;
     const projectRoot = mkdtempSync(join(tmpdir(), "planner-drift-"));

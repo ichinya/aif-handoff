@@ -145,52 +145,51 @@ export async function runPlanner(taskId: string, projectRoot: string): Promise<v
   const planDocs = task.planDocs ? "true" : "false";
   const planTests = task.planTests ? "true" : "false";
 
-  // Deterministic branch handling — runs regardless of whether the subagent
-  // skill honors Step 1.4. Only activates for full-mode plans; fast mode stays
-  // on current branch by design. See aif-handoff#83.
+  // Deterministic branch handling. Two contracts, applied in order:
   //
-  // Two paths:
-  //   - First-time provisioning (no persisted branchName): use
-  //     ensureFeatureBranch which can create from base.
-  //   - Re-run / replan (task.branchName already persisted): use
-  //     restorePersistedBranch so config drift cannot release us to current
-  //     HEAD via the `skipped` shortcut, and a deleted branch errors out
-  //     instead of being silently re-created from base.
+  //  1. RESTORE for ANY bound non-fix task — runs regardless of plannerMode
+  //     (full or fast). `task.branchName` is the source-of-truth: once a
+  //     prior run persisted it, every subsequent stage MUST land on it or
+  //     fail loud. A replan triggered with mode=fast (manual replanning,
+  //     comment-driven re-run) used to skip the restore entirely and let
+  //     the planner write to whatever HEAD happened to be.
+  //
+  //  2. CREATE only in full mode for unbound non-fix tasks. Fast mode stays
+  //     on the current branch by design (see aif-handoff#83) — first-time
+  //     branch provisioning is a full-mode-only concern.
   //
   // Failures throw BranchIsolationError (dirty worktree, missing base branch,
   // checkout failure, branch_missing, etc). The coordinator classifies it as
   // blocked_external with retryAfter=null so an operator can inspect the work
   // tree instead of the stage silently reverting into a bad state.
   let preparedBranch: string | null = task.branchName ?? null;
-  if (plannerMode === "full" && !task.isFix) {
-    if (task.branchName) {
-      restorePersistedBranch({
-        projectRoot,
-        taskId,
-        persistedBranchName: task.branchName,
+  if (!task.isFix && task.branchName) {
+    restorePersistedBranch({
+      projectRoot,
+      taskId,
+      persistedBranchName: task.branchName,
+    });
+    preparedBranch = task.branchName;
+    logActivity(taskId, "Agent", `Restored feature branch: ${task.branchName}`);
+  } else if (!task.isFix && plannerMode === "full") {
+    const branchResult = ensureFeatureBranch({
+      projectRoot,
+      taskId,
+      title: task.title,
+    });
+    if (branchResult.action !== "skipped" && branchResult.branchName) {
+      preparedBranch = branchResult.branchName;
+      setTaskFields(taskId, {
+        branchName: branchResult.branchName,
+        updatedAt: new Date().toISOString(),
       });
-      preparedBranch = task.branchName;
-      logActivity(taskId, "Agent", `Restored feature branch: ${task.branchName}`);
-    } else {
-      const branchResult = ensureFeatureBranch({
-        projectRoot,
+      logActivity(
         taskId,
-        title: task.title,
-      });
-      if (branchResult.action !== "skipped" && branchResult.branchName) {
-        preparedBranch = branchResult.branchName;
-        setTaskFields(taskId, {
-          branchName: branchResult.branchName,
-          updatedAt: new Date().toISOString(),
-        });
-        logActivity(
-          taskId,
-          "Agent",
-          `Feature branch ${branchResult.action}: ${branchResult.branchName}`,
-        );
-      } else if (branchResult.reason) {
-        log.debug({ taskId, reason: branchResult.reason }, "Branch creation skipped");
-      }
+        "Agent",
+        `Feature branch ${branchResult.action}: ${branchResult.branchName}`,
+      );
+    } else if (branchResult.reason) {
+      log.debug({ taskId, reason: branchResult.reason }, "Branch creation skipped");
     }
   }
 
