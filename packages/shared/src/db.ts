@@ -567,7 +567,7 @@ const MIGRATIONS: Migration[] = [
     `,
   },
   {
-    version: 16,
+    version: 17,
     description: "Add Codex index read-model tables for session and usage-limit overlays",
     sql: `
       CREATE TABLE IF NOT EXISTS codex_sessions (

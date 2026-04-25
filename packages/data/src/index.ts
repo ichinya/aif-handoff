@@ -3053,7 +3053,10 @@ export function pruneCodexLimitHistoryByHead(input: {
 
   const staleIds = ids.slice(keepLatest).map((row) => row.id);
   if (staleIds.length === 0) {
-    log.debug({ headKey: input.headKey, keepLatest, deletedRows: 0 }, "Pruned codex limit-history rows");
+    log.debug(
+      { candidateRows: ids.length, keepLatest, deletedRows: 0 },
+      "Pruned codex limit-history rows",
+    );
     return 0;
   }
 
@@ -3068,7 +3071,7 @@ export function pruneCodexLimitHistoryByHead(input: {
   }
   log.debug(
     {
-      headKey: input.headKey,
+      candidateRows: ids.length,
       keepLatest,
       deletedRows: deleted,
     },
@@ -3161,7 +3164,7 @@ export function listCodexSessionsByProjectRoot(input: {
     .all();
 
   log.debug(
-    { projectRoot, requestedLimit: limit, returnedCount: rows.length },
+    { scope: projectRoot == null ? "global" : "project", requestedLimit: limit, returnedCount: rows.length },
     "Listed codex indexed sessions for project scope",
   );
   return rows;
@@ -3241,8 +3244,7 @@ export function listCodexLimitHeadsForOverlay(
   const mapped = rows.map(mapCodexLimitHeadWithSnapshot);
   log.debug(
     {
-      accountFingerprint: input.accountFingerprint,
-      projectRoot,
+      scope: projectRoot == null ? "global" : "project",
       includeGlobalFallback,
       requestedLimit: limit,
       returnedCount: mapped.length,
@@ -3260,9 +3262,7 @@ export function findPreferredCodexLimitHeadForOverlay(
     if (row.snapshot) {
       log.debug(
         {
-          headKey: row.headKey,
-          accountFingerprint: row.accountFingerprint,
-          projectRoot: row.projectRoot,
+          scope: row.projectRoot == null ? "global" : "project",
           limitId: row.limitId,
         },
         "Resolved preferred codex limit-head overlay row",
@@ -3272,8 +3272,7 @@ export function findPreferredCodexLimitHeadForOverlay(
   }
   log.debug(
     {
-      accountFingerprint: input.accountFingerprint,
-      projectRoot: normalizeCodexProjectRoot(input.projectRoot),
+      scope: normalizeCodexProjectRoot(input.projectRoot) == null ? "global" : "project",
       limitId: input.limitId ?? null,
       model: input.model ?? null,
     },

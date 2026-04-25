@@ -388,7 +388,7 @@ describe("db", () => {
       expect(runtimeProfileColumns.map((column) => column.name)).toEqual(
         expect.arrayContaining(["runtime_limit_snapshot_json", "runtime_limit_updated_at"]),
       );
-      expect(userVersion).toBe(16);
+      expect(userVersion).toBe(17);
     } finally {
       closeDb();
       removeSqliteArtifacts(dbPath);
@@ -453,7 +453,7 @@ describe("db", () => {
       expect(profileColumns.map((column) => column.name)).toEqual(
         expect.arrayContaining(["runtime_limit_snapshot_json", "runtime_limit_updated_at"]),
       );
-      expect(userVersion).toBe(16);
+      expect(userVersion).toBe(17);
     } finally {
       closeDb();
       removeSqliteArtifacts(dbPath);
