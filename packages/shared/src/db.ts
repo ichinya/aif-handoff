@@ -634,6 +634,13 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    version: 18,
+    description: "Drop unused Codex session-file dirty-scan index",
+    sql: `
+      DROP INDEX IF EXISTS idx_codex_session_files_dirty;
+    `,
+  },
 ];
 
 function splitSqlStatements(sqlText: string): string[] {
@@ -896,7 +903,6 @@ function ensureIndexes(sqlite: Database.Database): void {
     "CREATE INDEX IF NOT EXISTS idx_codex_sessions_file_path ON codex_sessions(file_path)",
     // Codex file-state reconcile scans.
     "CREATE INDEX IF NOT EXISTS idx_codex_session_files_session_id ON codex_session_files(session_id)",
-    "CREATE INDEX IF NOT EXISTS idx_codex_session_files_dirty ON codex_session_files(missing, mtime_ms, size_bytes)",
     // Codex latest-head and bounded-history lookups.
     "CREATE INDEX IF NOT EXISTS idx_codex_limit_heads_lookup ON codex_limit_heads(account_fingerprint, project_root, limit_id, observed_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_codex_limit_history_head ON codex_limit_history(head_key, observed_at DESC)",

@@ -22,6 +22,7 @@ import {
   buildRuntimeLimitSignature,
   appSettings,
   generatePlanPath,
+  getEnv,
   getProjectConfig,
   logger as createLogger,
   normalizeRuntimeLimitSnapshot,
@@ -2244,8 +2245,20 @@ export function evaluateRuntimeLimitGate(
   profile: RuntimeProfile | null | undefined,
   nowMs = Date.now(),
 ): RuntimeLimitGateDecision {
-  const snapshot = profile?.runtimeLimitSnapshot ?? null;
   const runtimeProfileId = profile?.id ?? null;
+  if (!getEnv().AIF_USAGE_LIMITS_ENABLED) {
+    return {
+      blocked: false,
+      reason: "none",
+      runtimeProfileId,
+      snapshot: null,
+      futureHint: resolveRuntimeLimitFutureHint(null, { nowMs }),
+      violatedWindow: null,
+      signature: null,
+    };
+  }
+
+  const snapshot = profile?.runtimeLimitSnapshot ?? null;
   if (!snapshot) {
     return {
       blocked: false,
@@ -3063,44 +3076,77 @@ export function pruneStaleCodexSessionIndexRows(input: {
   }
 
   const mtimeBeforeMs = Math.max(0, Math.trunc(input.mtimeBeforeMs));
-  const linkedRows = getDb()
-    .select({
-      runtimeSessionId: chatSessions.runtimeSessionId,
-      agentSessionId: chatSessions.agentSessionId,
-    })
-    .from(chatSessions)
+  const staleLinkedSessionRows = getDb()
+    .select({ filePath: codexSessions.filePath, sessionId: codexSessions.sessionId })
+    .from(codexSessions)
+    .where(
+      and(
+        lt(codexSessions.mtimeMs, mtimeBeforeMs),
+        sql`EXISTS (
+          SELECT 1 FROM ${chatSessions}
+          WHERE ${chatSessions.runtimeSessionId} = ${codexSessions.sessionId}
+             OR ${chatSessions.agentSessionId} = ${codexSessions.sessionId}
+        )`,
+      ),
+    )
     .all();
-  const linkedSessionIds = new Set<string>();
-  for (const row of linkedRows) {
-    if (row.runtimeSessionId) linkedSessionIds.add(row.runtimeSessionId);
-    if (row.agentSessionId) linkedSessionIds.add(row.agentSessionId);
+  const staleLinkedFileRows = getDb()
+    .select({ filePath: codexSessionFiles.filePath, sessionId: codexSessionFiles.sessionId })
+    .from(codexSessionFiles)
+    .where(
+      and(
+        lt(codexSessionFiles.mtimeMs, mtimeBeforeMs),
+        sql`EXISTS (
+          SELECT 1 FROM ${chatSessions}
+          WHERE ${chatSessions.runtimeSessionId} = ${codexSessionFiles.sessionId}
+             OR ${chatSessions.agentSessionId} = ${codexSessionFiles.sessionId}
+        )`,
+      ),
+    )
+    .all();
+
+  const linkedPaths = new Set<string>();
+  const retainedLinkedSessionIds = new Set<string>();
+  for (const row of [...staleLinkedSessionRows, ...staleLinkedFileRows]) {
+    linkedPaths.add(row.filePath);
+    if (row.sessionId) {
+      retainedLinkedSessionIds.add(row.sessionId);
+    }
   }
 
   const staleSessionRows = getDb()
     .select({ filePath: codexSessions.filePath, sessionId: codexSessions.sessionId })
     .from(codexSessions)
-    .where(lt(codexSessions.mtimeMs, mtimeBeforeMs))
+    .where(
+      and(
+        lt(codexSessions.mtimeMs, mtimeBeforeMs),
+        sql`NOT EXISTS (
+          SELECT 1 FROM ${chatSessions}
+          WHERE ${chatSessions.runtimeSessionId} = ${codexSessions.sessionId}
+             OR ${chatSessions.agentSessionId} = ${codexSessions.sessionId}
+        )`,
+      ),
+    )
     .all();
   const staleFileRows = getDb()
     .select({ filePath: codexSessionFiles.filePath, sessionId: codexSessionFiles.sessionId })
     .from(codexSessionFiles)
-    .where(lt(codexSessionFiles.mtimeMs, mtimeBeforeMs))
+    .where(
+      and(
+        lt(codexSessionFiles.mtimeMs, mtimeBeforeMs),
+        sql`NOT EXISTS (
+          SELECT 1 FROM ${chatSessions}
+          WHERE ${chatSessions.runtimeSessionId} = ${codexSessionFiles.sessionId}
+             OR ${chatSessions.agentSessionId} = ${codexSessionFiles.sessionId}
+        )`,
+      ),
+    )
     .all();
 
   const candidatePaths = new Set<string>();
-  const linkedPaths = new Set<string>();
-  const retainedLinkedSessionIds = new Set<string>();
   for (const row of [...staleSessionRows, ...staleFileRows]) {
-    if (!row.filePath) {
-      continue;
-    }
     candidatePaths.add(row.filePath);
-    if (row.sessionId != null && linkedSessionIds.has(row.sessionId)) {
-      retainedLinkedSessionIds.add(row.sessionId);
-      linkedPaths.add(row.filePath);
-    }
   }
-
   const filePaths = [...candidatePaths].filter((filePath) => !linkedPaths.has(filePath));
   const sessionRowsDeleted = deleteCodexSessionsByFilePaths(filePaths);
   const fileRowsDeleted = deleteCodexSessionFilesByFilePaths(filePaths);
@@ -3199,35 +3245,38 @@ export function pruneCodexLimitRowsBeforeObservedAt(
     return { deletedScopes: [], headRowsDeleted: 0, historyRowsDeleted: 0 };
   }
 
-  const deletedScopes = getDb()
-    .select({
-      headKey: codexLimitHeads.headKey,
-      projectRoot: codexLimitHeads.projectRoot,
-      observedAt: codexLimitHeads.observedAt,
-      filePath: codexLimitHeads.filePath,
-    })
-    .from(codexLimitHeads)
-    .where(lt(codexLimitHeads.observedAt, trimmedObservedBefore))
-    .all();
-  const headRowsDeleted = getDb()
-    .delete(codexLimitHeads)
-    .where(lt(codexLimitHeads.observedAt, trimmedObservedBefore))
-    .run().changes;
-  const historyRowsDeleted = getDb()
-    .delete(codexLimitHistory)
-    .where(lt(codexLimitHistory.observedAt, trimmedObservedBefore))
-    .run().changes;
+  const result = getDb().transaction((tx) => {
+    const deletedScopes = tx
+      .select({
+        headKey: codexLimitHeads.headKey,
+        projectRoot: codexLimitHeads.projectRoot,
+        observedAt: codexLimitHeads.observedAt,
+        filePath: codexLimitHeads.filePath,
+      })
+      .from(codexLimitHeads)
+      .where(lt(codexLimitHeads.observedAt, trimmedObservedBefore))
+      .all();
+    const headRowsDeleted = tx
+      .delete(codexLimitHeads)
+      .where(lt(codexLimitHeads.observedAt, trimmedObservedBefore))
+      .run().changes;
+    const historyRowsDeleted = tx
+      .delete(codexLimitHistory)
+      .where(lt(codexLimitHistory.observedAt, trimmedObservedBefore))
+      .run().changes;
+    return { deletedScopes, headRowsDeleted, historyRowsDeleted };
+  });
 
   log.debug(
     {
       observedBefore: trimmedObservedBefore,
-      deletedScopeCount: deletedScopes.length,
-      headRowsDeleted,
-      historyRowsDeleted,
+      deletedScopeCount: result.deletedScopes.length,
+      headRowsDeleted: result.headRowsDeleted,
+      historyRowsDeleted: result.historyRowsDeleted,
     },
     "Pruned stale codex limit rows by observed time",
   );
-  return { deletedScopes, headRowsDeleted, historyRowsDeleted };
+  return result;
 }
 
 export function upsertCodexLimitHeads(rows: UpsertCodexLimitHeadInput[]): number {

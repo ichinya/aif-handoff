@@ -348,6 +348,8 @@ async function loadIndexedCodexRuntimeMessages(input: {
   const runtimeEvents = await readCodexSessionEventsFromFile(filePath, {
     limit: input.limit,
   });
+  // Indexed Codex JSONL events are normalized into plain string messages, so
+  // they do not need adapter-specific content extraction here.
   return mapRuntimeEventsToChatMessages(runtimeEvents, input.chatSessionId);
 }
 

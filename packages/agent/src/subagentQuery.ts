@@ -697,6 +697,7 @@ export async function executeSubagentQuery(
   let latestLimitSnapshot: RuntimeLimitSnapshot | null = null;
   let adapter: RuntimeAdapter | null = null;
   let watchdog: ReturnType<typeof createFirstActivityWatchdog> | null = null;
+  const runtimeUsageLimitsEnabled = getEnv().AIF_USAGE_LIMITS_ENABLED;
 
   try {
     const context = await resolveExecutionContext(options);
@@ -810,18 +811,20 @@ export async function executeSubagentQuery(
       const originalOnSubagentStart = executionIntent.onSubagentStart;
       executionIntent.onEvent = (event) => {
         wd.markActivity();
-        latestLimitSnapshot = observeRuntimeLimitEvent(event, latestLimitSnapshot, {
-          logger: log,
-          observedMessage: "Observed runtime limit event during subagent execution",
-          malformedMessage: "Dropped runtime limit event with malformed snapshot payload",
-          logContext: {
-            taskId,
-            runtimeId: context.runtimeId,
-            runtimeProfileId: context.profileId,
-            workflowKind: context.workflow.workflowKind,
-            attempt: attempt + 1,
-          },
-        });
+        if (runtimeUsageLimitsEnabled) {
+          latestLimitSnapshot = observeRuntimeLimitEvent(event, latestLimitSnapshot, {
+            logger: log,
+            observedMessage: "Observed runtime limit event during subagent execution",
+            malformedMessage: "Dropped runtime limit event with malformed snapshot payload",
+            logContext: {
+              taskId,
+              runtimeId: context.runtimeId,
+              runtimeProfileId: context.profileId,
+              workflowKind: context.workflow.workflowKind,
+              attempt: attempt + 1,
+            },
+          });
+        }
         originalOnEvent(event);
       };
       if (originalOnToolUse) {
@@ -893,28 +896,30 @@ export async function executeSubagentQuery(
       );
     }
 
-    latestLimitSnapshot = extractLatestRuntimeLimitSnapshot(result.events) ?? latestLimitSnapshot;
-    if (latestLimitSnapshot) {
-      refreshRuntimeProfileLimitState({
-        runtimeProfileId: context.profileId,
-        runtimeId: context.runtimeId,
-        providerId: context.providerId,
-        snapshot: latestLimitSnapshot,
-        taskId,
-        workflowKind: context.workflow.workflowKind,
-        reason: "subagent:success",
-      });
-    } else {
-      log.debug(
-        {
-          taskId,
+    if (runtimeUsageLimitsEnabled) {
+      latestLimitSnapshot = extractLatestRuntimeLimitSnapshot(result.events) ?? latestLimitSnapshot;
+      if (latestLimitSnapshot) {
+        refreshRuntimeProfileLimitState({
           runtimeProfileId: context.profileId,
           runtimeId: context.runtimeId,
           providerId: context.providerId,
+          snapshot: latestLimitSnapshot,
+          taskId,
           workflowKind: context.workflow.workflowKind,
-        },
-        "Preserving runtime limit state after successful subagent execution without an authoritative recovery signal",
-      );
+          reason: "subagent:success",
+        });
+      } else {
+        log.debug(
+          {
+            taskId,
+            runtimeProfileId: context.profileId,
+            runtimeId: context.runtimeId,
+            providerId: context.providerId,
+            workflowKind: context.workflow.workflowKind,
+          },
+          "Preserving runtime limit state after successful subagent execution without an authoritative recovery signal",
+        );
+      }
     }
 
     const runtimeSessionId = getResultSessionId(result, context.capabilities);
@@ -958,16 +963,18 @@ export async function executeSubagentQuery(
 
     return { resultText };
   } catch (error) {
-    refreshRuntimeProfileLimitState({
-      runtimeProfileId: runtimeProfileIdForError,
-      runtimeId: runtimeIdForError,
-      providerId: providerIdForError,
-      snapshot: extractRuntimeLimitSnapshotFromError(error),
-      clearOnMissing: false,
-      taskId,
-      workflowKind: workflowKindForError,
-      reason: "subagent:error",
-    });
+    if (runtimeUsageLimitsEnabled) {
+      refreshRuntimeProfileLimitState({
+        runtimeProfileId: runtimeProfileIdForError,
+        runtimeId: runtimeIdForError,
+        providerId: providerIdForError,
+        snapshot: extractRuntimeLimitSnapshotFromError(error),
+        clearOnMissing: false,
+        taskId,
+        workflowKind: workflowKindForError,
+        reason: "subagent:error",
+      });
+    }
     const safeReason = mapSafeRuntimeErrorReason(error);
     let diagnosticsReason: string | null = null;
     if (adapter?.diagnoseError) {

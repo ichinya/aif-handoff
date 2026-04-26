@@ -1,6 +1,13 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { eq } from "drizzle-orm";
-import { appSettings, projects, runtimeProfiles, tasks, usageEvents } from "@aif/shared";
+import {
+  appSettings,
+  projects,
+  resetEnvCache,
+  runtimeProfiles,
+  tasks,
+  usageEvents,
+} from "@aif/shared";
 import { createTestDb } from "@aif/shared/server";
 
 const testDb = { current: createTestDb() };
@@ -107,9 +114,22 @@ function makeLimitSnapshot() {
 }
 
 describe("runtime profiles data layer", () => {
+  const previousUsageLimitsEnabled = process.env.AIF_USAGE_LIMITS_ENABLED;
+
   beforeEach(() => {
+    process.env.AIF_USAGE_LIMITS_ENABLED = "true";
+    resetEnvCache();
     testDb.current = createTestDb();
     seedProject();
+  });
+
+  afterEach(() => {
+    if (previousUsageLimitsEnabled == null) {
+      delete process.env.AIF_USAGE_LIMITS_ENABLED;
+    } else {
+      process.env.AIF_USAGE_LIMITS_ENABLED = previousUsageLimitsEnabled;
+    }
+    resetEnvCache();
   });
 
   it("creates and maps runtime profiles", () => {
@@ -292,6 +312,43 @@ describe("runtime profiles data layer", () => {
     const decision = evaluateRuntimeLimitGate(toRuntimeProfileResponse(findRuntimeProfileById(profile!.id)!), 0);
     expect(decision.blocked).toBe(false);
     expect(decision.reason).toBe("none");
+  });
+
+  it("does not gate persisted snapshots when usage limits are disabled", () => {
+    const nowMs = Date.parse("2026-04-17T10:00:00.000Z");
+    const profile = createRuntimeProfile({
+      projectId: "proj-1",
+      name: "Disabled usage limits profile",
+      runtimeId: "codex",
+      providerId: "openai",
+    });
+    persistRuntimeProfileLimitSnapshot(
+      profile!.id,
+      {
+        ...makeLimitSnapshot(),
+        status: "blocked",
+        profileId: profile!.id,
+        resetAt: "2026-04-17T15:00:00.000Z",
+      },
+      "2026-04-17T10:00:05.000Z",
+    );
+
+    process.env.AIF_USAGE_LIMITS_ENABLED = "false";
+    resetEnvCache();
+
+    const decision = evaluateRuntimeLimitGate(
+      toRuntimeProfileResponse(findRuntimeProfileById(profile!.id)!),
+      nowMs,
+    );
+    expect(decision).toEqual({
+      blocked: false,
+      reason: "none",
+      runtimeProfileId: profile!.id,
+      snapshot: null,
+      futureHint: expect.objectContaining({ source: "none", isFuture: false }),
+      violatedWindow: null,
+      signature: null,
+    });
   });
 
   it("proactively gates provider-blocked snapshots with retryAfterSeconds even without resetAt", () => {
