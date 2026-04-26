@@ -31,10 +31,7 @@ export function createGracefulShutdownHandler(
 
     try {
       await options.stopCodexIndex();
-      options.logger.debug?.(
-        { signal },
-        "DEBUG [FIX:codex-index-shutdown] Codex indexer stopped during shutdown",
-      );
+      options.logger.debug?.({ signal }, "Codex indexer stopped during shutdown");
     } catch (error) {
       options.logger.warn?.({ err: error, signal }, "Codex indexer shutdown failed");
     } finally {

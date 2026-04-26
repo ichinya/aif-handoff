@@ -382,6 +382,13 @@ describe("codex index service", () => {
     );
     expect(mockReadLatestCodexSessionLimitSnapshotFromFile).not.toHaveBeenCalled();
     expect(mockReadCodexSessionLimitSnapshotsFromFile).not.toHaveBeenCalled();
+    expect(mockLog.debug).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "appended",
+        parsedBytes: 204,
+      }),
+      "Parsed Codex appended session range",
+    );
     expect(mockUpsertCodexSessionFiles).toHaveBeenCalledWith(
       expect.arrayContaining([
         expect.objectContaining({
@@ -449,6 +456,24 @@ describe("codex index service", () => {
     expect(mockReadLatestCodexSessionLimitSnapshotFromFile).not.toHaveBeenCalled();
     expect(mockDeleteCodexLimitHeadsByFilePaths).toHaveBeenCalledWith([fileInfo.filePath]);
     expect(mockDeleteCodexLimitHistoryByFilePaths).toHaveBeenCalledWith([fileInfo.filePath]);
+    expect(mockLog.debug).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "rewrite",
+        pendingTailBytes: 13,
+      }),
+      "Parsed Codex full session range with cursor state",
+    );
+    expect(mockLog.debug).toHaveBeenCalledWith(
+      expect.objectContaining({
+        staleFileCount: 1,
+      }),
+      "Deleted stale Codex limit rows for changed files",
+    );
+    const debugMessages = mockLog.debug.mock.calls
+      .map((call) => call[1])
+      .filter((message): message is string => typeof message === "string");
+    const developerMarkerPattern = new RegExp(String.raw`\[${"FIX"}:|^DEBUG `, "m");
+    expect(debugMessages.join("\n")).not.toMatch(developerMarkerPattern);
     expect(mockUpsertCodexSessionFiles).toHaveBeenCalledWith(
       expect.arrayContaining([
         expect.objectContaining({

@@ -2525,7 +2525,7 @@ export function resolveEffectiveRuntimeProfilesForTasks(
       candidateProfileCount: profileById.size,
       fallbackLogCount,
     },
-    "[FIX:tasks-runtime-batch] Resolved effective runtime profiles for task list",
+    "Resolved effective runtime profiles for task list",
   );
 
   return results;

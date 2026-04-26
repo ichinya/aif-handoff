@@ -27,9 +27,10 @@ describe("createGracefulShutdownHandler", () => {
     const exitProcess = vi.fn(() => {
       events.push("exit");
     });
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
 
     const onShutdown = createGracefulShutdownHandler({
-      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+      logger,
       stopCodexIndex,
       closeWebSockets,
       closeServer,
@@ -46,6 +47,10 @@ describe("createGracefulShutdownHandler", () => {
     await shutdown;
 
     expect(events).toEqual(["stop:start", "stop:end", "ws:close", "server:close", "exit"]);
+    expect(logger.debug).toHaveBeenCalledWith(
+      { signal: "SIGTERM" },
+      "Codex indexer stopped during shutdown",
+    );
   });
 
   it("ignores duplicate shutdown signals while the first shutdown is in progress", async () => {

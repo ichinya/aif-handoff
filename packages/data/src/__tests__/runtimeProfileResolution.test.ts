@@ -136,5 +136,18 @@ describe("runtime profile resolution", () => {
     expect(results.get("task-override")?.source).toBe("task_override");
     expect(results.get("task-override")?.profile?.id).toBe("profile-task");
     expect(loggerMock.info).not.toHaveBeenCalled();
+    expect(loggerMock.debug).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskCount: 2,
+        projectCount: 1,
+        fallbackLogCount: 0,
+      }),
+      "Resolved effective runtime profiles for task list",
+    );
+    const debugMessages = loggerMock.debug.mock.calls
+      .map((call) => call[1])
+      .filter((message): message is string => typeof message === "string");
+    const developerMarkerPattern = new RegExp(String.raw`\[${"FIX"}:|^DEBUG `, "m");
+    expect(debugMessages.join("\n")).not.toMatch(developerMarkerPattern);
   });
 });

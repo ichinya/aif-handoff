@@ -495,8 +495,8 @@ export function createCodexIndexService(
           snapshotCount: snapshotParseResult.snapshots.length,
         },
         status === "appended"
-          ? "DEBUG [FIX:codex-index-append] Parsed Codex appended session range"
-          : "DEBUG [FIX:codex-index-full-range] Parsed Codex full session range with cursor state",
+          ? "Parsed Codex appended session range"
+          : "Parsed Codex full session range with cursor state",
       );
 
       for (const snapshot of snapshots) {
@@ -607,7 +607,7 @@ export function createCodexIndexService(
           headRowsDeleted,
           historyRowsDeleted: staleHistoryRowsDeleted,
         },
-        "DEBUG [FIX:codex-index-cleanup] Deleted stale Codex limit rows for changed files",
+        "Deleted stale Codex limit rows for changed files",
       );
     }
 
