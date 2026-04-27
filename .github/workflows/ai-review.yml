@@ -1,15 +1,48 @@
+# Drop into your repo at .github/workflows/ai-review.yml.
+# Posts a signed webhook to the AI Review Runner on:
+#   1. PR opened — automatic first review.
+#   2. A trusted user posts `/code-review` in a PR comment — re-trigger
+#      against the current head_sha.
+#
+# Required secrets in the repo (or org):
+#   RUNNER_HMAC_SECRET   — same value the runner has at RUNNER_HMAC_SECRET / _FILE.
+#   RUNNER_URL           — e.g. https://runner.example.com/review
+#   RUNNER_GH_PAT        — fine-grained PAT with `Contents: Read`,
+#                          `Pull requests: Read & Write`, `Issues: Read & Write`,
+#                          `Metadata: Read`. See README / DEPLOY.md for why
+#                          GITHUB_TOKEN won't work: the runner processes jobs
+#                          asynchronously, but the built-in GITHUB_TOKEN is
+#                          revoked the moment this workflow job finishes
+#                          (~2 s after the POST), while the runner still needs
+#                          the token 30–180 s later to clone and post.
+#
+# Edit the `TRUSTED_USERS` list below to control who can re-trigger via comment.
+
 name: AI Review
 
 on:
   pull_request:
     types: [opened]
+  issue_comment:
+    types: [created]
 
 permissions:
   pull-requests: write
   contents: read
+  issues: read
 
 jobs:
   ai-review:
+    # Trigger on:
+    #   - PR opened (automatic first review)
+    #   - issue_comment on a PR, by a TRUSTED user, containing `/code-review`
+    if: |
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request != null &&
+       github.event.sender.type != 'Bot' &&
+       contains(fromJSON('["lee-to"]'), github.event.sender.login) &&
+       contains(github.event.comment.body, '/code-review'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -17,13 +50,29 @@ jobs:
         env:
           RUNNER_URL: ${{ secrets.RUNNER_URL }}
           RUNNER_HMAC_SECRET: ${{ secrets.RUNNER_HMAC_SECRET }}
+          # PAT, NOT secrets.GITHUB_TOKEN — that one expires when the job
+          # finishes, but the runner needs the token 30–180 s later.
           GH_TOKEN: ${{ secrets.RUNNER_GH_PAT }}
         shell: bash
         run: |
           set -euo pipefail
           REPO="${GITHUB_REPOSITORY}"
-          PR_NUMBER="${{ github.event.pull_request.number }}"
-          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+
+          # PR number + head_sha differ between event types.
+          # `pull_request`  → both come straight from the event payload.
+          # `issue_comment` → only `issue.number` is available; fetch head_sha
+          #                   for the *latest* commit via gh so each /code-review
+          #                   reviews the freshest code.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          else
+            PR_NUMBER="${{ github.event.issue.number }}"
+            HEAD_SHA=$(gh pr view "${PR_NUMBER}" \
+                --repo "${REPO}" \
+                --json headRefOid -q .headRefOid)
+          fi
+
           TS="$(date +%s)"
 
           # Build payload — keep this single-line JSON; the runner verifies HMAC over
