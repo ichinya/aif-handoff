@@ -617,29 +617,32 @@ export const api = {
   },
 
   // Codex login proxy (feature-flagged)
-  getCodexLoginCapabilities(): Promise<{ loginProxyEnabled: boolean; loopbackPort: number }> {
+  getCodexLoginCapabilities(): Promise<{ loginProxyEnabled: boolean }> {
     console.debug("[api] GET /auth/codex/capabilities");
     return request("/auth/codex/capabilities");
   },
 
   getCodexLoginStatus(): Promise<
-    { active: false } | { active: true; sessionId: string; authUrl: string; startedAt: string }
+    | { active: false }
+    | {
+        active: true;
+        sessionId: string;
+        verificationUrl: string;
+        userCode: string;
+        startedAt: string;
+      }
   > {
     return request("/auth/codex/login/status");
   },
 
-  startCodexLogin(): Promise<{ sessionId: string; authUrl: string; startedAt: string }> {
+  startCodexLogin(): Promise<{
+    sessionId: string;
+    verificationUrl: string;
+    userCode: string;
+    startedAt: string;
+  }> {
     console.debug("[api] POST /auth/codex/login/start");
     return request("/auth/codex/login/start", { method: "POST" }, PLAN_FAST_FIX_TIMEOUT_MS);
-  },
-
-  submitCodexCallback(url: string): Promise<{ ok: boolean; exitCode: number | null }> {
-    console.debug("[api] POST /auth/codex/login/callback");
-    return request(
-      "/auth/codex/login/callback",
-      { method: "POST", body: JSON.stringify({ url }) },
-      PLAN_FAST_FIX_TIMEOUT_MS,
-    );
   },
 
   cancelCodexLogin(): Promise<{ ok: boolean; cancelled: boolean }> {
