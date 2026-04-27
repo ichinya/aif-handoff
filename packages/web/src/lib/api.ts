@@ -623,13 +623,23 @@ export const api = {
   },
 
   getCodexLoginStatus(): Promise<
-    | { active: false }
     | {
         active: true;
         sessionId: string;
         verificationUrl: string;
         userCode: string;
         startedAt: string;
+      }
+    | {
+        active: false;
+        lastResult?: {
+          ok: boolean;
+          sessionId: string;
+          reason: "success" | "exit_nonzero" | "signal" | "timeout" | "cancel" | "spawn_failed";
+          exitCode: number | null;
+          signal: string | null;
+          finishedAt: string;
+        };
       }
   > {
     return request("/auth/codex/login/status");

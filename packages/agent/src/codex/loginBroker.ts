@@ -14,6 +14,26 @@ const SESSION_TIMEOUT_MS = 5 * 60 * 1000;
 const VERIFICATION_URL = "https://auth.openai.com/codex/device";
 const ANSI_PATTERN = /\x1B\[[0-9;]*[A-Za-z]/g;
 const USER_CODE_PATTERN = /\b[A-Z0-9]{4}-[A-Z0-9]{4,}\b/;
+const USER_CODE_PATTERN_GLOBAL = /\b[A-Z0-9]{4}-[A-Z0-9]{4,}\b/g;
+const REDACTED_CODE = "***-*****";
+const LOG_CHUNK_LIMIT = 200;
+
+export type TerminalReason =
+  | "success"
+  | "exit_nonzero"
+  | "signal"
+  | "timeout"
+  | "cancel"
+  | "spawn_failed";
+
+export interface TerminalResult {
+  ok: boolean;
+  sessionId: string;
+  finishedAt: number;
+  reason: TerminalReason;
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
+}
 
 export interface DeviceAuthInfo {
   verificationUrl: string;
@@ -33,6 +53,8 @@ export interface BrokerRuntime {
   app: Hono;
   /** Internal accessor for tests */
   getCurrentSession(): LoginSession | null;
+  /** Internal accessor for tests */
+  getLastResult(): TerminalResult | null;
 }
 
 export interface BrokerServer {
@@ -53,6 +75,7 @@ export interface BrokerOptions {
 
 interface BrokerContext {
   currentSession: LoginSession | null;
+  lastResult: TerminalResult | null;
   options: Required<Omit<BrokerOptions, "spawnFn">> & {
     spawnFn: typeof spawn;
   };
@@ -78,7 +101,33 @@ export function maskUserCode(code: string): string {
   return `${"*".repeat(code.length - 2)}${code.slice(-2)}`;
 }
 
-function terminateSession(ctx: BrokerContext, reason: string): void {
+/**
+ * Redact every device-code-shaped token from a raw stdout/stderr chunk before
+ * it is written to the logger. Without this, DEBUG-level chunk logs would
+ * leak the exact one-time code printed by the codex CLI.
+ */
+export function redactChunkForLog(text: string): string {
+  return text.replace(USER_CODE_PATTERN_GLOBAL, REDACTED_CODE).slice(0, LOG_CHUNK_LIMIT);
+}
+
+function recordTerminalResult(ctx: BrokerContext, result: TerminalResult): void {
+  ctx.lastResult = result;
+  log.info(
+    {
+      sessionId: result.sessionId,
+      ok: result.ok,
+      reason: result.reason,
+      exitCode: result.exitCode,
+      signal: result.signal,
+    },
+    "[Broker.terminalResult] session ended",
+  );
+}
+
+function terminateSession(
+  ctx: BrokerContext,
+  reason: Extract<TerminalReason, "timeout" | "cancel">,
+): void {
   const session = ctx.currentSession;
   if (!session) return;
   log.info({ sessionId: session.id, reason }, "[Broker.terminateSession] ending session");
@@ -90,7 +139,21 @@ function terminateSession(ctx: BrokerContext, reason: string): void {
       log.warn({ err }, "[Broker.terminateSession] failed to kill child");
     }
   }
+  recordTerminalResult(ctx, {
+    ok: false,
+    sessionId: session.id,
+    finishedAt: Date.now(),
+    reason,
+    exitCode: null,
+    signal: null,
+  });
   ctx.currentSession = null;
+}
+
+function classifyExit(code: number | null, signal: NodeJS.Signals | null): TerminalReason {
+  if (signal !== null) return "signal";
+  if (code === 0) return "success";
+  return "exit_nonzero";
 }
 
 function createBrokerApp(ctx: BrokerContext): Hono {
@@ -99,14 +162,29 @@ function createBrokerApp(ctx: BrokerContext): Hono {
   app.get("/codex/login/status", (c) => {
     log.debug("[Broker.status] enter");
     const session = ctx.currentSession;
-    if (!session) return c.json({ active: false });
-    return c.json({
-      active: true,
-      sessionId: session.id,
-      verificationUrl: session.verificationUrl,
-      userCode: session.userCode,
-      startedAt: new Date(session.startedAt).toISOString(),
-    });
+    if (session) {
+      return c.json({
+        active: true,
+        sessionId: session.id,
+        verificationUrl: session.verificationUrl,
+        userCode: session.userCode,
+        startedAt: new Date(session.startedAt).toISOString(),
+      });
+    }
+    if (ctx.lastResult) {
+      return c.json({
+        active: false,
+        lastResult: {
+          ok: ctx.lastResult.ok,
+          sessionId: ctx.lastResult.sessionId,
+          reason: ctx.lastResult.reason,
+          exitCode: ctx.lastResult.exitCode,
+          signal: ctx.lastResult.signal,
+          finishedAt: new Date(ctx.lastResult.finishedAt).toISOString(),
+        },
+      });
+    }
+    return c.json({ active: false });
   });
 
   app.post("/codex/login/start", async (c) => {
@@ -128,6 +206,10 @@ function createBrokerApp(ctx: BrokerContext): Hono {
       );
     }
 
+    // Each new start clears the previous terminal result so /status during
+    // the new run reflects only the current session.
+    ctx.lastResult = null;
+
     const cliPath = ctx.options.codexCliPath;
     log.debug({ cliPath }, "[Broker.start] spawning codex login --device-auth");
 
@@ -139,6 +221,14 @@ function createBrokerApp(ctx: BrokerContext): Hono {
       });
     } catch (err) {
       log.error({ err }, "[Broker.start] spawn failed");
+      recordTerminalResult(ctx, {
+        ok: false,
+        sessionId: randomUUID(),
+        finishedAt: Date.now(),
+        reason: "spawn_failed",
+        exitCode: null,
+        signal: null,
+      });
       return c.json({ error: "spawn_failed", message: String(err) }, 500);
     }
 
@@ -161,12 +251,12 @@ function createBrokerApp(ctx: BrokerContext): Hono {
       const onData = (data: Buffer) => {
         const text = data.toString("utf8");
         buffered += text;
-        log.debug({ chunk: text.slice(0, 200) }, "[Broker.start] codex stdout");
+        log.debug({ chunk: redactChunkForLog(text) }, "[Broker.start] codex stdout");
         tryParse();
       };
       const onStderr = (data: Buffer) => {
         const text = data.toString("utf8");
-        log.debug({ chunk: text.slice(0, 200) }, "[Broker.start] codex stderr");
+        log.debug({ chunk: redactChunkForLog(text) }, "[Broker.start] codex stderr");
         buffered += text;
         tryParse();
       };
@@ -208,6 +298,14 @@ function createBrokerApp(ctx: BrokerContext): Hono {
       } catch {
         // ignore
       }
+      recordTerminalResult(ctx, {
+        ok: false,
+        sessionId,
+        finishedAt: Date.now(),
+        reason: "exit_nonzero",
+        exitCode: child.exitCode,
+        signal: null,
+      });
       return c.json({ error: "device_auth_parse_failed", message: String(err) }, 500);
     }
 
@@ -230,10 +328,21 @@ function createBrokerApp(ctx: BrokerContext): Hono {
 
     child.once("exit", (code, signal) => {
       log.info({ sessionId, code, signal }, "[Broker.childExit] codex exited");
-      if (ctx.currentSession?.id === sessionId) {
-        clearTimeout(session.timeoutHandle);
-        ctx.currentSession = null;
-      }
+      // If the session was already cleared by terminateSession (cancel/timeout)
+      // we keep that terminal result — terminateSession recorded the reason
+      // before signalling the child.
+      if (ctx.currentSession?.id !== sessionId) return;
+      clearTimeout(session.timeoutHandle);
+      const reason = classifyExit(code, signal);
+      recordTerminalResult(ctx, {
+        ok: reason === "success",
+        sessionId,
+        finishedAt: Date.now(),
+        reason,
+        exitCode: code,
+        signal,
+      });
+      ctx.currentSession = null;
     });
 
     ctx.currentSession = session;
@@ -263,6 +372,7 @@ function createBrokerApp(ctx: BrokerContext): Hono {
 export function createBrokerRuntime(options: BrokerOptions = {}): BrokerRuntime {
   const ctx: BrokerContext = {
     currentSession: null,
+    lastResult: null,
     options: {
       port: options.port ?? DEFAULT_PORT,
       host: options.host ?? DEFAULT_HOST,
@@ -275,6 +385,7 @@ export function createBrokerRuntime(options: BrokerOptions = {}): BrokerRuntime 
   return {
     app,
     getCurrentSession: () => ctx.currentSession,
+    getLastResult: () => ctx.lastResult,
   };
 }
 

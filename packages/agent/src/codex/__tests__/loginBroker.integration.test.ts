@@ -61,13 +61,14 @@ describe("loginBroker device-auth integration", () => {
     expect(typeof body.startedAt).toBe("string");
   });
 
-  it("status reports active session details, then inactive after child exits", async () => {
+  it("status reports active session details, then a successful terminal result on code=0 exit", async () => {
     const stub = createStubChild();
     const runtime = createBrokerRuntime({
       spawnFn: vi.fn(() => stub) as unknown as typeof import("node:child_process").spawn,
     });
 
-    await runtime.app.request("/codex/login/start", { method: "POST" });
+    const startRes = await runtime.app.request("/codex/login/start", { method: "POST" });
+    const startBody = (await startRes.json()) as { sessionId: string };
 
     const activeRes = await runtime.app.request("/codex/login/status");
     const activeBody = (await activeRes.json()) as {
@@ -86,8 +87,75 @@ describe("loginBroker device-auth integration", () => {
     expect(runtime.getCurrentSession()).toBeNull();
 
     const inactiveRes = await runtime.app.request("/codex/login/status");
-    const inactiveBody = (await inactiveRes.json()) as { active: boolean };
+    const inactiveBody = (await inactiveRes.json()) as {
+      active: boolean;
+      lastResult?: { ok: boolean; reason: string; sessionId: string; exitCode: number | null };
+    };
     expect(inactiveBody.active).toBe(false);
+    expect(inactiveBody.lastResult).toBeDefined();
+    expect(inactiveBody.lastResult?.ok).toBe(true);
+    expect(inactiveBody.lastResult?.reason).toBe("success");
+    expect(inactiveBody.lastResult?.sessionId).toBe(startBody.sessionId);
+    expect(inactiveBody.lastResult?.exitCode).toBe(0);
+  });
+
+  it("non-zero exit produces a failed terminal result, not success", async () => {
+    const stub = createStubChild();
+    const runtime = createBrokerRuntime({
+      spawnFn: vi.fn(() => stub) as unknown as typeof import("node:child_process").spawn,
+    });
+
+    const startRes = await runtime.app.request("/codex/login/start", { method: "POST" });
+    const startBody = (await startRes.json()) as { sessionId: string };
+
+    (stub as unknown as { exitCode: number | null }).exitCode = 1;
+    stub.emit("exit", 1, null);
+
+    const inactiveRes = await runtime.app.request("/codex/login/status");
+    const inactiveBody = (await inactiveRes.json()) as {
+      active: boolean;
+      lastResult?: { ok: boolean; reason: string; sessionId: string; exitCode: number | null };
+    };
+    expect(inactiveBody.active).toBe(false);
+    expect(inactiveBody.lastResult?.ok).toBe(false);
+    expect(inactiveBody.lastResult?.reason).toBe("exit_nonzero");
+    expect(inactiveBody.lastResult?.exitCode).toBe(1);
+    expect(inactiveBody.lastResult?.sessionId).toBe(startBody.sessionId);
+  });
+
+  it("signal kill produces a failed terminal result with reason=signal", async () => {
+    const stub = createStubChild();
+    const runtime = createBrokerRuntime({
+      spawnFn: vi.fn(() => stub) as unknown as typeof import("node:child_process").spawn,
+    });
+
+    await runtime.app.request("/codex/login/start", { method: "POST" });
+
+    (stub as unknown as { exitCode: number | null }).exitCode = null;
+    stub.emit("exit", null, "SIGKILL");
+
+    const inactiveRes = await runtime.app.request("/codex/login/status");
+    const inactiveBody = (await inactiveRes.json()) as {
+      active: boolean;
+      lastResult?: { ok: boolean; reason: string; signal: string | null };
+    };
+    expect(inactiveBody.lastResult?.ok).toBe(false);
+    expect(inactiveBody.lastResult?.reason).toBe("signal");
+    expect(inactiveBody.lastResult?.signal).toBe("SIGKILL");
+  });
+
+  it("cancel records a failed terminal result with reason=cancel", async () => {
+    const stub = createStubChild();
+    const runtime = createBrokerRuntime({
+      spawnFn: vi.fn(() => stub) as unknown as typeof import("node:child_process").spawn,
+    });
+
+    await runtime.app.request("/codex/login/start", { method: "POST" });
+    await runtime.app.request("/codex/login/cancel", { method: "POST" });
+
+    const lastResult = runtime.getLastResult();
+    expect(lastResult?.ok).toBe(false);
+    expect(lastResult?.reason).toBe("cancel");
   });
 
   it("returns 409 when a session is already active", async () => {

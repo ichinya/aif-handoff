@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractDeviceAuth, maskUserCode } from "../loginBroker.js";
+import { extractDeviceAuth, maskUserCode, redactChunkForLog } from "../loginBroker.js";
 
 const ANSI = "\x1B[94m";
 const RESET = "\x1B[0m";
@@ -67,5 +67,32 @@ describe("maskUserCode", () => {
   it("returns *** for very short codes", () => {
     expect(maskUserCode("AB")).toBe("***");
     expect(maskUserCode("")).toBe("***");
+  });
+});
+
+describe("redactChunkForLog", () => {
+  it("replaces every device-code-shaped token with the redaction sentinel", () => {
+    const input = "Enter this one-time code\n   5PZO-GPZLR\nlater retry: ABCD-12345\n";
+    const out = redactChunkForLog(input);
+    expect(out).not.toContain("5PZO-GPZLR");
+    expect(out).not.toContain("ABCD-12345");
+    expect(out).toContain("***-*****");
+  });
+
+  it("does not touch unrelated text", () => {
+    const input = "Welcome to Codex\nFollow these steps to sign in";
+    expect(redactChunkForLog(input)).toBe(input);
+  });
+
+  it("truncates at the 200-character log limit", () => {
+    const long = "x".repeat(300);
+    expect(redactChunkForLog(long)).toHaveLength(200);
+  });
+
+  it("redacts before truncating so a code near the 200-char boundary still gets masked", () => {
+    const prefix = `${"x".repeat(180)}\n   `;
+    const out = redactChunkForLog(`${prefix}5PZO-GPZLR\n`);
+    expect(out).not.toContain("5PZO-GPZLR");
+    expect(out).toContain("***-*****");
   });
 });

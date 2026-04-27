@@ -76,7 +76,7 @@ describe("CodexLoginCard", () => {
     expect(screen.getByRole("button", { name: /Cancel/i })).toBeInTheDocument();
   });
 
-  it("flips to success when the broker reports the session is no longer active", async () => {
+  it("flips to success only when the broker reports lastResult.ok=true", async () => {
     const statusMock = api.getCodexLoginStatus as unknown as ReturnType<typeof vi.fn>;
     statusMock.mockResolvedValue({
       active: true,
@@ -96,13 +96,61 @@ describe("CodexLoginCard", () => {
     fireEvent.click(screen.getByRole("button", { name: /Start Codex login/i }));
     await waitFor(() => expect(screen.getByText("ABCD-12345")).toBeInTheDocument());
 
-    // Simulate the child exiting in the broker — status query now returns inactive.
-    statusMock.mockResolvedValue({ active: false });
+    statusMock.mockResolvedValue({
+      active: false,
+      lastResult: {
+        ok: true,
+        sessionId: "s-1",
+        reason: "success",
+        exitCode: 0,
+        signal: null,
+        finishedAt: new Date().toISOString(),
+      },
+    });
 
     await waitFor(
       () => expect(screen.getByText(/Codex is now authenticated/i)).toBeInTheDocument(),
       { timeout: 3000 },
     );
+  });
+
+  it("flips to error when the broker reports a non-zero exit terminal result", async () => {
+    const statusMock = api.getCodexLoginStatus as unknown as ReturnType<typeof vi.fn>;
+    statusMock.mockResolvedValue({
+      active: true,
+      sessionId: "s-2",
+      verificationUrl: "https://auth.openai.com/codex/device",
+      userCode: "ABCD-12345",
+      startedAt: new Date().toISOString(),
+    });
+    (api.startCodexLogin as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      sessionId: "s-2",
+      verificationUrl: "https://auth.openai.com/codex/device",
+      userCode: "ABCD-12345",
+      startedAt: new Date().toISOString(),
+    });
+
+    renderCard();
+    fireEvent.click(screen.getByRole("button", { name: /Start Codex login/i }));
+    await waitFor(() => expect(screen.getByText("ABCD-12345")).toBeInTheDocument());
+
+    statusMock.mockResolvedValue({
+      active: false,
+      lastResult: {
+        ok: false,
+        sessionId: "s-2",
+        reason: "exit_nonzero",
+        exitCode: 1,
+        signal: null,
+        finishedAt: new Date().toISOString(),
+      },
+    });
+
+    await waitFor(() => expect(screen.getByText(/exited with code 1/i)).toBeInTheDocument(), {
+      timeout: 3000,
+    });
+    expect(screen.queryByText(/Codex is now authenticated/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Retry/i })).toBeInTheDocument();
   });
 
   it("shows an error message when start fails", async () => {

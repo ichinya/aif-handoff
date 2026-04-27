@@ -29,6 +29,29 @@ const INITIAL_VIEW: ViewState = {
   error: null,
 };
 
+type FailureReason = "exit_nonzero" | "signal" | "timeout" | "cancel" | "spawn_failed";
+
+function failureMessage(
+  reason: string | undefined,
+  exitCode: number | null,
+  signal: string | null,
+): string {
+  switch (reason as FailureReason | undefined) {
+    case "exit_nonzero":
+      return `Codex CLI exited with code ${exitCode ?? "?"} before completing login. Check the agent logs (TLS / network).`;
+    case "signal":
+      return `Codex CLI was killed by signal ${signal ?? "?"} before completing login.`;
+    case "timeout":
+      return "Codex login session timed out after 5 minutes. Click Retry to start a fresh code.";
+    case "cancel":
+      return "Codex login was cancelled.";
+    case "spawn_failed":
+      return "Could not spawn the codex CLI. Verify the binary is installed in the agent container.";
+    default:
+      return "Codex login ended without success and the broker did not report a reason.";
+  }
+}
+
 /**
  * Guided wizard for `codex login --device-auth` running inside the agent
  * container. The CLI prints a fixed verification URL plus a one-time code;
@@ -63,7 +86,12 @@ export function CodexLoginCard() {
   const cancelMutation = useCancelCodexLogin();
 
   // Adopt any pre-existing session the broker reports (user refreshed the page),
-  // and detect completion when an active session goes inactive.
+  // and detect terminal status (success / non-zero exit / signal / timeout /
+  // cancel) when an active session goes inactive. Success is gated on the
+  // broker's explicit `lastResult.ok === true` — we never infer success from
+  // the mere absence of an active child, because codex `--device-auth` can
+  // exit non-zero (network failure, user cancel in browser, etc.) and the UI
+  // must not lie to the user about authentication state.
   useEffect(() => {
     const data = statusQuery.data;
     if (!data) return;
@@ -81,9 +109,12 @@ export function CodexLoginCard() {
       }
       return;
     }
-    // Child exited cleanly while we were waiting → flow succeeded.
-    if (view.step === "awaiting_completion" && sawActiveRef.current) {
-      sawActiveRef.current = false;
+    if (view.step !== "awaiting_completion" || !sawActiveRef.current) return;
+    const result = data.lastResult;
+    // Stale lastResult (different session) — keep waiting; ignore.
+    if (result && view.sessionId !== null && result.sessionId !== view.sessionId) return;
+    sawActiveRef.current = false;
+    if (result?.ok) {
       setView({
         step: "success",
         verificationUrl: null,
@@ -91,8 +122,16 @@ export function CodexLoginCard() {
         sessionId: null,
         error: null,
       });
+      return;
     }
-  }, [statusQuery.data, view.step]);
+    setView({
+      step: "error",
+      verificationUrl: null,
+      userCode: null,
+      sessionId: null,
+      error: failureMessage(result?.reason, result?.exitCode ?? null, result?.signal ?? null),
+    });
+  }, [statusQuery.data, view.step, view.sessionId]);
 
   const disabledStart = startMutation.isPending;
 
