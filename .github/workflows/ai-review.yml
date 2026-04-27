@@ -1,0 +1,56 @@
+name: AI Review
+
+on:
+  pull_request:
+    types: [opened]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  ai-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Send signed webhook
+        env:
+          RUNNER_URL: ${{ secrets.RUNNER_URL }}
+          RUNNER_HMAC_SECRET: ${{ secrets.RUNNER_HMAC_SECRET }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPO="${GITHUB_REPOSITORY}"
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          TS="$(date +%s)"
+
+          # Build payload — keep this single-line JSON; the runner verifies HMAC over
+          # `<ts>.<rawBody>` byte-for-byte.
+          BODY="$(jq -nc \
+            --arg repo "${REPO}" \
+            --argjson pr ${PR_NUMBER} \
+            --arg sha "${HEAD_SHA}" \
+            --arg tok "${GH_TOKEN}" \
+            --argjson ts ${TS} \
+            '{repo: $repo, pr_number: $pr, head_sha: $sha, gh_token: $tok, ts: $ts}')"
+
+          # X-Signature = sha256= + HMAC( "<ts>." + BODY )
+          SIG="sha256=$(printf '%s.%s' "${TS}" "${BODY}" \
+            | openssl dgst -sha256 -hmac "${RUNNER_HMAC_SECRET}" -hex \
+            | awk '{print $2}')"
+
+          # POST and capture status; fail the workflow on >= 400 from the runner.
+          HTTP_CODE=$(curl -sS -o /tmp/resp.json -w '%{http_code}' \
+              -X POST "${RUNNER_URL}" \
+              -H "Content-Type: application/json" \
+              -H "X-Signature: ${SIG}" \
+              -H "X-Timestamp: ${TS}" \
+              --data-raw "${BODY}")
+          echo "runner http: ${HTTP_CODE}"
+          cat /tmp/resp.json || true
+          if [ "${HTTP_CODE}" -ge 400 ]; then
+              echo "::error::Runner returned ${HTTP_CODE}"
+              exit 1
+          fi
