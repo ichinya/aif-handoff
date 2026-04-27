@@ -23,8 +23,29 @@ export type TerminalReason =
   | "exit_nonzero"
   | "signal"
   | "timeout"
+  | "parse_timeout"
   | "cancel"
   | "spawn_failed";
+
+/**
+ * Reject reason carried out of the parse-output promise so the start handler
+ * can record a precise terminal result. Plain `Error.message` matching would
+ * collapse the failure modes (async spawn error vs early exit vs no-output
+ * timeout) into one bucket.
+ */
+class DeviceAuthParseError extends Error {
+  constructor(
+    public readonly reason: Extract<
+      TerminalReason,
+      "exit_nonzero" | "spawn_failed" | "parse_timeout"
+    >,
+    message: string,
+    public readonly exitCode: number | null = null,
+  ) {
+    super(message);
+    this.name = "DeviceAuthParseError";
+  }
+}
 
 export interface TerminalResult {
   ok: boolean;
@@ -263,13 +284,22 @@ function createBrokerApp(ctx: BrokerContext): Hono {
       const onExit = (code: number | null) => {
         if (!settled) {
           settled = true;
-          reject(new Error(`codex exited before printing device auth (code=${code})`));
+          reject(
+            new DeviceAuthParseError(
+              "exit_nonzero",
+              `codex exited before printing device auth (code=${code})`,
+              code,
+            ),
+          );
         }
       };
       const onError = (err: Error) => {
         if (!settled) {
           settled = true;
-          reject(err);
+          // `error` events on a spawned child usually mean the binary could
+          // not be launched (ENOENT, EACCES, etc.) — surface that as
+          // spawn_failed rather than collapsing it into exit_nonzero.
+          reject(new DeviceAuthParseError("spawn_failed", err.message));
         }
       };
 
@@ -283,7 +313,12 @@ function createBrokerApp(ctx: BrokerContext): Hono {
           settled = true;
           child.stdout.off("data", onData);
           child.stderr.off("data", onStderr);
-          reject(new Error("timed out waiting for codex device auth output"));
+          reject(
+            new DeviceAuthParseError(
+              "parse_timeout",
+              "timed out waiting for codex device auth output",
+            ),
+          );
         }
       }, 15_000).unref();
     });
@@ -298,12 +333,13 @@ function createBrokerApp(ctx: BrokerContext): Hono {
       } catch {
         // ignore
       }
+      const parseErr = err instanceof DeviceAuthParseError ? err : null;
       recordTerminalResult(ctx, {
         ok: false,
         sessionId,
         finishedAt: Date.now(),
-        reason: "exit_nonzero",
-        exitCode: child.exitCode,
+        reason: parseErr?.reason ?? "exit_nonzero",
+        exitCode: parseErr?.exitCode ?? child.exitCode,
         signal: null,
       });
       return c.json({ error: "device_auth_parse_failed", message: String(err) }, 500);

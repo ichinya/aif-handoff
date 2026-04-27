@@ -635,7 +635,14 @@ export const api = {
         lastResult?: {
           ok: boolean;
           sessionId: string;
-          reason: "success" | "exit_nonzero" | "signal" | "timeout" | "cancel" | "spawn_failed";
+          reason:
+            | "success"
+            | "exit_nonzero"
+            | "signal"
+            | "timeout"
+            | "parse_timeout"
+            | "cancel"
+            | "spawn_failed";
           exitCode: number | null;
           signal: string | null;
           finishedAt: string;

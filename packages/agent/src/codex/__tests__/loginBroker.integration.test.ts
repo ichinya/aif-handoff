@@ -144,6 +144,30 @@ describe("loginBroker device-auth integration", () => {
     expect(inactiveBody.lastResult?.signal).toBe("SIGKILL");
   });
 
+  it("async child error during parsing records reason=spawn_failed", async () => {
+    const proc = new EventEmitter() as ChildProcessWithoutNullStreams & EventEmitter;
+    const stdout = new EventEmitter() as unknown as ChildProcessWithoutNullStreams["stdout"];
+    const stderr = new EventEmitter() as unknown as ChildProcessWithoutNullStreams["stderr"];
+    (proc as unknown as { stdout: typeof stdout }).stdout = stdout;
+    (proc as unknown as { stderr: typeof stderr }).stderr = stderr;
+    (proc as unknown as { killed: boolean }).killed = false;
+    (proc as unknown as { exitCode: number | null }).exitCode = null;
+    (proc as unknown as { kill: (sig?: string) => boolean }).kill = vi.fn(() => true);
+    // Emit an error event before any stdout — mimics ENOENT on the codex binary.
+    queueMicrotask(() => proc.emit("error", new Error("spawn codex ENOENT")));
+
+    const runtime = createBrokerRuntime({
+      spawnFn: vi.fn(() => proc) as unknown as typeof import("node:child_process").spawn,
+    });
+
+    const startRes = await runtime.app.request("/codex/login/start", { method: "POST" });
+    expect(startRes.status).toBe(500);
+
+    const lastResult = runtime.getLastResult();
+    expect(lastResult?.ok).toBe(false);
+    expect(lastResult?.reason).toBe("spawn_failed");
+  });
+
   it("cancel records a failed terminal result with reason=cancel", async () => {
     const stub = createStubChild();
     const runtime = createBrokerRuntime({

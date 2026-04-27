@@ -29,7 +29,13 @@ const INITIAL_VIEW: ViewState = {
   error: null,
 };
 
-type FailureReason = "exit_nonzero" | "signal" | "timeout" | "cancel" | "spawn_failed";
+type FailureReason =
+  | "exit_nonzero"
+  | "signal"
+  | "timeout"
+  | "parse_timeout"
+  | "cancel"
+  | "spawn_failed";
 
 function failureMessage(
   reason: string | undefined,
@@ -43,6 +49,8 @@ function failureMessage(
       return `Codex CLI was killed by signal ${signal ?? "?"} before completing login.`;
     case "timeout":
       return "Codex login session timed out after 5 minutes. Click Retry to start a fresh code.";
+    case "parse_timeout":
+      return "Codex CLI did not print a verification URL within 15 seconds. Check the agent logs and the codex binary version.";
     case "cancel":
       return "Codex login was cancelled.";
     case "spawn_failed":

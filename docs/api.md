@@ -772,9 +772,20 @@ last run** so the client can distinguish success from failure:
 }
 ```
 
-`reason` is one of `success`, `exit_nonzero`, `signal`, `timeout`, `cancel`,
-`spawn_failed`. The UI **must** gate the success transition on
-`lastResult.ok === true`. If no session has ever run the field is omitted.
+`reason` is one of `success`, `exit_nonzero`, `signal`, `timeout`,
+`parse_timeout`, `cancel`, `spawn_failed`. The UI **must** gate the success
+transition on `lastResult.ok === true`. If no session has ever run the field
+is omitted.
+
+| Reason          | Meaning                                                                            |
+| --------------- | ---------------------------------------------------------------------------------- |
+| `success`       | Codex CLI exited with code `0` and no signal — `~/.codex/auth.json` was written.   |
+| `exit_nonzero`  | Codex CLI exited with a non-zero status code (network/TLS failure, server reject). |
+| `signal`        | Codex CLI was killed by a signal (e.g. `SIGKILL`) before completing login.         |
+| `timeout`       | The 5-minute wizard session expired before the user completed the browser flow.    |
+| `parse_timeout` | The CLI did not print a verification URL + code within 15 seconds of spawn.        |
+| `cancel`        | The user pressed Cancel; broker SIGTERMed the child.                               |
+| `spawn_failed`  | The codex binary could not be spawned (missing/unexecutable, ENOENT/EACCES).       |
 
 ### Cancel
 
