@@ -691,6 +691,121 @@ Planning and review follow the same pattern but use their dedicated defaults bef
 
 ---
 
+## Codex OAuth Login (Docker)
+
+Wraps `codex login --device-auth` running inside the agent container so the
+host browser can complete the device-code flow. All `/auth/codex/login/*`
+mutating endpoints are gated behind `AIF_ENABLE_CODEX_LOGIN_PROXY=true`. When
+the flag is `false` only `/auth/codex/capabilities` is mounted; the others
+return `404`. See [Providers](providers.md#codex-oauth-login-in-docker-broker)
+for the full design.
+
+### Capabilities
+
+```
+GET /auth/codex/capabilities
+```
+
+**Response:** `200 OK`
+
+```json
+{ "loginProxyEnabled": true }
+```
+
+### Start Login
+
+```
+POST /auth/codex/login/start
+```
+
+Spawns `codex login --device-auth` in the agent container and parses the
+verification URL plus one-time code.
+
+**Response:** `200 OK`
+
+```json
+{
+  "sessionId": "9f3c1a8e-...",
+  "verificationUrl": "https://auth.openai.com/codex/device",
+  "userCode": "ABCD-12345",
+  "startedAt": "2026-04-27T16:30:00.000Z"
+}
+```
+
+`409 Conflict` when a session is already active — the body still carries
+`{sessionId, verificationUrl, userCode}` so the client can adopt it.
+`500` on spawn failure or device-auth parse timeout.
+`502` when the API cannot reach the broker over the docker network.
+
+### Status
+
+```
+GET /auth/codex/login/status
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "active": true,
+  "sessionId": "9f3c1a8e-...",
+  "verificationUrl": "https://auth.openai.com/codex/device",
+  "userCode": "ABCD-12345",
+  "startedAt": "2026-04-27T16:30:00.000Z"
+}
+```
+
+When no session is active the response carries the **terminal result of the
+last run** so the client can distinguish success from failure:
+
+```json
+{
+  "active": false,
+  "lastResult": {
+    "ok": true,
+    "sessionId": "9f3c1a8e-...",
+    "reason": "success",
+    "exitCode": 0,
+    "signal": null,
+    "finishedAt": "2026-04-27T16:32:14.000Z"
+  }
+}
+```
+
+`reason` is one of `success`, `exit_nonzero`, `signal`, `timeout`,
+`parse_timeout`, `cancel`, `spawn_failed`. The UI **must** gate the success
+transition on `lastResult.ok === true`. If no session has ever run the field
+is omitted.
+
+| Reason          | Meaning                                                                            |
+| --------------- | ---------------------------------------------------------------------------------- |
+| `success`       | Codex CLI exited with code `0` and no signal — `~/.codex/auth.json` was written.   |
+| `exit_nonzero`  | Codex CLI exited with a non-zero status code (network/TLS failure, server reject). |
+| `signal`        | Codex CLI was killed by a signal (e.g. `SIGKILL`) before completing login.         |
+| `timeout`       | The 5-minute wizard session expired before the user completed the browser flow.    |
+| `parse_timeout` | The CLI did not print a verification URL + code within 15 seconds of spawn.        |
+| `cancel`        | The user pressed Cancel; broker SIGTERMed the child.                               |
+| `spawn_failed`  | The codex binary could not be spawned (missing/unexecutable, ENOENT/EACCES).       |
+
+### Cancel
+
+```
+POST /auth/codex/login/cancel
+```
+
+`SIGTERM`s the active child process. Records a terminal result with
+`reason: "cancel"`, `ok: false`.
+
+**Response:** `200 OK`
+
+```json
+{ "ok": true, "cancelled": true, "sessionId": "9f3c1a8e-..." }
+```
+
+`{ ok: true, cancelled: false }` when there was no active session.
+
+---
+
 ## AI Chat
 
 Interactive AI chat powered by the runtime adapter system. Messages are sent via REST, responses stream back through WebSocket as tokens. The runtime used depends on the effective chat runtime for the project: project chat default, then app chat default, then environment fallback.

@@ -87,9 +87,7 @@ if (getEnv().AIF_ENABLE_CODEX_LOGIN_PROXY) {
 } else {
   log.debug("Codex login proxy disabled — mounting capabilities endpoint only");
   const disabledRouter = new Hono();
-  disabledRouter.get("/capabilities", (c) =>
-    c.json({ loginProxyEnabled: false, loopbackPort: getEnv().AIF_CODEX_LOGIN_LOOPBACK_PORT }),
-  );
+  disabledRouter.get("/capabilities", (c) => c.json({ loginProxyEnabled: false }));
   app.route("/auth/codex", disabledRouter);
 }
 
