@@ -497,7 +497,8 @@ export function ChatPanel({
             onKeyDown={handleKeyDown}
             placeholder="Ask a question..."
             rows={1}
-            className="max-h-32 min-h-[2.25rem] flex-1 resize-none bg-secondary/50"
+            containerClassName="flex-1"
+            className="max-h-32 min-h-[2.25rem] resize-none bg-secondary/50"
           />
           {isStreaming ? (
             <Button
