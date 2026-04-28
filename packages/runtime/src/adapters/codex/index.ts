@@ -142,7 +142,7 @@ const APP_SERVER_CAPABILITIES: RuntimeCapabilities = {
   supportsAgentDefinitions: false,
   supportsStreaming: true,
   supportsModelDiscovery: true,
-  supportsApprovals: true,
+  supportsApprovals: false,
   supportsCustomEndpoint: true,
   usageReporting: UsageReporting.PARTIAL,
 };

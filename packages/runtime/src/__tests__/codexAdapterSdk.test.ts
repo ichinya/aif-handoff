@@ -139,14 +139,14 @@ describe("Codex adapter — SDK transport and capabilities", () => {
       expect(caps.supportsSessionList).toBe(false);
     });
 
-    it("returns app-server capabilities with approvals and partial usage reporting", () => {
+    it("returns app-server capabilities without human approvals while approval requests are denied", () => {
       const adapter = createCodexRuntimeAdapter();
       const caps = adapter.getEffectiveCapabilities!(RuntimeTransport.APP_SERVER);
 
       expect(caps.supportsResume).toBe(true);
       expect(caps.supportsSessionList).toBe(true);
       expect(caps.supportsStreaming).toBe(true);
-      expect(caps.supportsApprovals).toBe(true);
+      expect(caps.supportsApprovals).toBe(false);
       expect(caps.usageReporting).toBe("partial");
     });
 
