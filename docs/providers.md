@@ -59,13 +59,13 @@ The API exposes effective selection endpoints:
 
 ## Supported Runtimes
 
-| Runtime      | Provider     | Transports                | Resume                    | Sessions             | Agent Defs    | Usage Reporting                          | Light Model         | Status                    |
-| ------------ | ------------ | ------------------------- | ------------------------- | -------------------- | ------------- | ---------------------------------------- | ------------------- | ------------------------- |
-| `claude`     | `anthropic`  | SDK, CLI, API             | Yes (SDK/CLI)             | Yes (SDK/CLI)        | Yes (SDK/CLI) | `FULL` (all transports)                  | `claude-haiku-3-5`  | Built-in                  |
-| `codex`      | `openai`     | SDK, CLI, App Server, API | Yes (SDK/CLI/App Server)  | Yes (SDK/App Server) | No            | `FULL` SDK/API, `PARTIAL` CLI/App Server | default             | Built-in                  |
-| `opencode`   | `opencode`   | API                       | Yes                       | Yes                  | No            | `NONE`                                   | null (configurable) | Built-in                  |
-| `openrouter` | `openrouter` | API                       | No                        | No                   | No            | `FULL`                                   | null (configurable) | Built-in                  |
-| Custom       | Any          | Any                       | Configurable              | Configurable         | Configurable  | Must declare                             | Configurable        | Via `AIF_RUNTIME_MODULES` |
+| Runtime      | Provider     | Transports                | Resume                   | Sessions             | Agent Defs    | Usage Reporting                          | Light Model         | Status                    |
+| ------------ | ------------ | ------------------------- | ------------------------ | -------------------- | ------------- | ---------------------------------------- | ------------------- | ------------------------- |
+| `claude`     | `anthropic`  | SDK, CLI, API             | Yes (SDK/CLI)            | Yes (SDK/CLI)        | Yes (SDK/CLI) | `FULL` (all transports)                  | `claude-haiku-3-5`  | Built-in                  |
+| `codex`      | `openai`     | SDK, CLI, App Server, API | Yes (SDK/CLI/App Server) | Yes (SDK/App Server) | No            | `FULL` SDK/API, `PARTIAL` CLI/App Server | default             | Built-in                  |
+| `opencode`   | `opencode`   | API                       | Yes                      | Yes                  | No            | `NONE`                                   | null (configurable) | Built-in                  |
+| `openrouter` | `openrouter` | API                       | No                       | No                   | No            | `FULL`                                   | null (configurable) | Built-in                  |
+| Custom       | Any          | Any                       | Configurable             | Configurable         | Configurable  | Must declare                             | Configurable        | Via `AIF_RUNTIME_MODULES` |
 
 Capabilities are **transport-aware**: the same adapter may expose different capabilities depending on the selected transport. For example, Codex supports resume on SDK/CLI/App Server, while session discovery remains SDK/App Server-only. Use `resolveAdapterCapabilities(adapter, transport)` to get the effective set.
 
@@ -265,6 +265,8 @@ Runs `codex app-server` over stdio JSONL RPC and keeps Codex thread IDs as resum
 App Server operational notes:
 
 - Reuses the same key options as other Codex transports: `codexCliPath`, `approvalPolicy`, `sandboxMode`, `modelReasoningEffort`, and `skipGitRepoCheck`.
+- Does not add a transport-local hard run timeout. Long-running stages are governed by the shared runtime execution config; `options.appServerRequestTimeoutMs` only controls individual JSONL RPC request waits.
+- Human approval bridging is not implemented yet. Command, file-change, and permissions approval requests are denied by design and surfaced as permission failures/events; unattended App Server profiles should use `approvalPolicy="never"` only when the caller has intentionally accepted that trust level.
 - Session list APIs are supported through `thread/list` and `thread/read`; AIF stores Codex thread IDs as runtime session IDs for resume.
 - Docker images already include `@openai/codex` and mount persistent `~/.codex` auth state (`codex-auth` volume), so no extra Docker wiring is required for this transport.
 - On Windows, configured `codexCliPath` / `CODEX_CLI_PATH` values are treated as executable paths or shim names, not shell snippets. Values containing command-shell metacharacters are rejected before spawn.

@@ -228,10 +228,20 @@ describe("chat session API", () => {
         },
         selectionSource: "project_default",
       });
-      mockListSessions.mockResolvedValue([
+      mockListCodexSessionsByProjectRoot.mockReturnValue([
         {
-          id: "thread-123",
+          sessionId: "thread-123",
+          filePath: "/tmp/proj/.codex/sessions/thread-123.jsonl",
           title: "Codex App Server Session",
+          projectRoot: "/tmp/proj",
+          accountFingerprint: "fp-1",
+          sourceCreatedAt: "2026-04-01T12:00:00Z",
+          sourceUpdatedAt: "2026-04-02T00:00:00Z",
+          messageCount: 2,
+          previewText: "Codex App Server Session",
+          sizeBytes: 100,
+          mtimeMs: 100,
+          lastIndexedAt: "2026-04-02T00:00:00Z",
           createdAt: "2026-04-01T12:00:00Z",
           updatedAt: "2026-04-02T00:00:00Z",
         },
@@ -244,11 +254,11 @@ describe("chat session API", () => {
       expect(runtimeSession).toBeDefined();
       expect(runtimeSession.id).toBe("runtime:codex:thread-123");
       expect(runtimeSession.source).toBe("cli");
-      expect(mockListSessions).toHaveBeenCalledWith(
-        expect.objectContaining({
-          transport: "app-server",
-        }),
-      );
+      expect(mockListCodexSessionsByProjectRoot).toHaveBeenCalledWith({
+        projectRoot: "/tmp/proj",
+        limit: 50,
+      });
+      expect(mockListSessions).not.toHaveBeenCalled();
     });
 
     it("filters out already linked runtime sessions", async () => {

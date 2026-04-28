@@ -28,7 +28,6 @@ import {
 export type CodexAppServerRunLogger = CodexAppServerEventMapperLogger;
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 8_000;
-const DEFAULT_RUN_TIMEOUT_MS = 120_000;
 
 const CODEX_EFFORT_LEVELS = new Set<ReasoningEffort>(["minimal", "low", "medium", "high", "xhigh"]);
 
@@ -53,7 +52,7 @@ export async function runCodexAppServer(
       resume: Boolean(input.resume && input.sessionId),
       model: input.model ?? null,
       startTimeoutMs: input.execution?.startTimeoutMs ?? null,
-      runTimeoutMs: input.execution?.runTimeoutMs ?? DEFAULT_RUN_TIMEOUT_MS,
+      runTimeoutMs: input.execution?.runTimeoutMs ?? null,
     },
     "INFO [runtime:codex] Starting Codex app-server run",
   );
@@ -106,7 +105,7 @@ async function runCodexAppServerAttempt(
     launch.process,
     {
       startTimeoutMs: input.execution?.startTimeoutMs,
-      runTimeoutMs: input.execution?.runTimeoutMs ?? DEFAULT_RUN_TIMEOUT_MS,
+      runTimeoutMs: input.execution?.runTimeoutMs,
     },
     logger,
   );
@@ -344,7 +343,7 @@ async function runCodexAppServerAttempt(
       throw makeProcessStartTimeoutError(input.execution?.startTimeoutMs ?? 0);
     }
     if (timeouts.runTimedOut) {
-      throw makeProcessRunTimeoutError(input.execution?.runTimeoutMs ?? DEFAULT_RUN_TIMEOUT_MS);
+      throw makeProcessRunTimeoutError(input.execution?.runTimeoutMs ?? 0);
     }
 
     const usage = mapper.getUsage();
@@ -393,7 +392,7 @@ async function runCodexAppServerAttempt(
           "WARN [runtime:codex] Interrupted turn did not stop before timeout; forcing close",
         );
       }
-      throw makeProcessRunTimeoutError(input.execution?.runTimeoutMs ?? DEFAULT_RUN_TIMEOUT_MS);
+      throw makeProcessRunTimeoutError(input.execution?.runTimeoutMs ?? 0);
     }
     throw error;
   } finally {

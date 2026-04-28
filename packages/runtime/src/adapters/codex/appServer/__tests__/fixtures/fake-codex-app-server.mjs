@@ -14,6 +14,7 @@ let turnId = "turn-1";
 let waitingForInterrupt = false;
 let interruptFallbackTimer = null;
 let experimentalApiCapability = false;
+const pendingApprovalRequests = new Map();
 
 if (scenario === "malformed-json-on-start") {
   process.stdout.write("{malformed-json\n");
@@ -126,7 +127,112 @@ function completeTurn(text, usage) {
   });
 }
 
+function failTurnForDeniedApproval() {
+  sendNotification("turn/completed", {
+    threadId,
+    turn: {
+      ...makeTurn("failed"),
+      error: {
+        message: "Codex app-server approval request denied by AIF",
+        category: "permission",
+        adapterCode: "CODEX_PERMISSION_DENIED",
+      },
+    },
+  });
+}
+
+function sendApprovalRequest(kind) {
+  const id = `server-request-${kind}`;
+  pendingApprovalRequests.set(id, kind);
+
+  if (kind === "command") {
+    writeJsonLine({
+      id,
+      method: "item/commandExecution/requestApproval",
+      params: {
+        threadId,
+        turnId,
+        itemId: "item-command-1",
+        command: "npm install",
+        reason: "needs write access",
+        reasoning: "private",
+      },
+    });
+    return;
+  }
+
+  if (kind === "file-change") {
+    writeJsonLine({
+      id,
+      method: "item/fileChange/requestApproval",
+      params: {
+        threadId,
+        turnId,
+        itemId: "item-file-change-1",
+        changes: [{ path: "package.json", action: "modify" }],
+        reason: "needs to edit package metadata",
+        reasoning: "private",
+      },
+    });
+    return;
+  }
+
+  writeJsonLine({
+    id,
+    method: "item/permissions/requestApproval",
+    params: {
+      threadId,
+      turnId,
+      itemId: "item-permissions-1",
+      permissions: {
+        network: true,
+        writeRoots: ["/tmp/outside-workspace"],
+      },
+      reason: "needs broader permissions",
+      reasoning: "private",
+    },
+  });
+}
+
+function handleApprovalResponse(message) {
+  const id = String(message.id);
+  const kind = pendingApprovalRequests.get(id);
+  if (!kind) {
+    return false;
+  }
+  pendingApprovalRequests.delete(id);
+
+  if (message.error) {
+    failTurnForDeniedApproval();
+    return true;
+  }
+
+  const result = message.result && typeof message.result === "object" ? message.result : {};
+  if (result.decision === "decline") {
+    failTurnForDeniedApproval();
+    return true;
+  }
+  if (kind === "permissions") {
+    const permissions =
+      result.permissions && typeof result.permissions === "object" ? result.permissions : {};
+    if (Object.keys(permissions).length === 0) {
+      failTurnForDeniedApproval();
+      return true;
+    }
+  }
+
+  completeTurn("Approved fake app-server request", {
+    inputTokens: 1,
+    outputTokens: 1,
+  });
+  return true;
+}
+
 function handleRequest(message) {
+  if (handleApprovalResponse(message)) {
+    return;
+  }
+
   const id = message.id;
   const method = typeof message.method === "string" ? message.method : null;
   const params = message.params && typeof message.params === "object" ? message.params : {};
@@ -260,6 +366,9 @@ function handleRequest(message) {
     }
 
     case "thread/list": {
+      if (scenario === "session-discovery-hang") {
+        return;
+      }
       sendResult(id, {
         data: [makeThread()],
         nextCursor: null,
@@ -408,19 +517,29 @@ function handleRequest(message) {
         return;
       }
 
-      if (scenario === "approval-request") {
-        writeJsonLine({
-          id: "server-request-1",
-          method: "item/commandExecution/requestApproval",
-          params: {
-            threadId,
-            turnId,
-            itemId: "item-command-1",
-            command: "npm install",
-            reason: "needs write access",
-            reasoning: "private",
-          },
-        });
+      if (scenario === "approval-request" || scenario === "approval-command-denied") {
+        sendApprovalRequest("command");
+        return;
+      }
+
+      if (scenario === "approval-file-change-denied") {
+        sendApprovalRequest("file-change");
+        return;
+      }
+
+      if (scenario === "approval-permissions-denied") {
+        sendApprovalRequest("permissions");
+        return;
+      }
+
+      if (scenario === "long-running-stage-success") {
+        setTimeout(() => {
+          completeTurn("Long running fake app-server stage finished", {
+            inputTokens: 11,
+            outputTokens: 7,
+          });
+        }, 150);
+        return;
       }
 
       completeTurn("Hello from fake app-server", {

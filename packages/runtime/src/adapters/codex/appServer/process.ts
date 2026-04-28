@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { RuntimeTransport } from "../../../types.js";
@@ -17,22 +17,20 @@ const PLATFORM_PACKAGE_BY_TARGET: Record<string, string> = {
   "aarch64-pc-windows-msvc": "@openai/codex-win32-arm64",
 };
 
-const ALLOWED_ENV_PREFIXES = [
-  "OPENAI_",
-  "CODEX_",
-  "AIF_",
-  "HANDOFF_",
-  "NODE_",
+const ALLOWED_ENV_KEYS = new Set([
   "HOME",
   "USER",
+  "USERPROFILE",
+  "HOMEDRIVE",
+  "HOMEPATH",
   "LANG",
-  "LC_",
   "PATH",
   "SHELL",
   "TERM",
   "TMPDIR",
+  "TMP",
+  "TEMP",
   "TZ",
-  "XDG_",
   "FORCE_COLOR",
   "NO_COLOR",
   "HTTP_PROXY",
@@ -41,7 +39,9 @@ const ALLOWED_ENV_PREFIXES = [
   "http_proxy",
   "https_proxy",
   "no_proxy",
-];
+]);
+
+const ALLOWED_ENV_PREFIXES = ["OPENAI_", "CODEX_", "AIF_", "HANDOFF_", "NODE_", "LC_", "XDG_"];
 
 const BLOCKED_ENV_KEYS = new Set(["OPENAI_BASE_URL"]);
 
@@ -124,7 +124,7 @@ export function buildCodexAppServerEnvWithStats(
       blockedCount += 1;
       continue;
     }
-    if (ALLOWED_ENV_PREFIXES.some((prefix) => key === prefix || key.startsWith(prefix))) {
+    if (isAllowedEnvironmentKey(key)) {
       env[key] = value;
       forwardedCount += 1;
       continue;
@@ -249,7 +249,7 @@ export async function terminateCodexAppServerProcess(
   terminateTimeoutMs = DEFAULT_TERMINATE_TIMEOUT_MS,
   forceKillTimeoutMs = DEFAULT_FORCE_KILL_TIMEOUT_MS,
 ): Promise<void> {
-  if (context.process.exitCode != null) {
+  if (hasProcessExited(context.process)) {
     return;
   }
 
@@ -321,6 +321,14 @@ function mirrorEnvPair(
   env[lowercaseKey] = value;
 }
 
+function isAllowedEnvironmentKey(key: string): boolean {
+  return ALLOWED_ENV_KEYS.has(key) || ALLOWED_ENV_PREFIXES.some((prefix) => key.startsWith(prefix));
+}
+
+export function hasProcessExited(process: ChildProcess): boolean {
+  return process.exitCode != null || process.signalCode != null;
+}
+
 function findBundledCodexBinary(): string {
   const { platform, arch } = process;
   let targetTriple: string | null = null;
@@ -384,7 +392,7 @@ async function waitForExit(
   childProcess: ChildProcessWithoutNullStreams,
   timeoutMs: number,
 ): Promise<boolean> {
-  if (childProcess.exitCode != null) {
+  if (hasProcessExited(childProcess)) {
     return true;
   }
 

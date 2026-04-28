@@ -21,12 +21,35 @@ export interface CodexAppServerSessionLogger {
 }
 
 const DEFAULT_SESSION_REQUEST_TIMEOUT_MS = 8_000;
+const SESSION_LIST_CACHE_TTL_MS = 1_000;
+const SESSION_LIST_CACHE_MAX_ENTRIES = 32;
+
+interface SessionListCacheEntry {
+  expiresAt: number;
+  sessions: RuntimeSession[];
+}
+
+const sessionListCache = new Map<string, SessionListCacheEntry>();
 
 export async function listCodexAppServerSessions(
   input: RuntimeSessionListInput,
   logger?: CodexAppServerSessionLogger,
 ): Promise<RuntimeSession[]> {
-  return await withAppServerSessionClient(input, logger, async (client) => {
+  const cacheKey = buildSessionListCacheKey(input);
+  const cached = readSessionListCache(cacheKey);
+  if (cached) {
+    logger?.debug?.(
+      {
+        runtimeId: input.runtimeId,
+        profileId: input.profileId ?? null,
+        transport: RuntimeTransport.APP_SERVER,
+      },
+      "DEBUG [runtime:codex] Reusing cached Codex app-server session discovery result",
+    );
+    return cached;
+  }
+
+  const sessions = await withAppServerSessionClient(input, logger, async (client) => {
     const result = await client.listThreads({
       limit: input.limit ?? 50,
       cursor: null,
@@ -40,6 +63,8 @@ export async function listCodexAppServerSessions(
 
     return result.data.map((thread) => mapThreadToRuntimeSession(thread, input));
   });
+  writeSessionListCache(cacheKey, sessions);
+  return cloneSessions(sessions);
 }
 
 export async function getCodexAppServerSession(
@@ -74,6 +99,7 @@ async function withAppServerSessionClient<T>(
   logger: CodexAppServerSessionLogger | undefined,
   run: (client: CodexAppServerClient) => Promise<T>,
 ): Promise<T> {
+  const requestTimeoutMs = resolveSessionRequestTimeout(input);
   const launch = spawnCodexAppServerProcess({
     input: {
       runtimeId: input.runtimeId,
@@ -88,14 +114,14 @@ async function withAppServerSessionClient<T>(
     runtimeId: input.runtimeId,
     profileId: input.profileId ?? null,
     transport: RuntimeTransport.APP_SERVER,
-    requestTimeoutMs: DEFAULT_SESSION_REQUEST_TIMEOUT_MS,
+    requestTimeoutMs,
     logger,
   });
   const client = new CodexAppServerClient(rpcClient, {
     runtimeId: input.runtimeId,
     profileId: input.profileId ?? null,
     transport: RuntimeTransport.APP_SERVER,
-    requestTimeoutMs: DEFAULT_SESSION_REQUEST_TIMEOUT_MS,
+    requestTimeoutMs,
     logger,
   });
 
@@ -115,6 +141,73 @@ async function withAppServerSessionClient<T>(
     client.close("session discovery finished");
     await terminateCodexAppServerProcess(launch, logger);
   }
+}
+
+function resolveSessionRequestTimeout(
+  input: RuntimeSessionListInput | RuntimeSessionGetInput,
+): number {
+  const optionTimeout = readNumber(asRecord(input.options)?.appServerRequestTimeoutMs);
+  return optionTimeout && optionTimeout > 0
+    ? Math.floor(optionTimeout)
+    : DEFAULT_SESSION_REQUEST_TIMEOUT_MS;
+}
+
+function readSessionListCache(cacheKey: string): RuntimeSession[] | null {
+  const entry = sessionListCache.get(cacheKey);
+  if (!entry) {
+    return null;
+  }
+  if (entry.expiresAt <= Date.now()) {
+    sessionListCache.delete(cacheKey);
+    return null;
+  }
+  return cloneSessions(entry.sessions);
+}
+
+function writeSessionListCache(cacheKey: string, sessions: RuntimeSession[]): void {
+  if (sessionListCache.size >= SESSION_LIST_CACHE_MAX_ENTRIES) {
+    const oldestKey = sessionListCache.keys().next().value;
+    if (oldestKey) {
+      sessionListCache.delete(oldestKey);
+    }
+  }
+  sessionListCache.set(cacheKey, {
+    expiresAt: Date.now() + SESSION_LIST_CACHE_TTL_MS,
+    sessions: cloneSessions(sessions),
+  });
+}
+
+function cloneSessions(sessions: RuntimeSession[]): RuntimeSession[] {
+  return sessions.map((session) => ({
+    ...session,
+    metadata: session.metadata ? { ...session.metadata } : undefined,
+  }));
+}
+
+function buildSessionListCacheKey(input: RuntimeSessionListInput): string {
+  return stableStringify({
+    runtimeId: input.runtimeId,
+    providerId: input.providerId ?? null,
+    profileId: input.profileId ?? null,
+    projectRoot: input.projectRoot ?? null,
+    transport: input.transport ?? RuntimeTransport.APP_SERVER,
+    limit: input.limit ?? 50,
+    options: asRecord(input.options) ?? {},
+  });
+}
+
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableStringify(entry)).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
 }
 
 function mapThreadToRuntimeSession(
@@ -228,4 +321,14 @@ function truncateTitle(value: string | null | undefined): string | null {
     return null;
   }
   return trimmed.length > 80 ? trimmed.slice(0, 80) : trimmed;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function readNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }

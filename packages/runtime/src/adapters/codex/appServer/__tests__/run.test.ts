@@ -2,7 +2,12 @@ import { once } from "node:events";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { RuntimeTransport, UsageSource, type RuntimeRunInput } from "../../../../types.js";
+import {
+  RuntimeTransport,
+  UsageSource,
+  type RuntimeEvent,
+  type RuntimeRunInput,
+} from "../../../../types.js";
 
 const FIXTURE_PATH = fileURLToPath(
   new URL("./fixtures/fake-codex-app-server.mjs", import.meta.url),
@@ -12,12 +17,21 @@ const activeChildren = new Set<ChildProcessWithoutNullStreams>();
 
 const spawnCodexAppServerProcessMock = vi.fn();
 const terminateCodexAppServerProcessMock = vi.fn();
+const withProcessTimeoutsMock = vi.fn();
 
 vi.mock("../process.js", () => ({
   spawnCodexAppServerProcess: (...args: unknown[]) => spawnCodexAppServerProcessMock(...args),
   terminateCodexAppServerProcess: (...args: unknown[]) =>
     terminateCodexAppServerProcessMock(...args),
 }));
+
+vi.mock("../../../../timeouts.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../../timeouts.js")>();
+  return {
+    ...actual,
+    withProcessTimeouts: (...args: unknown[]) => withProcessTimeoutsMock(...args),
+  };
+});
 
 const { runCodexAppServer } = await import("../run.js");
 
@@ -35,7 +49,7 @@ function spawnFixtureProcess(scenario: string): ChildProcessWithoutNullStreams {
 
 async function terminateFixtureProcess(child: ChildProcessWithoutNullStreams): Promise<void> {
   activeChildren.delete(child);
-  if (child.exitCode != null) {
+  if (child.exitCode != null || child.signalCode != null) {
     return;
   }
   child.kill();
@@ -74,6 +88,14 @@ function createRunInput(
 beforeEach(() => {
   spawnCodexAppServerProcessMock.mockReset();
   terminateCodexAppServerProcessMock.mockReset();
+  withProcessTimeoutsMock.mockReset();
+  withProcessTimeoutsMock.mockImplementation(() => ({
+    cleanup: vi.fn(),
+    startTimedOut: Promise.resolve(false),
+    get runTimedOut() {
+      return false;
+    },
+  }));
 
   spawnCodexAppServerProcessMock.mockImplementation(
     (input: {
@@ -204,6 +226,43 @@ describe("codex app-server run transport", () => {
     expect(result.sessionId).toBe("thread-1");
   }, 15_000);
 
+  it("does not add an app-server hard run timeout when execution config omits it", async () => {
+    const logger = {
+      info: vi.fn(),
+      debug: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    const result = await runCodexAppServer(
+      createRunInput(
+        {
+          execution: {
+            startTimeoutMs: 500,
+          },
+        },
+        "long-running-stage-success",
+      ),
+      logger,
+    );
+
+    expect(result.outputText).toContain("Long running fake app-server stage finished");
+    expect(withProcessTimeoutsMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        startTimeoutMs: 500,
+        runTimeoutMs: undefined,
+      }),
+      logger,
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runTimeoutMs: null,
+      }),
+      "INFO [runtime:codex] Starting Codex app-server run",
+    );
+  }, 15_000);
+
   it("honors an AbortController that was already aborted before listener registration", async () => {
     const abortController = new AbortController();
     abortController.abort();
@@ -238,4 +297,46 @@ describe("codex app-server run transport", () => {
       category: "transport",
     });
   });
+
+  it.each([
+    ["command", "approval-command-denied"],
+    ["file-change", "approval-file-change-denied"],
+    ["permissions", "approval-permissions-denied"],
+  ])(
+    "emits %s approval requests and fails when app-server approval is denied",
+    async (_, scenario) => {
+      const observedEvents: RuntimeEvent[] = [];
+
+      await expect(
+        runCodexAppServer(
+          createRunInput(
+            {
+              execution: {
+                startTimeoutMs: 500,
+                runTimeoutMs: 5_000,
+                onEvent: (event) => {
+                  observedEvents.push(event);
+                },
+              },
+            },
+            scenario,
+          ),
+        ),
+      ).rejects.toMatchObject({
+        message: "Codex app-server approval request denied by AIF",
+        adapterCode: "CODEX_PERMISSION_DENIED",
+        category: "permission",
+      });
+
+      expect(observedEvents).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: "approval:request" }),
+          expect.objectContaining({
+            type: "result:error",
+            message: "Codex app-server approval request denied by AIF",
+          }),
+        ]),
+      );
+    },
+  );
 });

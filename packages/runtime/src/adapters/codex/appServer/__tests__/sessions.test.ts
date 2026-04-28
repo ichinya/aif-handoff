@@ -21,12 +21,12 @@ vi.mock("../process.js", () => ({
 const { getCodexAppServerSession, listCodexAppServerSessionEvents, listCodexAppServerSessions } =
   await import("../sessions.js");
 
-function spawnFixtureProcess(): ChildProcessWithoutNullStreams {
+function spawnFixtureProcess(scenario = "session-discovery"): ChildProcessWithoutNullStreams {
   const child = spawn(process.execPath, [FIXTURE_PATH], {
     stdio: "pipe",
     env: {
       ...process.env,
-      FAKE_CODEX_SCENARIO: "session-discovery",
+      FAKE_CODEX_SCENARIO: scenario,
     },
   });
   activeChildren.add(child);
@@ -35,7 +35,7 @@ function spawnFixtureProcess(): ChildProcessWithoutNullStreams {
 
 async function terminateFixtureProcess(child: ChildProcessWithoutNullStreams): Promise<void> {
   activeChildren.delete(child);
-  if (child.exitCode != null) {
+  if (child.exitCode != null || child.signalCode != null) {
     return;
   }
   child.kill();
@@ -45,16 +45,26 @@ async function terminateFixtureProcess(child: ChildProcessWithoutNullStreams): P
 beforeEach(() => {
   spawnCodexAppServerProcessMock.mockReset();
   terminateCodexAppServerProcessMock.mockReset();
-  spawnCodexAppServerProcessMock.mockImplementation(() => {
-    const child = spawnFixtureProcess();
-    return {
-      process: child,
-      stderrTail: [],
-      executablePath: process.execPath,
-      args: [FIXTURE_PATH],
-      cwd: undefined,
-    };
-  });
+  spawnCodexAppServerProcessMock.mockImplementation(
+    (input: {
+      input: {
+        options?: Record<string, unknown>;
+      };
+    }) => {
+      const scenario =
+        typeof input.input.options?.testScenario === "string"
+          ? input.input.options.testScenario
+          : "session-discovery";
+      const child = spawnFixtureProcess(scenario);
+      return {
+        process: child,
+        stderrTail: [],
+        executablePath: process.execPath,
+        args: [FIXTURE_PATH],
+        cwd: undefined,
+      };
+    },
+  );
   terminateCodexAppServerProcessMock.mockImplementation(
     async (context: { process: ChildProcessWithoutNullStreams }) => {
       await terminateFixtureProcess(context.process);
@@ -122,5 +132,42 @@ describe("codex app-server session discovery", () => {
         data: expect.objectContaining({ role: "assistant" }),
       }),
     ]);
+  });
+
+  it("reuses a fresh list result instead of spawning repeatedly for identical discovery input", async () => {
+    const input = {
+      runtimeId: "codex",
+      providerId: "openai",
+      profileId: "profile-1",
+      projectRoot: "/tmp/fake-repeated-session-discovery",
+      transport: RuntimeTransport.APP_SERVER,
+      limit: 10,
+      options: {},
+    };
+
+    const first = await listCodexAppServerSessions(input);
+    const second = await listCodexAppServerSessions(input);
+
+    expect(second).toEqual(first);
+    expect(spawnCodexAppServerProcessMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("applies request timeouts to session discovery and terminates the process", async () => {
+    await expect(
+      listCodexAppServerSessions({
+        runtimeId: "codex",
+        providerId: "openai",
+        profileId: "profile-1",
+        projectRoot: "/tmp/fake-hanging-session-discovery",
+        transport: RuntimeTransport.APP_SERVER,
+        limit: 10,
+        options: {
+          testScenario: "session-discovery-hang",
+          appServerRequestTimeoutMs: 500,
+        },
+      }),
+    ).rejects.toThrow("Timed out waiting for JSONL RPC response (thread/list)");
+
+    expect(terminateCodexAppServerProcessMock).toHaveBeenCalledTimes(1);
   });
 });
