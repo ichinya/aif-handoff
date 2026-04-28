@@ -314,7 +314,7 @@ describe("runtime profiles data layer", () => {
     expect(decision.reason).toBe("none");
   });
 
-  it("does not gate persisted snapshots when usage limits are disabled", () => {
+  it("does not write, clear, or gate persisted snapshots when usage limits are disabled", () => {
     const nowMs = Date.parse("2026-04-17T10:00:00.000Z");
     const profile = createRuntimeProfile({
       projectId: "proj-1",
@@ -322,7 +322,11 @@ describe("runtime profiles data layer", () => {
       runtimeId: "codex",
       providerId: "openai",
     });
-    persistRuntimeProfileLimitSnapshot(
+
+    process.env.AIF_USAGE_LIMITS_ENABLED = "false";
+    resetEnvCache();
+
+    const skippedPersist = persistRuntimeProfileLimitSnapshot(
       profile!.id,
       {
         ...makeLimitSnapshot(),
@@ -332,9 +336,32 @@ describe("runtime profiles data layer", () => {
       },
       "2026-04-17T10:00:05.000Z",
     );
+    const skippedPersistMapped = toRuntimeProfileResponse(skippedPersist!);
+    expect(skippedPersistMapped.runtimeLimitSnapshot).toBeNull();
+    expect(skippedPersistMapped.runtimeLimitUpdatedAt).toBeNull();
+
+    process.env.AIF_USAGE_LIMITS_ENABLED = "true";
+    resetEnvCache();
+
+    const oldSnapshot = {
+      ...makeLimitSnapshot(),
+      status: "blocked" as const,
+      profileId: profile!.id,
+      resetAt: "2026-04-17T15:00:00.000Z",
+    };
+    persistRuntimeProfileLimitSnapshot(
+      profile!.id,
+      oldSnapshot,
+      "2026-04-17T10:00:05.000Z",
+    );
 
     process.env.AIF_USAGE_LIMITS_ENABLED = "false";
     resetEnvCache();
+
+    const skippedClear = clearRuntimeProfileLimitSnapshot(profile!.id, "2026-04-17T11:00:00.000Z");
+    const skippedClearMapped = toRuntimeProfileResponse(skippedClear!);
+    expect(skippedClearMapped.runtimeLimitSnapshot).toEqual(oldSnapshot);
+    expect(skippedClearMapped.runtimeLimitUpdatedAt).toBe("2026-04-17T10:00:05.000Z");
 
     const decision = evaluateRuntimeLimitGate(
       toRuntimeProfileResponse(findRuntimeProfileById(profile!.id)!),

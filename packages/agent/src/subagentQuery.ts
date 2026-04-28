@@ -396,7 +396,7 @@ function pickEffort(options: Record<string, unknown>): string | null {
 function createRuntimeRegistryLogger(): RuntimeRegistryLogger {
   return {
     debug(context, message) {
-      log.debug({ ...context }, `DEBUG [runtime-registry] ${message}`);
+      log.debug({ ...context }, `[runtime-registry] ${message}`);
     },
     warn(context, message) {
       log.warn({ ...context }, `WARN [runtime-module] ${message}`);
@@ -515,7 +515,7 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
     env: process.env,
     logger: {
       debug(context, message) {
-        log.debug({ ...context }, `DEBUG [runtime-resolution] ${message}`);
+        log.debug({ ...context }, `[runtime-resolution] ${message}`);
       },
       info(context, message) {
         log.info({ ...context }, `INFO [runtime-validation] ${message}`);
@@ -549,7 +549,7 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
       required: hardRequired,
       logger: {
         debug(context, message) {
-          log.debug({ ...context }, `DEBUG [runtime-capabilities] ${message}`);
+          log.debug({ ...context }, `[runtime-capabilities] ${message}`);
         },
         warn(context, message) {
           log.warn({ ...context }, `WARN [runtime-capabilities] ${message}`);
@@ -564,7 +564,7 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
     workflow,
     logger: {
       debug(context, message) {
-        log.debug({ ...context }, `DEBUG [runtime-workflow] ${message}`);
+        log.debug({ ...context }, `[runtime-workflow] ${message}`);
       },
       warn(context, message) {
         log.warn({ ...context }, `WARN [runtime-workflow] ${message}`);

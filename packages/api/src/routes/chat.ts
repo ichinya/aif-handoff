@@ -821,7 +821,7 @@ chatRouter.get("/sessions", async (c) => {
           mergedRuntimeSessions: runtimeSessions.length,
           dbSessions: dbSessions.length,
         },
-        "DEBUG [chat-route] Runtime session discovery completed",
+        "[chat-route] Runtime session discovery completed",
       );
     } else {
       const caps = resolveAdapterCapabilities(adapter, context.resolvedProfile.transport);
@@ -893,7 +893,7 @@ chatRouter.get("/sessions", async (c) => {
             mergedRuntimeSessions: runtimeSessions.length,
             dbSessions: dbSessions.length,
           },
-          "DEBUG [chat-route] Runtime session discovery completed",
+          "[chat-route] Runtime session discovery completed",
         );
       }
     }
@@ -963,7 +963,7 @@ chatRouter.get("/sessions/:id", async (c) => {
           runtimeSessionId: virtual.sessionId,
           source: "codex_index",
         },
-        "DEBUG [chat-route] Indexed Codex session lookup missed; falling back to adapter",
+        "[chat-route] Indexed Codex session lookup missed; falling back to adapter",
       );
     }
 
@@ -1038,7 +1038,7 @@ chatRouter.get("/sessions/:id/messages", async (c) => {
           runtimeSessionId: virtual.sessionId,
           source: "codex_index",
         },
-        "DEBUG [chat-route] Indexed Codex session-message lookup missed; falling back to adapter",
+        "[chat-route] Indexed Codex session-message lookup missed; falling back to adapter",
       );
     }
 
@@ -1121,7 +1121,7 @@ chatRouter.get("/sessions/:id/messages", async (c) => {
                 runtimeSessionId: linkedRuntimeSessionId,
                 dbMessageCount: dbMessages.length,
               },
-              "DEBUG [chat-route] Indexed Codex runtime events were empty; falling back to DB messages",
+              "[chat-route] Indexed Codex runtime events were empty; falling back to DB messages",
             );
             return c.json(dbMessages);
           }
@@ -1154,7 +1154,7 @@ chatRouter.get("/sessions/:id/messages", async (c) => {
               runtimeSessionId: linkedRuntimeSessionId,
               dbMessageCount: dbMessages.length,
             },
-            "DEBUG [chat-route] Runtime session events were empty; falling back to DB messages",
+            "[chat-route] Runtime session events were empty; falling back to DB messages",
           );
           return c.json(dbMessages);
         }
@@ -1250,7 +1250,7 @@ chatRouter.post("/:conversationId/abort", async (c) => {
   if (!controller) {
     log.debug(
       { conversationId },
-      "DEBUG [chat-route] abort requested for unknown or completed conversation",
+      "[chat-route] abort requested for unknown or completed conversation",
     );
     return c.json({ error: "Conversation not found or already completed" }, 404);
   }
@@ -1507,7 +1507,7 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
               conversationId: chatConversationId,
               questionCount: payload.questions.length,
             },
-            "DEBUG [chat] tool:question rendered",
+            "[chat] tool:question rendered",
           );
           pendingQuestionBlocks.push(rendered);
           if (payload.toolUseId) seenToolPromptIds.add(payload.toolUseId);
@@ -1529,13 +1529,13 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
         if (NOISY_TOOL_NAMES.has(toolName) || toolName.startsWith("mcp__handoff__")) {
           log.debug(
             { tool: toolName, conversationId: chatConversationId },
-            "DEBUG [chat] tool:use suppressed (noisy)",
+            "[chat] tool:use suppressed (noisy)",
           );
           return;
         }
         log.debug(
           { tool: toolName, conversationId: chatConversationId, hasQuestion: false },
-          "DEBUG [chat] tool:use forwarded",
+          "[chat] tool:use forwarded",
         );
         sendToken(`\n\n> 🔧 ${toolName}\n\n`);
       }
@@ -1639,7 +1639,7 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
           runtimeSessionId,
           sessionId: chatSessionId,
         },
-        "DEBUG [chat-route] Persisted runtime session link",
+        "[chat-route] Persisted runtime session link",
       );
     }
 

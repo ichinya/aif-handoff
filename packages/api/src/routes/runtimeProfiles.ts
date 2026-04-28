@@ -285,7 +285,7 @@ async function refreshProfileWithIndexedCodexLimit<T extends LocalCodexAccountPr
         projectId: effectiveProjectId,
         projectRoot,
       },
-      "DEBUG [runtime-profile-route] Skipping indexed Codex overlay because no account fingerprint is available",
+      "[runtime-profile-route] Skipping indexed Codex overlay because no account fingerprint is available",
     );
     return profile;
   }
@@ -303,7 +303,7 @@ async function refreshProfileWithIndexedCodexLimit<T extends LocalCodexAccountPr
         projectId: effectiveProjectId,
         projectRoot,
       },
-      "DEBUG [runtime-profile-route] No indexed Codex overlay snapshot selected for profile",
+      "[runtime-profile-route] No indexed Codex overlay snapshot selected for profile",
     );
     return profile;
   }
@@ -321,7 +321,7 @@ async function refreshProfileWithIndexedCodexLimit<T extends LocalCodexAccountPr
       persistedAtMs: Number.isFinite(persistedAtMs) ? persistedAtMs : null,
       indexedCheckedAtMs: Number.isFinite(indexedCheckedAtMs) ? indexedCheckedAtMs : null,
     },
-    "DEBUG [runtime-profile-route] Evaluated indexed Codex overlay snapshot freshness",
+    "[runtime-profile-route] Evaluated indexed Codex overlay snapshot freshness",
   );
   if (persistedAtMs > indexedCheckedAtMs) {
     return profile;
@@ -528,7 +528,7 @@ runtimeProfilesRouter.get("/", queryValidator(runtimeProfileListQuerySchema), as
 
   log.debug(
     { projectId, includeGlobal, enabledOnly, scope },
-    "DEBUG [runtime-profile-route] List request",
+    "[runtime-profile-route] List request",
   );
   if (scope === "project" && !projectId) {
     return c.json({ error: "projectId is required when scope=project" }, 400);
@@ -597,7 +597,7 @@ runtimeProfilesRouter.post(
     if (!created) return c.json({ error: "Failed to create runtime profile" }, 500);
     log.debug(
       { profileId: created.id, runtimeId: created.runtimeId, providerId: created.providerId },
-      "DEBUG [runtime-profile-route] Created runtime profile",
+      "[runtime-profile-route] Created runtime profile",
     );
     return c.json(toRuntimeProfileResponse(created), 201);
   },
