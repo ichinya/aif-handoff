@@ -80,7 +80,7 @@ export async function getApiRuntimeRegistry(): Promise<RuntimeRegistry> {
     runtimeRegistryPromise = bootstrapRuntimeRegistry({
       logger: {
         debug(context, message) {
-          log.debug({ ...context }, `DEBUG [runtime-registry] ${message}`);
+          log.debug({ ...context }, `[runtime-registry] ${message}`);
         },
         warn(context, message) {
           log.warn({ ...context }, `WARN [runtime-module] ${message}`);
@@ -113,7 +113,7 @@ export async function getApiRuntimeModelDiscoveryService(): Promise<RuntimeModel
       validationCache: createRuntimeMemoryCache({ defaultTtlMs: 15_000 }),
       logger: {
         debug(context, message) {
-          log.debug({ ...context }, `DEBUG [runtime-validation] ${message}`);
+          log.debug({ ...context }, `[runtime-validation] ${message}`);
         },
         info(context, message) {
           log.info({ ...context }, `INFO [runtime-validation] ${message}`);
@@ -176,6 +176,20 @@ function broadcastRuntimeLimitUpdate(input: {
     },
   });
   runtimeLimitBroadcastCache.set(broadcastCacheKey, input.signature);
+}
+
+export function notifyRuntimeLimitProjectUpdate(input: {
+  projectId: string;
+  runtimeProfileId: string;
+  signature: string;
+  taskId?: string | null;
+}): void {
+  broadcastRuntimeLimitUpdate({
+    projectId: input.projectId,
+    runtimeProfileId: input.runtimeProfileId,
+    signature: input.signature,
+    taskId: input.taskId ?? null,
+  });
 }
 
 function broadcastRuntimeUsageRefresh(event: DbUsageEvent): void {
@@ -403,7 +417,7 @@ export async function resolveApiRuntimeContext(input: {
     env: process.env,
     logger: {
       debug(context, message) {
-        log.debug({ ...context }, `DEBUG [runtime-resolution] ${message}`);
+        log.debug({ ...context }, `[runtime-resolution] ${message}`);
       },
       info(context, message) {
         log.info({ ...context }, `INFO [runtime-validation] ${message}`);
@@ -449,7 +463,7 @@ export function assertApiRuntimeCapabilities(input: {
     required: input.workflow.requiredCapabilities,
     logger: {
       debug(context, message) {
-        log.debug({ ...context }, `DEBUG [runtime-capabilities] ${message}`);
+        log.debug({ ...context }, `[runtime-capabilities] ${message}`);
       },
       warn(context, message) {
         log.warn({ ...context }, `WARN [runtime-capabilities] ${message}`);
