@@ -23,6 +23,57 @@ describe("db", () => {
     expect(db).toBeDefined();
   });
 
+  it("creates Codex index tables for fresh databases", () => {
+    closeDb();
+    const dbPath = join(tmpdir(), `aif-shared-codex-index-${Date.now()}-${Math.random()}.sqlite`);
+
+    try {
+      getDb(dbPath);
+      closeDb();
+
+      const sqlite = new Database(dbPath, { readonly: true });
+      const tableNames = sqlite
+        .prepare(
+          `
+          SELECT name
+          FROM sqlite_master
+          WHERE type = 'table'
+            AND name IN (
+              'codex_sessions',
+              'codex_session_files',
+              'codex_limit_heads',
+              'codex_limit_history',
+              'codex_index_cursors'
+            )
+        `,
+        )
+        .all() as Array<{ name: string }>;
+      const dirtyIndex = sqlite
+        .prepare(
+          `
+          SELECT name
+          FROM sqlite_master
+          WHERE type = 'index'
+            AND name = 'idx_codex_session_files_dirty'
+        `,
+        )
+        .get() as { name: string } | undefined;
+      sqlite.close();
+
+      expect(tableNames.map((row) => row.name).sort()).toEqual([
+        "codex_index_cursors",
+        "codex_limit_heads",
+        "codex_limit_history",
+        "codex_session_files",
+        "codex_sessions",
+      ]);
+      expect(dirtyIndex).toBeUndefined();
+    } finally {
+      closeDb();
+      removeSqliteArtifacts(dbPath);
+    }
+  });
+
   it("index bootstrap is idempotent — calling createTestDb twice does not throw", () => {
     // Each call runs ensureTables + ensureIndexes with CREATE INDEX IF NOT EXISTS
     const db1 = createTestDb();
@@ -348,7 +399,61 @@ describe("db", () => {
       expect(runtimeProfileColumns.map((column) => column.name)).toEqual(
         expect.arrayContaining(["runtime_limit_snapshot_json", "runtime_limit_updated_at"]),
       );
-      expect(userVersion).toBe(15);
+      expect(userVersion).toBe(18);
+    } finally {
+      closeDb();
+      removeSqliteArtifacts(dbPath);
+    }
+  });
+
+  it("drops the unused Codex session-files dirty index when migrating v17 databases", () => {
+    closeDb();
+    const dbPath = join(
+      tmpdir(),
+      `aif-shared-codex-index-drop-${Date.now()}-${Math.random()}.sqlite`,
+    );
+    const sqlite = new Database(dbPath);
+
+    sqlite.exec(`
+      CREATE TABLE codex_session_files (
+        file_path TEXT PRIMARY KEY,
+        session_id TEXT,
+        size_bytes INTEGER NOT NULL DEFAULT 0,
+        mtime_ms INTEGER NOT NULL DEFAULT 0,
+        parsed_offset INTEGER NOT NULL DEFAULT 0,
+        pending_tail TEXT NOT NULL DEFAULT '',
+        missing INTEGER NOT NULL DEFAULT 0,
+        import_version INTEGER NOT NULL DEFAULT 1,
+        last_seen_at TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      );
+      CREATE INDEX idx_codex_session_files_dirty
+        ON codex_session_files(missing, mtime_ms, size_bytes);
+    `);
+    sqlite.pragma("user_version = 17");
+    sqlite.close();
+
+    try {
+      getDb(dbPath);
+      closeDb();
+
+      const migratedSqlite = new Database(dbPath, { readonly: true });
+      const dirtyIndex = migratedSqlite
+        .prepare(
+          `
+          SELECT name
+          FROM sqlite_master
+          WHERE type = 'index'
+            AND name = 'idx_codex_session_files_dirty'
+        `,
+        )
+        .get() as { name: string } | undefined;
+      const userVersion = migratedSqlite.pragma("user_version", { simple: true }) as number;
+      migratedSqlite.close();
+
+      expect(dirtyIndex).toBeUndefined();
+      expect(userVersion).toBe(18);
     } finally {
       closeDb();
       removeSqliteArtifacts(dbPath);
@@ -413,7 +518,7 @@ describe("db", () => {
       expect(profileColumns.map((column) => column.name)).toEqual(
         expect.arrayContaining(["runtime_limit_snapshot_json", "runtime_limit_updated_at"]),
       );
-      expect(userVersion).toBe(15);
+      expect(userVersion).toBe(18);
     } finally {
       closeDb();
       removeSqliteArtifacts(dbPath);
