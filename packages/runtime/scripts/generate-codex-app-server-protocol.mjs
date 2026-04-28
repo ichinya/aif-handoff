@@ -66,25 +66,57 @@ function cleanGeneratedDirectory(root) {
 }
 
 function runCodex(args) {
-  const command = process.platform === "win32" ? (process.env.ComSpec ?? "cmd.exe") : "codex";
-  const commandArgs =
-    process.platform === "win32"
-      ? ["/d", "/s", "/c", ["codex", ...args].map(quoteCommandArg).join(" ")]
-      : args;
-  const result = spawnSync(command, commandArgs, {
+  const executablePath = resolveCodexExecutable();
+  let commandSpec;
+  try {
+    commandSpec = buildCodexCommand(executablePath, args);
+  } catch (error) {
+    fail(`Refusing to execute Codex CLI executable "${executablePath}": ${getErrorMessage(error)}`);
+  }
+  const result = spawnSync(commandSpec.command, commandSpec.commandArgs, {
     cwd: runtimeRoot,
     stdio: "inherit",
   });
   if (result.error) {
     fail(
-      `Failed to execute Codex CLI. Install @openai/codex or ensure "codex" is in PATH: ${result.error.message}`,
+      `Failed to execute Codex CLI executable "${executablePath}". Install @openai/codex, ensure "codex" is in PATH, or set CODEX_CLI_PATH: ${result.error.message}`,
     );
   }
   if (result.status !== 0) {
     fail(
-      `Codex CLI exited with status ${result.status ?? "null"} while running: codex ${args.join(" ")}`,
+      `Codex CLI executable "${executablePath}" exited with status ${result.status ?? "null"} while running: ${formatCodexInvocation(
+        executablePath,
+        args,
+      )}`,
     );
   }
+}
+
+function resolveCodexExecutable() {
+  const configured = process.env.CODEX_CLI_PATH;
+  if (typeof configured === "string" && configured.trim().length > 0) {
+    return configured.trim();
+  }
+  return "codex";
+}
+
+function buildCodexCommand(executablePath, args) {
+  if (process.platform !== "win32") {
+    return {
+      command: executablePath,
+      commandArgs: args,
+    };
+  }
+
+  return {
+    command: process.env.ComSpec ?? "cmd.exe",
+    commandArgs: [
+      "/d",
+      "/s",
+      "/c",
+      [executablePath, ...args].map(quoteSafeWindowsShellArg).join(" "),
+    ],
+  };
 }
 
 async function formatGeneratedDirectory(root) {
@@ -175,8 +207,25 @@ function stableStringify(value) {
   return JSON.stringify(value);
 }
 
-function quoteCommandArg(value) {
-  return /[\s"]/.test(value) ? `"${value.replace(/"/g, '\\"')}"` : value;
+function formatCodexInvocation(executablePath, args) {
+  return [executablePath, ...args].join(" ");
+}
+
+function quoteSafeWindowsShellArg(value) {
+  assertSafeWindowsShellArg(value);
+  return /[\s()]/.test(value) ? `"${value}"` : value;
+}
+
+function assertSafeWindowsShellArg(value) {
+  if (/[\r\n&|<>^%"]/.test(value)) {
+    throw new Error(
+      "Unsafe Codex CLI executable or argument contains Windows shell metacharacters",
+    );
+  }
+}
+
+function getErrorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function fail(message) {

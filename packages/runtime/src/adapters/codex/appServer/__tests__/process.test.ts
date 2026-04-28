@@ -86,6 +86,19 @@ describe("codex app-server process helpers", () => {
     vi.unstubAllEnvs();
   });
 
+  it("forwards NODE_ENV without forwarding NODE_OPTIONS", () => {
+    vi.stubEnv("NODE_ENV", "test");
+    vi.stubEnv("NODE_OPTIONS", "--require ./steal-secrets.js");
+
+    const env = buildCodexAppServerEnv({
+      runtimeId: "codex",
+      options: {},
+    });
+
+    expect(env.NODE_ENV).toBe("test");
+    expect(env.NODE_OPTIONS).toBeUndefined();
+  });
+
   it("treats signal-terminated processes as already exited", async () => {
     const fakeProcess = new EventEmitter() as ChildProcessWithoutNullStreams;
     const kill = vi.fn(() => true) as unknown as ChildProcessWithoutNullStreams["kill"];

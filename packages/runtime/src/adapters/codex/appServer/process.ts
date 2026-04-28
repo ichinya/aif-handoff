@@ -33,6 +33,7 @@ const ALLOWED_ENV_KEYS = new Set([
   "TZ",
   "FORCE_COLOR",
   "NO_COLOR",
+  "NODE_ENV",
   "HTTP_PROXY",
   "HTTPS_PROXY",
   "NO_PROXY",
@@ -41,9 +42,9 @@ const ALLOWED_ENV_KEYS = new Set([
   "no_proxy",
 ]);
 
-const ALLOWED_ENV_PREFIXES = ["OPENAI_", "CODEX_", "AIF_", "HANDOFF_", "NODE_", "LC_", "XDG_"];
+const ALLOWED_ENV_PREFIXES = ["OPENAI_", "CODEX_", "AIF_", "HANDOFF_", "LC_", "XDG_"];
 
-const BLOCKED_ENV_KEYS = new Set(["OPENAI_BASE_URL"]);
+const BLOCKED_ENV_KEYS = new Set(["OPENAI_BASE_URL", "NODE_OPTIONS"]);
 
 const DEFAULT_TERMINATE_TIMEOUT_MS = 1_000;
 const DEFAULT_FORCE_KILL_TIMEOUT_MS = 500;
