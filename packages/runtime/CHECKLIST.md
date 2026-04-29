@@ -22,6 +22,7 @@ Every feature or fix in the runtime layer must cover **every** adapter, not just
 
 - [ ] Add or update unit tests in `packages/runtime/src/__tests__/` for every adapter you touched.
 - [ ] If the change spans multiple adapters, add a parity test or table-driven test that exercises each adapter.
+- [ ] If Codex App Server protocol artifacts are touched or adapter protocol shapes change, run `npm run codex:app-server:protocol:check --workspace=@aif/runtime` and regenerate with `npm run codex:app-server:protocol:generate --workspace=@aif/runtime` if needed.
 - [ ] Run `npm test -- --filter @aif/runtime` and keep coverage ≥70%.
 
 ## Final sweep

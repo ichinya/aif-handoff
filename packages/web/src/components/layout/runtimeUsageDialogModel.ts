@@ -44,11 +44,21 @@ function transportSortRank(value: string): number {
       return 0;
     case "cli":
       return 1;
-    case "api":
+    case "app-server":
       return 2;
+    case "api":
+      return 3;
     default:
       return 99;
   }
+}
+
+function isLocalClaudeTransport(transport: string | null | undefined): boolean {
+  return transport === "sdk" || transport === "cli";
+}
+
+function isLocalCodexTransport(transport: string | null | undefined): boolean {
+  return transport === "sdk" || transport === "cli" || transport === "app-server";
 }
 
 function latestLimitUpdatedAt(profile: RuntimeProfile): string | null {
@@ -152,7 +162,7 @@ function identityGroupKey(profile: RuntimeProfile): string {
   const accountId = readProviderMetaString(snapshot, "accountId");
   const limitId = readProviderMetaString(snapshot, "limitId");
   const isLocalCodexProfile =
-    profile.runtimeId === "codex" && (profile.transport === "sdk" || profile.transport === "cli");
+    profile.runtimeId === "codex" && isLocalCodexTransport(profile.transport);
   if (accountId && limitId) {
     return `${profile.runtimeId}|${profile.providerId}|account|${accountId}|limit|${limitId}`;
   }
@@ -174,8 +184,8 @@ function identityGroupKey(profile: RuntimeProfile): string {
   }
 
   const isLocalAccountRuntime =
-    (profile.runtimeId === "codex" || profile.runtimeId === "claude") &&
-    (profile.transport === "sdk" || profile.transport === "cli");
+    (profile.runtimeId === "codex" && isLocalCodexTransport(profile.transport)) ||
+    (profile.runtimeId === "claude" && isLocalClaudeTransport(profile.transport));
   if (isLocalAccountRuntime) {
     const providerFamily = readProviderMetaString(snapshot, "providerFamily") ?? "default";
     return `${profile.runtimeId}|${profile.providerId}|local-account|${providerFamily}|${profile.baseUrl ?? "default"}`;
@@ -185,10 +195,13 @@ function identityGroupKey(profile: RuntimeProfile): string {
 }
 
 function isLocalAccountEntry(entry: RuntimeUsageEntry): boolean {
-  return (
-    (entry.runtimeId === "codex" || entry.runtimeId === "claude") &&
-    entry.transports.every((transport) => transport === "sdk" || transport === "cli")
-  );
+  if (entry.runtimeId === "codex") {
+    return entry.transports.every((transport) => isLocalCodexTransport(transport));
+  }
+  if (entry.runtimeId === "claude") {
+    return entry.transports.every((transport) => isLocalClaudeTransport(transport));
+  }
+  return false;
 }
 
 function formatTransportSummary(entry: RuntimeUsageEntry): string | null {

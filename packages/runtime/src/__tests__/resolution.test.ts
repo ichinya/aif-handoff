@@ -73,6 +73,24 @@ describe("resolveRuntimeProfile", () => {
     expect(resolved.transport).toBe("cli");
   });
 
+  it("keeps explicit codex app-server transport from profile", () => {
+    const debug = vi.fn();
+    const resolved = resolveRuntimeProfile({
+      source: "task_override",
+      profile: {
+        id: "profile-codex-app-server",
+        runtimeId: "codex",
+        providerId: "openai",
+        transport: "app-server",
+      },
+      env: {},
+      logger: { debug },
+    });
+
+    expect(resolved.transport).toBe("app-server");
+    expect(debug).toHaveBeenCalled();
+  });
+
   it("falls back to ANTHROPIC_MODEL when profile/default overrides are missing", () => {
     const resolved = resolveRuntimeProfile({
       source: "none",

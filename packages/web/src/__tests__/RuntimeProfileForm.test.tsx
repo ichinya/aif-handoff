@@ -145,6 +145,55 @@ describe("RuntimeProfileForm", () => {
     );
   });
 
+  it("allows selecting codex app-server transport from runtime-supported transport options", async () => {
+    mockRuntimeModels.mutateAsync.mockResolvedValue({
+      models: [
+        {
+          id: "gpt-5.4",
+          label: "GPT-5.4",
+          metadata: {
+            supportedEffortLevels: ["minimal", "low", "medium", "high", "xhigh"],
+          },
+        },
+      ],
+      profile: {},
+    });
+    const onSubmit = vi.fn();
+
+    render(
+      <RuntimeProfileForm
+        mode="create"
+        projectId="project-1"
+        runtimes={[
+          createRuntimeDescriptor({
+            id: "codex",
+            providerId: "openai",
+            displayName: "Codex",
+            defaultTransport: "cli",
+            defaultApiKeyEnvVar: "OPENAI_API_KEY",
+            defaultModelPlaceholder: "gpt-5.4",
+            supportedTransports: ["sdk", "cli", "app-server", "api"],
+          }),
+        ]}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByDisplayValue("gpt-5.4")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "CLI" }));
+    fireEvent.click(screen.getByRole("button", { name: "APP-SERVER" }));
+    fireEvent.click(screen.getByRole("button", { name: /create profile/i }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtimeId: "codex",
+        transport: "app-server",
+      }),
+    );
+  });
+
   it("derives Claude effort choices from the selected model", async () => {
     mockRuntimeModels.mutateAsync.mockResolvedValue({
       models: [

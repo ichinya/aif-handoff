@@ -1,5 +1,5 @@
 import { RuntimeResolutionError, RuntimeValidationError } from "./errors.js";
-import { RuntimeTransport } from "./types.js";
+import { isRuntimeTransport, RuntimeTransport } from "./types.js";
 import type { RuntimeWorkflowSpec } from "./workflowSpec.js";
 
 export interface RuntimeProfileLike {
@@ -127,6 +127,61 @@ function inferDefaultTransport(runtimeId: string): RuntimeTransport {
   return RuntimeTransport.SDK;
 }
 
+function resolveConfiguredTransport(input: {
+  source: string;
+  profileId: string | null;
+  runtimeId: string;
+  rawTransport: string | null;
+  logger?: RuntimeResolutionLogger;
+}): RuntimeTransport {
+  const fallback = inferDefaultTransport(input.runtimeId);
+  if (!input.rawTransport) {
+    return fallback;
+  }
+
+  if (input.rawTransport === "agentapi") {
+    input.logger?.warn?.(
+      {
+        source: input.source,
+        profileId: input.profileId,
+        runtimeId: input.runtimeId,
+        legacyTransport: input.rawTransport,
+        normalizedTransport: RuntimeTransport.API,
+      },
+      "Legacy transport alias detected; normalizing to api",
+    );
+    return RuntimeTransport.API;
+  }
+
+  if (isRuntimeTransport(input.rawTransport)) {
+    if (input.rawTransport === RuntimeTransport.APP_SERVER) {
+      input.logger?.debug?.(
+        {
+          source: input.source,
+          profileId: input.profileId,
+          runtimeId: input.runtimeId,
+          transport: input.rawTransport,
+          explicit: true,
+        },
+        "Explicit app-server transport resolved from runtime profile",
+      );
+    }
+    return input.rawTransport;
+  }
+
+  input.logger?.warn?.(
+    {
+      source: input.source,
+      profileId: input.profileId,
+      runtimeId: input.runtimeId,
+      unknownTransport: input.rawTransport,
+      fallbackTransport: fallback,
+    },
+    "Unknown transport value detected; falling back to inferred runtime transport",
+  );
+  return fallback;
+}
+
 function inferDefaultModel(
   runtimeId: string,
   providerId: string,
@@ -198,10 +253,13 @@ export function resolveRuntimeProfile(input: ResolveRuntimeProfileInput): Resolv
   }
 
   const rawTransport = normalizeString(profile?.transport);
-  const transport: RuntimeTransport =
-    (rawTransport === "agentapi"
-      ? RuntimeTransport.API
-      : (rawTransport as RuntimeTransport | null)) ?? inferDefaultTransport(runtimeId);
+  const transport = resolveConfiguredTransport({
+    source: input.source,
+    profileId: normalizeString(profile?.id),
+    runtimeId,
+    rawTransport,
+    logger: input.logger,
+  });
   const explicitApiKeyEnvVar = normalizeString(profile?.apiKeyEnvVar);
   const defaultApiKeyEnvVar = inferDefaultApiKeyEnvVar(runtimeId, providerId, env);
   let apiKeyEnvVar = defaultApiKeyEnvVar;
@@ -313,10 +371,15 @@ export function validateResolvedRuntimeProfile(
 
   // CLI transport requires a CLI path
   if (
-    resolved.transport === RuntimeTransport.CLI &&
+    (resolved.transport === RuntimeTransport.CLI ||
+      resolved.transport === RuntimeTransport.APP_SERVER) &&
     typeof resolved.options.codexCliPath !== "string"
   ) {
-    warnings.push("CLI transport is selected but codexCliPath is missing");
+    warnings.push(
+      `${
+        resolved.transport === RuntimeTransport.APP_SERVER ? "app-server" : "CLI"
+      } transport is selected but codexCliPath is missing`,
+    );
   }
 
   // SDK transport — API key is optional (CLI-backed SDKs manage auth via their own login flow)

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CodexRuntimeAdapterError, classifyCodexRuntimeError } from "../adapters/codex/errors.js";
+import { classifyCodexAppServerError } from "../adapters/codex/appServer/errors.js";
+import { JsonlRpcResponseError } from "../adapters/codex/appServer/jsonlRpcClient.js";
 
 describe("codex error classification", () => {
   it("returns existing CodexRuntimeAdapterError without re-wrapping", () => {
@@ -79,5 +81,38 @@ describe("codex error classification", () => {
     const classified = classifyCodexRuntimeError(new Error("connection refused"));
     expect(classified.adapterCode).toBe("CODEX_TRANSPORT_ERROR");
     expect(classified.category).toBe("transport");
+  });
+
+  it("prefers structured app-server category when codexErrorInfo is provided", () => {
+    const err = new Error("unauthorized") as Error & {
+      codexErrorInfo: Record<string, unknown>;
+    };
+    err.codexErrorInfo = {
+      category: "auth",
+      adapterCode: "CODEX_AUTH_ERROR",
+      httpStatusCode: 401,
+    };
+
+    const classified = classifyCodexAppServerError(err);
+    expect(classified.category).toBe("auth");
+    expect(classified.adapterCode).toBe("CODEX_AUTH_ERROR");
+    expect(classified.httpStatus).toBe(401);
+  });
+
+  it("classifies app-server JSONL rpc errors by structured http status", () => {
+    const err = new JsonlRpcResponseError({
+      message: "handshake failed",
+      rpcId: "1",
+      rpcMethod: "initialize",
+      rpcCode: -32000,
+      rpcData: {
+        httpStatusCode: 429,
+      },
+    });
+
+    const classified = classifyCodexAppServerError(err);
+    expect(classified.category).toBe("rate_limit");
+    expect(classified.adapterCode).toBe("CODEX_RATE_LIMIT");
+    expect(classified.httpStatus).toBe(429);
   });
 });

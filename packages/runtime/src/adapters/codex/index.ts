@@ -32,6 +32,16 @@ import {
   listCodexAppServerModels,
 } from "./modelDiscovery.js";
 import { runCodexSdk, type CodexSdkLogger } from "./sdk.js";
+import { runCodexAppServer } from "./appServer/run.js";
+import {
+  getCodexAppServerSession,
+  listCodexAppServerSessionEvents,
+  listCodexAppServerSessions,
+} from "./appServer/sessions.js";
+import { spawnCodexAppServerProcess, terminateCodexAppServerProcess } from "./appServer/process.js";
+import { JsonlRpcClient } from "./appServer/jsonlRpcClient.js";
+import { CodexAppServerClient } from "./appServer/client.js";
+import { classifyCodexAppServerError } from "./appServer/errors.js";
 import { listCodexSdkSessions, getCodexSdkSession, listCodexSdkSessionEvents } from "./sessions.js";
 import { classifyCodexRuntimeError } from "./errors.js";
 
@@ -69,6 +79,16 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function readString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+type TransportResolutionSource = "input.transport" | "options.transport" | "default";
+
+interface TransportResolution {
+  transport: RuntimeTransport;
+  requested: string | null;
+  source: TransportResolutionSource;
+  normalizedFromLegacy: boolean;
+  fellBackToDefault: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -116,14 +136,82 @@ const API_CAPABILITIES: RuntimeCapabilities = {
   usageReporting: UsageReporting.FULL,
 };
 
+const APP_SERVER_CAPABILITIES: RuntimeCapabilities = {
+  supportsResume: true,
+  supportsSessionList: true,
+  supportsAgentDefinitions: false,
+  supportsStreaming: true,
+  supportsModelDiscovery: true,
+  supportsApprovals: false,
+  supportsCustomEndpoint: true,
+  usageReporting: UsageReporting.PARTIAL,
+};
+
 function resolveTransport(input: {
   transport?: string;
   options?: Record<string, unknown>;
-}): RuntimeTransport {
-  const requested = readString(input.transport) ?? readString(asRecord(input.options).transport);
-  if (requested === RuntimeTransport.SDK) return RuntimeTransport.SDK;
-  if (requested === RuntimeTransport.API || requested === "agentapi") return RuntimeTransport.API;
-  return RuntimeTransport.CLI;
+}): TransportResolution {
+  const requestedFromInput = readString(input.transport);
+  const requestedFromOptions = readString(asRecord(input.options).transport);
+  const requested = requestedFromInput ?? requestedFromOptions;
+  const source: TransportResolutionSource = requestedFromInput
+    ? "input.transport"
+    : requestedFromOptions
+      ? "options.transport"
+      : "default";
+
+  if (!requested) {
+    return {
+      transport: RuntimeTransport.CLI,
+      requested: null,
+      source,
+      normalizedFromLegacy: false,
+      fellBackToDefault: false,
+    };
+  }
+  if (requested === RuntimeTransport.SDK) {
+    return {
+      transport: RuntimeTransport.SDK,
+      requested,
+      source,
+      normalizedFromLegacy: false,
+      fellBackToDefault: false,
+    };
+  }
+  if (requested === RuntimeTransport.API) {
+    return {
+      transport: RuntimeTransport.API,
+      requested,
+      source,
+      normalizedFromLegacy: false,
+      fellBackToDefault: false,
+    };
+  }
+  if (requested === RuntimeTransport.APP_SERVER) {
+    return {
+      transport: RuntimeTransport.APP_SERVER,
+      requested,
+      source,
+      normalizedFromLegacy: false,
+      fellBackToDefault: false,
+    };
+  }
+  if (requested === "agentapi") {
+    return {
+      transport: RuntimeTransport.API,
+      requested,
+      source,
+      normalizedFromLegacy: true,
+      fellBackToDefault: false,
+    };
+  }
+  return {
+    transport: RuntimeTransport.CLI,
+    requested,
+    source,
+    normalizedFromLegacy: false,
+    fellBackToDefault: true,
+  };
 }
 
 function resolveCliPath(input: RuntimeConnectionValidationInput): string | null {
@@ -200,6 +288,85 @@ async function validateCodexSdkConnection(
   };
 }
 
+function buildValidationLaunchInput(input: RuntimeConnectionValidationInput): {
+  runtimeId: string;
+  profileId: string | null;
+  transport: RuntimeTransport;
+  options: Record<string, unknown>;
+  projectRoot?: string;
+  cwd?: string;
+  apiKey?: string | null;
+  apiKeyEnvVar?: string | null;
+  baseUrl?: string | null;
+} {
+  const options = asRecord(input.options);
+  return {
+    runtimeId: input.runtimeId,
+    profileId: input.profileId ?? null,
+    transport: RuntimeTransport.APP_SERVER,
+    options,
+    apiKey: readString(options.apiKey),
+    apiKeyEnvVar: readString(options.apiKeyEnvVar),
+    baseUrl: readString(options.baseUrl),
+  };
+}
+
+async function validateCodexAppServerConnection(
+  input: RuntimeConnectionValidationInput,
+): Promise<RuntimeConnectionValidationResult> {
+  const cliValidation = await validateCodexCliConnection(input);
+  if (!cliValidation.ok) {
+    return cliValidation;
+  }
+
+  const launch = spawnCodexAppServerProcess({
+    input: buildValidationLaunchInput(input),
+  });
+  const rpcClient = new JsonlRpcClient(launch.process, {
+    runtimeId: input.runtimeId,
+    profileId: input.profileId ?? null,
+    transport: RuntimeTransport.APP_SERVER,
+    requestTimeoutMs: 5_000,
+  });
+  const appServerClient = new CodexAppServerClient(rpcClient, {
+    runtimeId: input.runtimeId,
+    profileId: input.profileId ?? null,
+    transport: RuntimeTransport.APP_SERVER,
+    requestTimeoutMs: 5_000,
+  });
+
+  try {
+    await appServerClient.initialize({
+      clientInfo: {
+        name: "aif-runtime-codex-validation",
+        title: "AIF Runtime Codex Validation",
+        version: "1.0",
+      },
+      capabilities: {
+        experimentalApi: asRecord(input.options).experimentalApi === true,
+      },
+    });
+    return {
+      ok: true,
+      message: `Codex app-server initialize handshake succeeded (${launch.executablePath})`,
+    };
+  } catch (error) {
+    const classified = classifyCodexAppServerError(error);
+    const installHint = `Install/update Codex CLI and run 'codex auth login' if needed`;
+    return {
+      ok: false,
+      message: `Codex app-server initialize handshake failed: ${classified.message}. ${installHint}.`,
+      details: {
+        category: classified.category,
+        adapterCode: classified.adapterCode ?? null,
+      },
+    };
+  } finally {
+    appServerClient.close("validation finished");
+    await terminateCodexAppServerProcess(launch);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Adapter factory
 // ---------------------------------------------------------------------------
@@ -212,13 +379,58 @@ export function createCodexRuntimeAdapter(
   const logger = options.logger ?? createFallbackLogger();
 
   async function runByTransport(input: RuntimeRunInput): Promise<RuntimeRunResult> {
-    const transport = resolveTransport({ transport: input.transport, options: input.options });
+    const transportResolution = resolveTransport({
+      transport: input.transport,
+      options: input.options,
+    });
+    const transport = transportResolution.transport;
     const wantsStreaming = input.execution?.onEvent != null;
+    if (
+      transportResolution.requested === RuntimeTransport.APP_SERVER &&
+      transportResolution.source !== "default"
+    ) {
+      logger.debug?.(
+        {
+          runtimeId,
+          profileId: input.profileId ?? null,
+          requestedTransport: transportResolution.requested,
+          resolvedTransport: transport,
+          source: transportResolution.source,
+        },
+        "DEBUG [runtime:codex] Explicit app-server transport resolved",
+      );
+    }
+    if (transportResolution.normalizedFromLegacy) {
+      logger.warn?.(
+        {
+          runtimeId,
+          profileId: input.profileId ?? null,
+          requestedTransport: transportResolution.requested,
+          resolvedTransport: transport,
+          source: transportResolution.source,
+        },
+        "WARN [runtime:codex] Legacy transport alias normalized to api",
+      );
+    }
+    if (transportResolution.fellBackToDefault) {
+      logger.warn?.(
+        {
+          runtimeId,
+          profileId: input.profileId ?? null,
+          requestedTransport: transportResolution.requested,
+          resolvedTransport: transport,
+          source: transportResolution.source,
+        },
+        "WARN [runtime:codex] Unknown transport requested, defaulting to cli",
+      );
+    }
     logger.info?.(
       {
         runtimeId,
         profileId: input.profileId ?? null,
         transport,
+        requestedTransport: transportResolution.requested,
+        transportSource: transportResolution.source,
       },
       "INFO [runtime:codex] Selected transport",
     );
@@ -232,6 +444,10 @@ export function createCodexRuntimeAdapter(
         return runCodexAgentApiStreaming({ ...input, transport }, logger);
       }
       return runCodexAgentApi({ ...input, transport }, logger);
+    }
+
+    if (transport === RuntimeTransport.APP_SERVER) {
+      return runCodexAppServer({ ...input, transport }, logger);
     }
 
     return runCodexCli({ ...input, transport }, logger);
@@ -249,7 +465,12 @@ export function createCodexRuntimeAdapter(
       defaultApiKeyEnvVar: "OPENAI_API_KEY",
       defaultBaseUrlEnvVar: "OPENAI_BASE_URL",
       defaultModelPlaceholder: "gpt-5.4",
-      supportedTransports: [RuntimeTransport.SDK, RuntimeTransport.CLI, RuntimeTransport.API],
+      supportedTransports: [
+        RuntimeTransport.SDK,
+        RuntimeTransport.CLI,
+        RuntimeTransport.APP_SERVER,
+        RuntimeTransport.API,
+      ],
       defaultTransport: RuntimeTransport.CLI,
       capabilities: CLI_CAPABILITIES,
     },
@@ -258,6 +479,8 @@ export function createCodexRuntimeAdapter(
       switch (transport) {
         case RuntimeTransport.SDK:
           return SDK_CAPABILITIES;
+        case RuntimeTransport.APP_SERVER:
+          return APP_SERVER_CAPABILITIES;
         case RuntimeTransport.API:
           return API_CAPABILITIES;
         default:
@@ -282,14 +505,35 @@ export function createCodexRuntimeAdapter(
     },
 
     async listSessions(input: RuntimeSessionListInput): Promise<RuntimeSession[]> {
+      const transport = resolveTransport({
+        transport: input.transport,
+        options: input.options,
+      }).transport;
+      if (transport === RuntimeTransport.APP_SERVER) {
+        return listCodexAppServerSessions(input, logger);
+      }
       return listCodexSdkSessions(input);
     },
 
     async getSession(input: RuntimeSessionGetInput): Promise<RuntimeSession | null> {
+      const transport = resolveTransport({
+        transport: input.transport,
+        options: input.options,
+      }).transport;
+      if (transport === RuntimeTransport.APP_SERVER) {
+        return getCodexAppServerSession(input, logger);
+      }
       return getCodexSdkSession(input);
     },
 
     async listSessionEvents(input: RuntimeSessionEventsInput): Promise<RuntimeEvent[]> {
+      const transport = resolveTransport({
+        transport: input.transport,
+        options: input.options,
+      }).transport;
+      if (transport === RuntimeTransport.APP_SERVER) {
+        return listCodexAppServerSessionEvents(input, logger);
+      }
       return listCodexSdkSessionEvents(input);
     },
 
@@ -300,17 +544,21 @@ export function createCodexRuntimeAdapter(
       if (
         rawTransport &&
         rawTransport !== RuntimeTransport.CLI &&
+        rawTransport !== RuntimeTransport.APP_SERVER &&
         rawTransport !== RuntimeTransport.API &&
         rawTransport !== RuntimeTransport.SDK &&
         rawTransport !== "agentapi"
       ) {
         return {
           ok: false,
-          message: `Codex does not support "${rawTransport}" transport. Use "sdk", "cli", or "api".`,
+          message: `Codex does not support "${rawTransport}" transport. Use "sdk", "cli", "app-server", or "api".`,
         };
       }
 
-      const transport = resolveTransport({ transport: input.transport, options: input.options });
+      const transport = resolveTransport({
+        transport: input.transport,
+        options: input.options,
+      }).transport;
 
       if (transport === RuntimeTransport.SDK) {
         return validateCodexSdkConnection(input);
@@ -338,12 +586,16 @@ export function createCodexRuntimeAdapter(
         return validateCodexAgentApiConnection({ ...input, transport });
       }
 
+      if (transport === RuntimeTransport.APP_SERVER) {
+        return validateCodexAppServerConnection({ ...input, transport });
+      }
+
       return validateCodexCliConnection({ ...input, transport });
     },
 
     async listModels(input: RuntimeModelListInput): Promise<RuntimeModel[]> {
       const options = asRecord(input.options);
-      const transport = resolveTransport({ transport: input.transport, options });
+      const transport = resolveTransport({ transport: input.transport, options }).transport;
       if (transport === RuntimeTransport.API) {
         try {
           const models = enrichCodexDiscoveredModels(await listCodexAgentApiModels(input));
@@ -369,7 +621,11 @@ export function createCodexRuntimeAdapter(
         }
       }
 
-      if (transport === RuntimeTransport.CLI || transport === RuntimeTransport.SDK) {
+      if (
+        transport === RuntimeTransport.CLI ||
+        transport === RuntimeTransport.SDK ||
+        transport === RuntimeTransport.APP_SERVER
+      ) {
         const slowPathStartedAt = Date.now();
         logger.debug?.(
           {

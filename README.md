@@ -15,7 +15,7 @@ Auto-review is now convergence-aware. You can keep the default `full_re_review` 
 Use the runtime that fits your stack today, then switch per project/task without changing orchestration logic:
 
 - **Claude (`anthropic`)** — SDK, CLI, API transports
-- **Codex (`openai`)** — SDK, CLI, API transports
+- **Codex (`openai`)** — SDK, CLI, App Server, API transports
 - **OpenRouter (`openrouter`)** — API transport
 - **OpenCode (`opencode`)** — API transport
 
@@ -78,7 +78,7 @@ The agent coordinator reacts to task events via WebSocket in near real-time and 
   ```
   Copy the URL and open it in your browser. **Important:** the terminal wraps long URLs across lines — remove any line breaks and spaces before pasting, otherwise OAuth will fail with `invalid code_challenge`. Then restart to apply. Credentials are stored in a persistent `claude-auth` Docker volume.
 
-For Codex/OpenAI-compatible profiles, configure `OPENAI_API_KEY` and optionally `OPENAI_BASE_URL` (or set profile-level `apiKeyEnvVar` / `baseUrl`). See [Providers](docs/providers.md).
+For Codex/OpenAI-compatible profiles, configure `OPENAI_API_KEY` and optionally `OPENAI_BASE_URL` (or set profile-level `apiKeyEnvVar` / `baseUrl`). For local Codex runs without API keys, prefer `transport: "app-server"` or `transport: "cli"` and authenticate via `codex login`. See [Providers](docs/providers.md).
 
 #### Codex OAuth in Docker (without `OPENAI_API_KEY`)
 
@@ -184,18 +184,18 @@ AIF Handoff supports two execution modes, configurable globally via `AGENT_USE_S
 
 ## Tech Stack
 
-| Layer        | Technology                                                    |
-| ------------ | ------------------------------------------------------------- |
-| Runtime      | Node.js + TypeScript                                          |
-| Monorepo     | Turborepo                                                     |
-| Database     | SQLite (better-sqlite3 + drizzle-orm)                         |
-| API          | Hono + @hono/node-server + WebSocket                          |
-| Validation   | zod + @hono/zod-validator                                     |
-| Frontend     | React + Vite + TailwindCSS                                    |
-| Drag & Drop  | @dnd-kit                                                      |
-| Server State | @tanstack/react-query                                         |
-| Runtime SDKs | Pluggable adapters — Claude (Agent SDK) + Codex (CLI/SDK/API) |
-| Scheduler    | node-cron                                                     |
+| Layer        | Technology                                                               |
+| ------------ | ------------------------------------------------------------------------ |
+| Runtime      | Node.js + TypeScript                                                     |
+| Monorepo     | Turborepo                                                                |
+| Database     | SQLite (better-sqlite3 + drizzle-orm)                                    |
+| API          | Hono + @hono/node-server + WebSocket                                     |
+| Validation   | zod + @hono/zod-validator                                                |
+| Frontend     | React + Vite + TailwindCSS                                               |
+| Drag & Drop  | @dnd-kit                                                                 |
+| Server State | @tanstack/react-query                                                    |
+| Runtime SDKs | Pluggable adapters — Claude (Agent SDK) + Codex (CLI/SDK/App Server/API) |
+| Scheduler    | node-cron                                                                |
 
 ## Docker
 

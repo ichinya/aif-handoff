@@ -110,13 +110,14 @@ data/                    # SQLite database files (gitignored)
 
 ## Documentation
 
-| Document        | Path                    | Description                              |
-| --------------- | ----------------------- | ---------------------------------------- |
-| README          | README.md               | Project landing page                     |
-| Getting Started | docs/getting-started.md | Installation, setup, first steps         |
-| Architecture    | docs/architecture.md    | Agent pipeline, state machine, data flow |
-| API Reference   | docs/api.md             | REST endpoints, WebSocket events         |
-| Configuration   | docs/configuration.md   | Environment variables, logging, auth     |
+| Document        | Path                    | Description                               |
+| --------------- | ----------------------- | ----------------------------------------- |
+| README          | README.md               | Project landing page                      |
+| Getting Started | docs/getting-started.md | Installation, setup, first steps          |
+| Architecture    | docs/architecture.md    | Agent pipeline, state machine, data flow  |
+| API Reference   | docs/api.md             | REST endpoints, WebSocket events          |
+| Configuration   | docs/configuration.md   | Environment variables, logging, auth      |
+| Providers       | docs/providers.md       | Runtime profiles and adapter capabilities |
 
 ## AI Context Files
 

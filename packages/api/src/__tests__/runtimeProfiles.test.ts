@@ -485,6 +485,68 @@ describe("runtimeProfiles API", () => {
     expect(body[0].runtimeLimitSnapshot.providerMeta).not.toHaveProperty("accountEmail");
   });
 
+  it("treats codex app-server profiles as local account transports for identity enrichment", async () => {
+    mockGetCodexAuthIdentity.mockResolvedValue({
+      accountId: "account-codex-appserver",
+      authMode: "chatgpt",
+      accountName: "Codex AppServer User",
+      accountEmail: "codex-appserver@example.com",
+      planType: "pro",
+    });
+
+    const db = testDb.current;
+    db.insert(runtimeProfiles)
+      .values({
+        id: "profile-codex-app-server",
+        projectId: "project-1",
+        name: "Codex App Server",
+        runtimeId: "codex",
+        providerId: "openai",
+        transport: "app-server",
+        enabled: true,
+        runtimeLimitSnapshotJson: JSON.stringify({
+          source: "sdk_event",
+          status: "ok",
+          precision: "exact",
+          checkedAt: "2026-04-18T06:24:09.174Z",
+          providerId: "openai",
+          runtimeId: "codex",
+          profileId: "profile-codex-app-server",
+          primaryScope: "time",
+          resetAt: "2026-04-18T07:02:25.000Z",
+          warningThreshold: 10,
+          windows: [
+            {
+              scope: "time",
+              name: "5h",
+              percentRemaining: 96,
+              resetAt: "2026-04-18T07:02:25.000Z",
+            },
+          ],
+          providerMeta: {
+            limitId: "codex",
+            planType: "pro",
+          },
+        }),
+        runtimeLimitUpdatedAt: "2026-04-18T06:24:09.174Z",
+      })
+      .run();
+
+    const res = await app.request("/runtime-profiles?projectId=project-1&includeGlobal=true");
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body[0].runtimeLimitSnapshot.providerMeta).toEqual(
+      expect.objectContaining({
+        accountId: "account-codex-appserver",
+        accountName: "Codex AppServer User",
+        planType: "pro",
+        limitId: "codex",
+      }),
+    );
+    expect(body[0].runtimeLimitSnapshot.providerMeta).not.toHaveProperty("authMode");
+    expect(body[0].runtimeLimitSnapshot.providerMeta).not.toHaveProperty("accountEmail");
+  });
+
   it("refreshes local Codex quota snapshots from the indexed DB when newer pool state exists", async () => {
     mockBuildCodexAuthFingerprint.mockReturnValue("codex-fp-1");
 

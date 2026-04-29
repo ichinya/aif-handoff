@@ -339,6 +339,8 @@ export const RuntimeTransport = {
   SDK: "sdk",
   /** CLI subprocess — spawn a binary and parse stdout */
   CLI: "cli",
+  /** Codex app-server subprocess over stdio JSONL */
+  APP_SERVER: "app-server",
   /** HTTP API — POST to a remote runtime endpoint */
   API: "api",
 } as const;

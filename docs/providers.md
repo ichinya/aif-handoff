@@ -59,28 +59,28 @@ The API exposes effective selection endpoints:
 
 ## Supported Runtimes
 
-| Runtime      | Provider     | Transports    | Resume        | Sessions             | Agent Defs    | Usage Reporting               | Light Model         | Status                    |
-| ------------ | ------------ | ------------- | ------------- | -------------------- | ------------- | ----------------------------- | ------------------- | ------------------------- |
-| `claude`     | `anthropic`  | SDK, CLI, API | Yes (SDK/CLI) | Yes (SDK/CLI)        | Yes (SDK/CLI) | `FULL` (all transports)       | `claude-haiku-3-5`  | Built-in                  |
-| `codex`      | `openai`     | SDK, CLI, API | Yes (SDK/CLI) | Yes (SDK/App Server) | No            | `FULL` SDK/API, `PARTIAL` CLI | default             | Built-in                  |
-| `opencode`   | `opencode`   | API           | Yes           | Yes                  | No            | `NONE`                        | null (configurable) | Built-in                  |
-| `openrouter` | `openrouter` | API           | No            | No                   | No            | `FULL`                        | null (configurable) | Built-in                  |
-| Custom       | Any          | Any           | Configurable  | Configurable         | Configurable  | Must declare                  | Configurable        | Via `AIF_RUNTIME_MODULES` |
+| Runtime      | Provider     | Transports                | Resume                   | Sessions             | Agent Defs    | Usage Reporting                          | Light Model         | Status                    |
+| ------------ | ------------ | ------------------------- | ------------------------ | -------------------- | ------------- | ---------------------------------------- | ------------------- | ------------------------- |
+| `claude`     | `anthropic`  | SDK, CLI, API             | Yes (SDK/CLI)            | Yes (SDK/CLI)        | Yes (SDK/CLI) | `FULL` (all transports)                  | `claude-haiku-3-5`  | Built-in                  |
+| `codex`      | `openai`     | SDK, CLI, App Server, API | Yes (SDK/CLI/App Server) | Yes (SDK/App Server) | No            | `FULL` SDK/API, `PARTIAL` CLI/App Server | default             | Built-in                  |
+| `opencode`   | `opencode`   | API                       | Yes                      | Yes                  | No            | `NONE`                                   | null (configurable) | Built-in                  |
+| `openrouter` | `openrouter` | API                       | No                       | No                   | No            | `FULL`                                   | null (configurable) | Built-in                  |
+| Custom       | Any          | Any                       | Configurable             | Configurable         | Configurable  | Must declare                             | Configurable        | Via `AIF_RUNTIME_MODULES` |
 
-Capabilities are **transport-aware**: the same adapter may expose different capabilities depending on the selected transport. For example, Codex supports resume on SDK/CLI, while session discovery remains SDK/App Server-only. Use `resolveAdapterCapabilities(adapter, transport)` to get the effective set.
+Capabilities are **transport-aware**: the same adapter may expose different capabilities depending on the selected transport. For example, Codex supports resume on SDK/CLI/App Server, while session discovery remains SDK/App Server-only. Use `resolveAdapterCapabilities(adapter, transport)` to get the effective set.
 
 ### Runtime-limit observability
 
 Runtime-limit auto-pause depends on what each provider/transport can actually surface. The runtime layer normalizes these inputs into the shared `runtimeLimitSnapshot` contract and marks each snapshot as either `exact` or `heuristic`.
 
-| Runtime / transport | Limit source                            | Precision   | Notes                                                                                                                                                                                                         |
-| ------------------- | --------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Claude SDK / CLI    | Claude `rate_limit_event`               | `heuristic` | Structured qualitative status with reset timestamps (`status`, `resetsAt`, `overageStatus`, `isUsingOverage`, ...)                                                                                            |
-| Claude API          | Anthropic rate-limit headers            | `exact`     | Exact request/token limits and reset times from `anthropic-ratelimit-*` + `retry-after`                                                                                                                       |
-| Codex API           | OpenAI-compatible rate-limit headers    | `exact`     | Exact request/token limits and reset times from `x-ratelimit-*` + `retry-after`                                                                                                                               |
-| Codex SDK / CLI     | Codex session `token_count.rate_limits` | `exact`     | API background indexing tails persisted Codex session logs into SQLite (`codex_limit_heads`/`codex_limit_history`); `/runtime-profiles` overlays read from that index instead of per-request filesystem scans |
-| OpenRouter API      | OpenAI-compatible rate-limit headers    | `exact`     | Uses `x-ratelimit-*` / `retry-after` when the upstream provides them                                                                                                                                          |
-| OpenCode API        | structured error metadata               | `heuristic` | Preserves `resetAt` / retry hints on rate-limit errors, but no proactive normalized snapshot is emitted today                                                                                                 |
+| Runtime / transport          | Limit source                            | Precision   | Notes                                                                                                                                                                                                         |
+| ---------------------------- | --------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude SDK / CLI             | Claude `rate_limit_event`               | `heuristic` | Structured qualitative status with reset timestamps (`status`, `resetsAt`, `overageStatus`, `isUsingOverage`, ...)                                                                                            |
+| Claude API                   | Anthropic rate-limit headers            | `exact`     | Exact request/token limits and reset times from `anthropic-ratelimit-*` + `retry-after`                                                                                                                       |
+| Codex API                    | OpenAI-compatible rate-limit headers    | `exact`     | Exact request/token limits and reset times from `x-ratelimit-*` + `retry-after`                                                                                                                               |
+| Codex SDK / CLI / App Server | Codex session `token_count.rate_limits` | `exact`     | API background indexing tails persisted Codex session logs into SQLite (`codex_limit_heads`/`codex_limit_history`); `/runtime-profiles` overlays read from that index instead of per-request filesystem scans |
+| OpenRouter API               | OpenAI-compatible rate-limit headers    | `exact`     | Uses `x-ratelimit-*` / `retry-after` when the upstream provides them                                                                                                                                          |
+| OpenCode API                 | structured error metadata               | `heuristic` | Preserves `resetAt` / retry hints on rate-limit errors, but no proactive normalized snapshot is emitted today                                                                                                 |
 
 Auto-pause semantics follow the precision:
 
@@ -130,11 +130,12 @@ Optional `supportsInteractiveQuestions` flag in `RuntimeCapabilities` declares t
 
 ### Transport Types
 
-| Transport | Description                           | Example                                  |
-| --------- | ------------------------------------- | ---------------------------------------- |
-| `sdk`     | In-process library call via JS/TS SDK | Claude Agent SDK, Codex SDK              |
-| `cli`     | Spawn a subprocess, parse stdout      | `claude --agent ...`, `codex run --json` |
-| `api`     | HTTP POST to a remote endpoint        | OpenAI-compatible REST API               |
+| Transport    | Description                                           | Example                                  |
+| ------------ | ----------------------------------------------------- | ---------------------------------------- |
+| `sdk`        | In-process library call via JS/TS SDK                 | Claude Agent SDK, Codex SDK              |
+| `cli`        | Spawn a subprocess, parse stdout                      | `claude --agent ...`, `codex run --json` |
+| `app-server` | Spawn `codex app-server` and exchange stdio JSONL RPC | Codex App Server transport               |
+| `api`        | HTTP POST to a remote endpoint                        | OpenAI-compatible REST API               |
 
 #### Transport Observability Differences
 
@@ -146,6 +147,8 @@ Optional `supportsInteractiveQuestions` flag in `RuntimeCapabilities` declares t
 - **First-activity watchdog** is disabled (no `onToolUse` callbacks to monitor)
 - **Start timeout** (`AGENT_QUERY_START_TIMEOUT_MS`) is disabled — CLI/API produce output only after the full run completes, so the only protection is the run timeout (`AGENT_STAGE_RUN_TIMEOUT_MS`)
 - **Token usage** is reported as a single aggregate at the end of the run
+
+**Codex App Server transport** streams JSONL notifications from the subprocess, so it behaves closer to SDK from an observability perspective (streaming events, resumable thread IDs) while still using a local process execution model.
 
 ## Built-In Adapter Examples
 
@@ -215,7 +218,7 @@ SDK-specific options:
 - `sandboxMode` — one of `read-only`, `workspace-write`, `danger-full-access`
 - `approvalPolicy` — one of `untrusted`, `on-failure`, `on-request`, `never`
 - `modelReasoningEffort` — one of `minimal`, `low`, `medium`, `high`, `xhigh`
-- `skipGitRepoCheck` — bypass the Codex guard that refuses to run outside a git repo (both SDK and CLI)
+- `skipGitRepoCheck` — bypass the Codex guard that refuses to run outside a git repo (SDK, App Server, and CLI)
 
 Invalid `options.approvalPolicy` / `options.sandboxMode` values are ignored with a runtime warning, and the adapter falls back to the effective default for that execution path.
 
@@ -238,6 +241,35 @@ Invalid `options.approvalPolicy` / `options.sandboxMode` values are ignored with
 ```
 
 **`codexCliArgs` is a full escape hatch.** When `options.codexCliArgs` is set, the adapter uses the custom template verbatim (with `{prompt}`, `{model}`, `{session_id}` substitutions) and **skips all adapter-managed flags** — including `--model`, `-c model_reasoning_effort`, `-c approval_policy`, `-c sandbox_mode`, `--skip-git-repo-check`, and the bypass-permission translation. If you use a custom template you are responsible for emitting these flags yourself. Profile-level `options.approvalPolicy`, `options.sandboxMode`, `options.skipGitRepoCheck`, `options.modelReasoningEffort`, and `AGENT_BYPASS_PERMISSIONS` all have **no effect** when a custom template is active. Use this only for integration with non-standard CLI wrappers.
+
+### Codex (App Server transport)
+
+Runs `codex app-server` over stdio JSONL RPC and keeps Codex thread IDs as resumable runtime session IDs.
+
+```json
+{
+  "projectId": null,
+  "name": "Codex App Server",
+  "runtimeId": "codex",
+  "providerId": "openai",
+  "transport": "app-server",
+  "defaultModel": "gpt-5.4",
+  "options": {
+    "approvalPolicy": "on-request",
+    "sandboxMode": "workspace-write"
+  },
+  "enabled": true
+}
+```
+
+App Server operational notes:
+
+- Reuses the same key options as other Codex transports: `codexCliPath`, `approvalPolicy`, `sandboxMode`, `modelReasoningEffort`, and `skipGitRepoCheck`.
+- Does not add a transport-local hard run timeout. Long-running stages are governed by the shared runtime execution config; `options.appServerRequestTimeoutMs` only controls individual JSONL RPC request waits.
+- Human approval bridging is not implemented yet. Command, file-change, and permissions approval requests are denied by design and surfaced as permission failures/events; App Server therefore reports `supportsApprovals: false` even though approval request events are observable. Unattended App Server profiles should use `approvalPolicy="never"` only when the caller has intentionally accepted that trust level.
+- Session list APIs are supported through `thread/list` and `thread/read`; AIF stores Codex thread IDs as runtime session IDs for resume.
+- Docker images already include `@openai/codex` and mount persistent `~/.codex` auth state (`codex-auth` volume), so no extra Docker wiring is required for this transport.
+- On Windows, configured `codexCliPath` / `CODEX_CLI_PATH` values are treated as executable paths or shim names, not shell snippets. Values containing command-shell metacharacters are rejected before spawn.
 
 ### Codex (API transport)
 
@@ -314,18 +346,19 @@ When `AGENT_BYPASS_PERMISSIONS=1` is set in the environment, the runtime layer f
 
 Each adapter translates this to its native "trust me, just run" mechanism:
 
-| Runtime / transport | Bypass translation                                                            |
-| ------------------- | ----------------------------------------------------------------------------- |
-| Claude SDK          | `permissionMode="bypassPermissions"` + `allowDangerouslySkipPermissions=true` |
-| Claude CLI          | `--dangerously-skip-permissions`                                              |
-| Codex SDK           | `approvalPolicy="never"` + `sandboxMode="danger-full-access"` (ThreadOptions) |
-| Codex CLI           | `-c approval_policy="never" -c sandbox_mode="danger-full-access"`             |
+| Runtime / transport | Bypass translation                                                                                          |
+| ------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Claude SDK          | `permissionMode="bypassPermissions"` + `allowDangerouslySkipPermissions=true`                               |
+| Claude CLI          | `--dangerously-skip-permissions`                                                                            |
+| Codex SDK           | `approvalPolicy="never"` + `sandboxMode="danger-full-access"` (ThreadOptions)                               |
+| Codex App Server    | `approvalPolicy="never"` + `sandboxMode="danger-full-access"` (thread metadata + interrupt-aware turn flow) |
+| Codex CLI           | `-c approval_policy="never" -c sandbox_mode="danger-full-access"`                                           |
 
 Why Codex disables both approval prompts **and** the sandbox: Codex has two orthogonal safety rails (approval policy + OS-level sandbox), while Claude has only one (permission prompts). To match Claude's effective "agent can do anything" behavior, both rails must be cleared. Leaving the Codex sandbox at its default `workspace-write` blocks network access — so `npm install`, `curl`, `git push`, and WebFetch would silently fail.
 
 The Codex CLI uses `--config` (`-c`) overrides instead of the single `--dangerously-bypass-approvals-and-sandbox` flag because the same code path must work for both `codex exec` and `codex exec resume` — the resume subcommand rejects the standalone `--sandbox` flag, while `--config` overrides are accepted on both. The end-state is identical to the atomic flag.
 
-**Opting out for Codex:** if you want narrower safety even in bypass mode, set `options.sandboxMode` or `options.approvalPolicy` explicitly in your profile — explicit profile values override the bypass defaults on both SDK and CLI transports:
+**Opting out for Codex:** if you want narrower safety even in bypass mode, set `options.sandboxMode` or `options.approvalPolicy` explicitly in your profile — explicit profile values override the bypass defaults on SDK, App Server, and CLI transports:
 
 ```json
 {

@@ -15,7 +15,11 @@
     "test": "vitest run --configLoader runner",
     "coverage": "vitest run --coverage",
     "lint": "eslint \"src/**/*.ts\"",
-    "test:watch": "vitest --configLoader runner"
+    "test:watch": "vitest --configLoader runner",
+    "codex:app-server:generate-types": "codex app-server generate-ts --out src/adapters/codex/appServer/generated",
+    "codex:app-server:generate-schema": "codex app-server generate-json-schema --out src/adapters/codex/appServer/generated/schema",
+    "codex:app-server:protocol:generate": "node ./scripts/generate-codex-app-server-protocol.mjs",
+    "codex:app-server:protocol:check": "node ./scripts/generate-codex-app-server-protocol.mjs --check"
   },
   "dependencies": {
     "@aif/shared": "*",

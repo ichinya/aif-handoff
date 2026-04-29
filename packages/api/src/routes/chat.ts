@@ -243,7 +243,7 @@ function formatVirtualRuntimeSessionId(
   runtimeSessionId: string,
   transport?: string,
 ): string {
-  if (transport === RuntimeTransport.SDK || transport === undefined) {
+  if (transport === RuntimeTransport.SDK) {
     return `sdk:${runtimeSessionId}`;
   }
   return `runtime:${encodeURIComponent(runtimeId)}:${encodeURIComponent(runtimeSessionId)}`;
@@ -275,7 +275,9 @@ function parseVirtualRuntimeSessionId(
 }
 
 function runtimeSourceFromTransport(transport: string): "cli" | "agent" {
-  return transport === RuntimeTransport.CLI ? "cli" : "agent";
+  return transport === RuntimeTransport.CLI || transport === RuntimeTransport.APP_SERVER
+    ? "cli"
+    : "agent";
 }
 
 function mapRuntimeEventsToChatMessages(
@@ -647,6 +649,7 @@ interface RuntimeSessionLookupContext {
   providerId: string;
   profileId: string | null;
   runtimeProfileId: string | null;
+  transport: string | null;
   projectRoot?: string;
   options?: Record<string, unknown>;
   headers?: Record<string, string>;
@@ -687,6 +690,7 @@ async function resolveVirtualSessionLookupContext(input: {
         providerId: profile.providerId,
         profileId: profile.id,
         runtimeProfileId: profile.id,
+        transport: profile.transport ?? null,
         options: buildSessionLookupOptions({
           options: profile.options ?? {},
           baseUrl: profile.baseUrl ?? null,
@@ -712,6 +716,7 @@ async function resolveVirtualSessionLookupContext(input: {
             providerId: context.resolvedProfile.providerId,
             profileId: context.resolvedProfile.profileId ?? null,
             runtimeProfileId: context.resolvedProfile.profileId ?? null,
+            transport: context.resolvedProfile.transport ?? null,
             projectRoot: project.rootPath,
             options: buildSessionLookupOptions({
               options: context.resolvedProfile.options ?? {},
@@ -739,6 +744,7 @@ async function resolveVirtualSessionLookupContext(input: {
     providerId: input.adapter.descriptor.providerId,
     profileId: null,
     runtimeProfileId: null,
+    transport: null,
   };
 }
 
@@ -850,6 +856,7 @@ chatRouter.get("/sessions", async (c) => {
             providerId: context.resolvedProfile.providerId,
             profileId: context.resolvedProfile.profileId,
             projectRoot: project.rootPath,
+            transport: context.resolvedProfile.transport,
             limit: 50,
             options: {
               ...context.resolvedProfile.options,
@@ -983,6 +990,7 @@ chatRouter.get("/sessions/:id", async (c) => {
         providerId: lookupContext.providerId,
         profileId: lookupContext.profileId,
         projectRoot: lookupContext.projectRoot,
+        transport: lookupContext.transport as RuntimeTransport | undefined,
         sessionId: virtual.sessionId,
         options: lookupContext.options,
         headers: lookupContext.headers,
@@ -997,7 +1005,7 @@ chatRouter.get("/sessions/:id", async (c) => {
         agentSessionId: null,
         runtimeProfileId: lookupContext.runtimeProfileId,
         runtimeSessionId: info.id,
-        source: "agent",
+        source: runtimeSourceFromTransport(lookupContext.transport ?? RuntimeTransport.API),
         createdAt: info.createdAt,
         updatedAt: info.updatedAt,
       };
@@ -1059,6 +1067,7 @@ chatRouter.get("/sessions/:id/messages", async (c) => {
         providerId: lookupContext.providerId,
         profileId: lookupContext.profileId,
         projectRoot: lookupContext.projectRoot,
+        transport: lookupContext.transport as RuntimeTransport | undefined,
         sessionId: virtual.sessionId,
         options: lookupContext.options,
         headers: lookupContext.headers,
@@ -1092,6 +1101,7 @@ chatRouter.get("/sessions/:id/messages", async (c) => {
     let profileOptions: Record<string, unknown> | undefined;
     let profileHeaders: Record<string, string> | undefined;
     let profileBaseUrl: string | null = null;
+    let profileTransport: RuntimeTransport | undefined;
 
     if (session.runtimeProfileId) {
       const profileRow = findRuntimeProfileById(session.runtimeProfileId);
@@ -1103,6 +1113,7 @@ chatRouter.get("/sessions/:id/messages", async (c) => {
         profileOptions = profile.options;
         profileHeaders = profile.headers;
         profileBaseUrl = profile.baseUrl ?? null;
+        profileTransport = (profile.transport ?? undefined) as RuntimeTransport | undefined;
       }
     }
 
@@ -1136,6 +1147,7 @@ chatRouter.get("/sessions/:id/messages", async (c) => {
           providerId,
           profileId,
           projectRoot: project.rootPath,
+          transport: profileTransport,
           sessionId: linkedRuntimeSessionId,
           options: {
             ...(profileOptions ?? {}),
