@@ -264,6 +264,12 @@ describe("data layer", () => {
         isFix: true,
         tags: ["x"],
       });
+      const firstBacklog = createTask({
+        projectId: "proj-1",
+        title: "Backlog first by position",
+        description: "D",
+        position: 10,
+      })!;
       const backlog = listTasks("proj-1").find((task) => task.title === "Backlog A")!;
       updateTask(backlog.id, {
         tokenInput: 5,
@@ -291,18 +297,20 @@ describe("data layer", () => {
       const proj1 = overviews.find((overview) => overview.projectId === "proj-1")!;
       const proj2 = overviews.find((overview) => overview.projectId === "proj-2")!;
 
-      expect(proj1.totalTasks).toBe(2);
+      expect(proj1.totalTasks).toBe(3);
       expect(proj1.completedTasks).toBe(1);
-      expect(proj1.backlogTasks).toBe(1);
+      expect(proj1.backlogTasks).toBe(2);
       expect(proj1.fixTasks).toBe(1);
       expect(proj1.totalRetries).toBe(2);
       expect(proj1.totalTokenInput).toBe(15);
       expect(proj1.totalTokenOutput).toBe(21);
       expect(proj1.totalTokenTotal).toBe(36);
       expect(proj1.totalCostUsd).toBe(0.5);
-      expect(proj1.statusCounts.backlog).toBe(1);
+      expect(proj1.statusCounts.backlog).toBe(2);
       expect(proj1.statusCounts.done).toBe(1);
-      expect(proj1.statusPreviews.backlog).toEqual([{ id: expect.any(String), title: "Backlog A" }]);
+      expect(proj1.statusPreviews.backlog).toEqual([
+        { id: firstBacklog.id, title: "Backlog first by position" },
+      ]);
       expect(proj1.statusPreviews.done).toEqual([{ id: done.id, title: "Done B" }]);
       expect(proj2.totalTasks).toBe(1);
     });

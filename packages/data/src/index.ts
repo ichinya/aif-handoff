@@ -1339,8 +1339,18 @@ function toFiniteNumber(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+type ProjectTaskPreviewQueryRow = {
+  id: string;
+  projectId: string;
+  title: string;
+  status: TaskStatus;
+};
+
 export function listProjectTaskOverviews(previewLimit = 3): ProjectTaskOverview[] {
   const db = getDb();
+  const normalizedPreviewLimit = Number.isFinite(previewLimit)
+    ? Math.max(0, Math.trunc(previewLimit))
+    : 0;
   const projectRows = listProjects();
   const overviewByProjectId = new Map(
     projectRows.map((project) => [project.id, emptyProjectTaskOverview(project.id)]),
@@ -1396,26 +1406,35 @@ export function listProjectTaskOverviews(previewLimit = 3): ProjectTaskOverview[
     }
   }
 
-  if (previewLimit > 0) {
-    const previewRows = db
-      .select({
-        id: tasks.id,
-        projectId: tasks.projectId,
-        title: tasks.title,
-        status: tasks.status,
-      })
-      .from(tasks)
-      .orderBy(asc(tasks.projectId), asc(tasks.status), asc(tasks.position))
-      .all();
+  if (normalizedPreviewLimit > 0) {
+    const previewRows = db.all<ProjectTaskPreviewQueryRow>(sql`
+      select
+        id,
+        project_id as "projectId",
+        title,
+        status
+      from (
+        select
+          ${tasks.id} as id,
+          ${tasks.projectId} as project_id,
+          ${tasks.title} as title,
+          ${tasks.status} as status,
+          row_number() over (
+            partition by ${tasks.projectId}, ${tasks.status}
+            order by ${tasks.position} asc, ${tasks.id} asc
+          ) as preview_rank
+        from ${tasks}
+      )
+      where preview_rank <= ${normalizedPreviewLimit}
+      order by project_id asc, status asc, preview_rank asc
+    `);
 
     for (const row of previewRows) {
       const overview = overviewByProjectId.get(row.projectId);
       if (!overview) continue;
 
       const previews = overview.statusPreviews[row.status];
-      if (previews.length < previewLimit) {
-        previews.push({ id: row.id, title: row.title });
-      }
+      previews.push({ id: row.id, title: row.title });
     }
   }
 
