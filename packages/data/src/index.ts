@@ -20,6 +20,7 @@ import {
 import {
   AUTO_REVIEW_FINDING_SOURCES,
   AUTO_REVIEW_STRATEGIES,
+  TASK_STATUSES,
   buildRuntimeLimitSignature,
   appSettings,
   generatePlanPath,
@@ -58,7 +59,9 @@ import {
   type UpdateRuntimeProfileInput,
   type RuntimeWarmupSessionStatus,
   type Task,
+  type TaskListItem,
   type TaskStatus,
+  type ProjectTaskOverview,
   resolveRuntimeLimitFutureHint,
   sanitizeRuntimeLimitSnapshotForExposure,
   selectViolatedWindowForExactThreshold,
@@ -635,6 +638,92 @@ export function listTasks(projectId?: string): TaskRow[] {
   return db.select().from(tasks).orderBy(asc(tasks.status), asc(tasks.position)).all();
 }
 
+type TaskListItemRow = Pick<TaskRow,
+  | "id" | "projectId" | "title" | "description" | "status" | "priority" | "position"
+  | "autoMode" | "isFix" | "paused" | "roadmapAlias" | "tags"
+  | "runtimeProfileId" | "modelOverride"
+  | "blockedReason" | "blockedFromStatus" | "retryAfter" | "retryCount"
+  | "reworkRequested" | "reviewIterationCount" | "maxReviewIterations" | "manualReviewRequired"
+  | "runtimeLimitSnapshotJson" | "runtimeLimitUpdatedAt"
+  | "tokenInput" | "tokenOutput" | "tokenTotal" | "costUsd"
+  | "lastSyncedAt" | "scheduledAt" | "createdAt" | "updatedAt"
+> & { hasPlan: boolean | number };
+
+const TASK_LIST_COLUMNS = {
+  id: tasks.id,
+  projectId: tasks.projectId,
+  title: tasks.title,
+  description: tasks.description,
+  status: tasks.status,
+  priority: tasks.priority,
+  position: tasks.position,
+  autoMode: tasks.autoMode,
+  isFix: tasks.isFix,
+  paused: tasks.paused,
+  roadmapAlias: tasks.roadmapAlias,
+  tags: tasks.tags,
+  runtimeProfileId: tasks.runtimeProfileId,
+  modelOverride: tasks.modelOverride,
+  blockedReason: tasks.blockedReason,
+  blockedFromStatus: tasks.blockedFromStatus,
+  retryAfter: tasks.retryAfter,
+  retryCount: tasks.retryCount,
+  reworkRequested: tasks.reworkRequested,
+  reviewIterationCount: tasks.reviewIterationCount,
+  maxReviewIterations: tasks.maxReviewIterations,
+  manualReviewRequired: tasks.manualReviewRequired,
+  runtimeLimitSnapshotJson: tasks.runtimeLimitSnapshotJson,
+  runtimeLimitUpdatedAt: tasks.runtimeLimitUpdatedAt,
+  tokenInput: tasks.tokenInput,
+  tokenOutput: tasks.tokenOutput,
+  tokenTotal: tasks.tokenTotal,
+  costUsd: tasks.costUsd,
+  lastSyncedAt: tasks.lastSyncedAt,
+  scheduledAt: tasks.scheduledAt,
+  createdAt: tasks.createdAt,
+  updatedAt: tasks.updatedAt,
+  hasPlan: sql<number>`case when length(trim(coalesce(${tasks.plan}, ''))) > 0 then 1 else 0 end`,
+} as const;
+
+function toBooleanFlag(value: boolean | number): boolean {
+  return value === true || value === 1;
+}
+
+const TASK_STATUS_ORDER = new Map<TaskStatus, number>(
+  TASK_STATUSES.map((status, index) => [status, index]),
+);
+
+function compareTaskListRows(a: TaskListItemRow, b: TaskListItemRow): number {
+  const statusOrder =
+    (TASK_STATUS_ORDER.get(a.status) ?? TASK_STATUSES.length) -
+    (TASK_STATUS_ORDER.get(b.status) ?? TASK_STATUSES.length);
+  if (statusOrder !== 0) return statusOrder;
+  return a.position - b.position;
+}
+
+export function toTaskListItem(row: TaskListItemRow): TaskListItem {
+  const { tags, runtimeLimitSnapshotJson, hasPlan, ...rest } = row;
+  return {
+    ...rest,
+    tags: parseTags(tags),
+    runtimeLimitSnapshot: parseTaskRuntimeLimitSnapshot(runtimeLimitSnapshotJson, row.id),
+    hasPlan: toBooleanFlag(hasPlan),
+  };
+}
+
+export function listTaskListItems(projectId: string): TaskListItem[] {
+  const rows = getDb()
+    .select(TASK_LIST_COLUMNS)
+    .from(tasks)
+    .where(eq(tasks.projectId, projectId))
+    .orderBy(asc(tasks.position))
+    .all();
+
+  rows.sort(compareTaskListRows);
+  log.debug({ projectId, count: rows.length, projection: "task-list" }, "Listed task list items");
+  return rows.map(toTaskListItem);
+}
+
 export function getMinBacklogPosition(projectId: string): number | null {
   const row = getDb()
     .select({ minPos: min(tasks.position) })
@@ -1207,6 +1296,134 @@ export function getAppDefaultRuntimeProfileId(
 
 export function listProjects(): ProjectRow[] {
   return getDb().select().from(projects).all();
+}
+
+function emptyStatusCounts(): Record<TaskStatus, number> {
+  const counts = {} as Record<TaskStatus, number>;
+  for (const status of TASK_STATUSES) {
+    counts[status] = 0;
+  }
+  return counts;
+}
+
+function emptyStatusPreviews(): ProjectTaskOverview["statusPreviews"] {
+  const previews = {} as ProjectTaskOverview["statusPreviews"];
+  for (const status of TASK_STATUSES) {
+    previews[status] = [];
+  }
+  return previews;
+}
+
+function emptyProjectTaskOverview(projectId: string): ProjectTaskOverview {
+  return {
+    projectId,
+    totalTasks: 0,
+    completedTasks: 0,
+    verifiedTasks: 0,
+    backlogTasks: 0,
+    activeTasks: 0,
+    blockedTasks: 0,
+    autoModeTasks: 0,
+    fixTasks: 0,
+    totalRetries: 0,
+    totalTokenInput: 0,
+    totalTokenOutput: 0,
+    totalTokenTotal: 0,
+    totalCostUsd: 0,
+    statusCounts: emptyStatusCounts(),
+    statusPreviews: emptyStatusPreviews(),
+  };
+}
+
+function toFiniteNumber(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+export function listProjectTaskOverviews(previewLimit = 3): ProjectTaskOverview[] {
+  const db = getDb();
+  const projectRows = listProjects();
+  const overviewByProjectId = new Map(
+    projectRows.map((project) => [project.id, emptyProjectTaskOverview(project.id)]),
+  );
+
+  const aggregateRows = db
+    .select({
+      projectId: tasks.projectId,
+      status: tasks.status,
+      taskCount: count(),
+      autoModeTasks: sql<number>`coalesce(sum(case when ${tasks.autoMode} = 1 then 1 else 0 end), 0)`,
+      fixTasks: sql<number>`coalesce(sum(case when ${tasks.isFix} = 1 then 1 else 0 end), 0)`,
+      totalRetries: sql<number>`coalesce(sum(${tasks.retryCount}), 0)`,
+      totalTokenInput: sql<number>`coalesce(sum(${tasks.tokenInput}), 0)`,
+      totalTokenOutput: sql<number>`coalesce(sum(${tasks.tokenOutput}), 0)`,
+      totalTokenTotal: sql<number>`coalesce(sum(${tasks.tokenTotal}), 0)`,
+      totalCostUsd: sql<number>`coalesce(sum(${tasks.costUsd}), 0)`,
+    })
+    .from(tasks)
+    .groupBy(tasks.projectId, tasks.status)
+    .all();
+
+  for (const row of aggregateRows) {
+    const overview = overviewByProjectId.get(row.projectId);
+    if (!overview) continue;
+
+    const taskCount = toFiniteNumber(row.taskCount);
+    const status = row.status;
+    overview.totalTasks += taskCount;
+    overview.statusCounts[status] = taskCount;
+    overview.autoModeTasks += toFiniteNumber(row.autoModeTasks);
+    overview.fixTasks += toFiniteNumber(row.fixTasks);
+    overview.totalRetries += toFiniteNumber(row.totalRetries);
+    overview.totalTokenInput += toFiniteNumber(row.totalTokenInput);
+    overview.totalTokenOutput += toFiniteNumber(row.totalTokenOutput);
+    overview.totalTokenTotal += toFiniteNumber(row.totalTokenTotal);
+    overview.totalCostUsd += toFiniteNumber(row.totalCostUsd);
+
+    if (status === "done" || status === "verified") {
+      overview.completedTasks += taskCount;
+    }
+    if (status === "verified") {
+      overview.verifiedTasks += taskCount;
+    }
+    if (status === "backlog") {
+      overview.backlogTasks += taskCount;
+    }
+    if (status === "blocked_external") {
+      overview.blockedTasks += taskCount;
+    }
+    if (status !== "backlog" && status !== "done" && status !== "verified") {
+      overview.activeTasks += taskCount;
+    }
+  }
+
+  if (previewLimit > 0) {
+    const previewRows = db
+      .select({
+        id: tasks.id,
+        projectId: tasks.projectId,
+        title: tasks.title,
+        status: tasks.status,
+      })
+      .from(tasks)
+      .orderBy(asc(tasks.projectId), asc(tasks.status), asc(tasks.position))
+      .all();
+
+    for (const row of previewRows) {
+      const overview = overviewByProjectId.get(row.projectId);
+      if (!overview) continue;
+
+      const previews = overview.statusPreviews[row.status];
+      if (previews.length < previewLimit) {
+        previews.push({ id: row.id, title: row.title });
+      }
+    }
+  }
+
+  log.debug(
+    { projectCount: projectRows.length, projection: "project-task-overview" },
+    "Listed project task overviews",
+  );
+  return projectRows.map((project) => overviewByProjectId.get(project.id)!);
 }
 
 export function findProjectById(id: string): ProjectRow | undefined {

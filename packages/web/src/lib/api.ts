@@ -1,5 +1,6 @@
 import type {
   Task,
+  TaskListItem,
   CreateTaskInput,
   UpdateTaskInput,
   TaskEvent,
@@ -7,6 +8,7 @@ import type {
   TaskComment,
   CreateTaskCommentInput,
   Project,
+  ProjectTaskOverview,
   CreateProjectInput,
   ChatRequest,
   ChatSession,
@@ -282,6 +284,11 @@ export const api = {
     return request<Project[]>("/projects");
   },
 
+  listProjectTaskOverviews(): Promise<ProjectTaskOverview[]> {
+    console.debug("[api] GET /projects/overview");
+    return request<ProjectTaskOverview[]>("/projects/overview");
+  },
+
   createProject(input: CreateProjectInput): Promise<Project> {
     console.debug("[api] POST /projects", input);
     return request<Project>("/projects", {
@@ -351,10 +358,10 @@ export const api = {
   },
 
   // Tasks
-  listTasks(projectId?: string): Promise<Task[]> {
-    const qs = projectId ? `?projectId=${projectId}` : "";
-    console.debug("[api] GET /tasks%s", qs);
-    return request<Task[]>(`${API_BASE}${qs}`);
+  listTasks(projectId: string): Promise<TaskListItem[]> {
+    const qs = `?projectId=${encodeURIComponent(projectId)}`;
+    console.debug("[api] GET /tasks?projectId=%s", projectId);
+    return request<TaskListItem[]>(`${API_BASE}${qs}`);
   },
 
   getTask(id: string): Promise<Task> {

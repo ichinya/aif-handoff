@@ -157,6 +157,66 @@ export interface Task {
   updatedAt: string;
 }
 
+export interface TaskListItem {
+  id: string;
+  projectId: string;
+  title: string;
+  description: string;
+  autoMode: boolean;
+  isFix: boolean;
+  status: TaskStatus;
+  priority: number;
+  position: number;
+  blockedReason: string | null;
+  blockedFromStatus: TaskStatus | null;
+  retryAfter: string | null;
+  retryCount: number;
+  tokenInput?: number;
+  tokenOutput?: number;
+  tokenTotal?: number;
+  costUsd?: number;
+  roadmapAlias: string | null;
+  tags: string[];
+  reworkRequested: boolean;
+  reviewIterationCount: number;
+  maxReviewIterations: number;
+  manualReviewRequired: boolean;
+  paused: boolean;
+  lastSyncedAt: string | null;
+  runtimeProfileId?: string | null;
+  modelOverride?: string | null;
+  runtimeLimitSnapshot?: RuntimeLimitSnapshot | null;
+  runtimeLimitUpdatedAt?: string | null;
+  scheduledAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  hasPlan: boolean;
+}
+
+export interface ProjectTaskPreview {
+  id: string;
+  title: string;
+}
+
+export interface ProjectTaskOverview {
+  projectId: string;
+  totalTasks: number;
+  completedTasks: number;
+  verifiedTasks: number;
+  backlogTasks: number;
+  activeTasks: number;
+  blockedTasks: number;
+  autoModeTasks: number;
+  fixTasks: number;
+  totalRetries: number;
+  totalTokenInput: number;
+  totalTokenOutput: number;
+  totalTokenTotal: number;
+  totalCostUsd: number;
+  statusCounts: Record<TaskStatus, number>;
+  statusPreviews: Record<TaskStatus, ProjectTaskPreview[]>;
+}
+
 export interface TaskActiveRuntimeSelection {
   status: TaskStatus;
   profileMode: "task" | "plan" | "review";
