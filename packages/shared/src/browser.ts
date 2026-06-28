@@ -15,8 +15,6 @@ export {
   type UpdateAppSettingsInput,
   type Task,
   type TaskListItem,
-  type ProjectTaskPreview,
-  type ProjectTaskOverview,
   type CreateTaskInput,
   type UpdateTaskInput,
   type TaskComment,

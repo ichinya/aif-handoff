@@ -139,55 +139,6 @@ GET /projects
 ]
 ```
 
-### Project Task Overview
-
-```
-GET /projects/overview
-```
-
-Returns compact task aggregates for the projects overview screen. This endpoint
-does not return full task rows.
-
-**Response:** `200 OK`
-
-```json
-[
-  {
-    "projectId": "uuid",
-    "totalTasks": 12,
-    "statusCounts": {
-      "backlog": 4,
-      "planning": 1,
-      "plan_ready": 2,
-      "implementing": 1,
-      "review": 1,
-      "blocked_external": 1,
-      "done": 2,
-      "verified": 0
-    },
-    "tokenInput": 1200,
-    "tokenOutput": 800,
-    "tokenTotal": 2000,
-    "costUsd": 0.25,
-    "retryCount": 3,
-    "blockedCount": 1,
-    "manualReviewRequiredCount": 1,
-    "statusPreviews": {
-      "backlog": [{ "id": "task-1", "title": "Queued work" }],
-      "planning": [],
-      "plan_ready": [],
-      "implementing": [],
-      "review": [],
-      "blocked_external": [],
-      "done": [],
-      "verified": []
-    }
-  }
-]
-```
-
-Preview lists are intentionally small and include only task id/title pairs.
-
 ### Create Project
 
 ```
@@ -667,9 +618,10 @@ task detail payload.
 
 - `400` - missing `projectId`
 - `400` - invalid `projectId` format
-  For backlog tasks, ordinary creation now places new rows at the backlog tail,
-  so API consumers see default-created backlog tasks in creation order unless a
-  caller supplies an explicit `position`.
+
+> Backlog ordering: ordinary task creation places new rows at the backlog tail,
+> so API consumers see default-created backlog tasks in creation order unless a
+> caller supplies an explicit `position`.
 
 ### Create Task
 

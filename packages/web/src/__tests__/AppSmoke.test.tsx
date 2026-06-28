@@ -25,7 +25,10 @@ vi.mock("@/hooks/useProjects", async (importOriginal) => {
 
 vi.mock("@/hooks/useTasks", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
-  return stubHookModule(Object.keys(actual));
+  const stubbed = stubHookModule(Object.keys(actual));
+  // useAllProjectTasks returns a merged array directly (not a query object).
+  stubbed.useAllProjectTasks = vi.fn(() => []) as never;
+  return stubbed;
 });
 
 vi.mock("@/hooks/useSettings", async (importOriginal) => {
@@ -52,13 +55,13 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
   return {
     ...actual,
     useQuery: vi.fn(() => ({ data: undefined, isLoading: false })),
+    useQueries: vi.fn(() => []),
     useMutation: vi.fn(() => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false })),
   };
 });
 
 const App = (await import("../App")).default;
-const { useProjectTaskOverviews } = await import("@/hooks/useProjects");
-const { useTasks } = await import("@/hooks/useTasks");
+const { useTasks, useAllProjectTasks } = await import("@/hooks/useTasks");
 
 describe("App smoke test", () => {
   beforeEach(() => {
@@ -88,6 +91,7 @@ describe("App smoke test", () => {
     render(<App />);
 
     expect(vi.mocked(useTasks)).toHaveBeenCalledWith(projectId);
-    expect(vi.mocked(useProjectTaskOverviews)).toHaveBeenCalledWith(false);
+    // When a project is selected, the no-project fan-out hook must not query anything.
+    expect(vi.mocked(useAllProjectTasks)).toHaveBeenCalledWith([]);
   });
 });

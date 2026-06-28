@@ -8,7 +8,6 @@ import type {
   TaskComment,
   CreateTaskCommentInput,
   Project,
-  ProjectTaskOverview,
   CreateProjectInput,
   ChatRequest,
   ChatSession,
@@ -282,11 +281,6 @@ export const api = {
   listProjects(): Promise<Project[]> {
     console.debug("[api] GET /projects");
     return request<Project[]>("/projects");
-  },
-
-  listProjectTaskOverviews(): Promise<ProjectTaskOverview[]> {
-    console.debug("[api] GET /projects/overview");
-    return request<ProjectTaskOverview[]>("/projects/overview");
   },
 
   createProject(input: CreateProjectInput): Promise<Project> {

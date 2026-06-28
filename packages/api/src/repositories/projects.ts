@@ -7,7 +7,6 @@ import {
   createProject as createProjectRecord,
   deleteProject as deleteProjectRecord,
   findProjectById,
-  listProjectTaskOverviews,
   listProjects,
   type ProjectRow,
   updateProject as updateProjectRecord,
@@ -159,4 +158,4 @@ export function getProjectMcpServers(projectId: string): Record<string, unknown>
   }
 }
 
-export { listProjects, listProjectTaskOverviews, findProjectById };
+export { listProjects, findProjectById };

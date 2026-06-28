@@ -4,6 +4,20 @@ Branch: `feat/optimize-task-list-load`
 Created: 2026-06-26
 Issue: https://github.com/lee-to/aif-handoff/issues/137
 
+> **PR split (2026-06-28):** Per review feedback (PR #138, size threshold), the
+> original scope was decomposed into two PRs along the task-list / overview seam.
+> This PR (#138, this branch) keeps only **Concern A** — the lightweight
+> `TaskListItem` contract, the project-scoped `GET /tasks` refactor, web
+> board/list integration, and the perf runner fix. The no-project overview
+> screen now fans out per-project lightweight lists via `useAllProjectTasks`
+> (no bare all-tasks call, no aggregate endpoint yet).
+>
+> **Concern B** — the `GET /projects/overview` aggregate endpoint,
+> `ProjectTaskOverview`/`ProjectTaskPreview` types, `ProjectsOverview` rewrite
+> to use the endpoint, and the `/projects/overview` docs — moved to a follow-up
+> PR branched off this one. The `/projects/overview` docs mismatch
+> (must-fix #1) is fixed there, where the section is reintroduced.
+
 ## Settings
 
 - Testing: yes

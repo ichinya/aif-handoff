@@ -6,13 +6,13 @@ import { TaskDetail } from "./components/task/TaskDetail";
 import { CommandPalette } from "./components/layout/CommandPalette";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { useCommitToasts } from "./hooks/useCommitToasts";
-import { useProjectTaskOverviews, useProjects } from "./hooks/useProjects";
-import { useTasks } from "./hooks/useTasks";
+import { useProjects } from "./hooks/useProjects";
+import { useTasks, useAllProjectTasks } from "./hooks/useTasks";
 import { useTheme } from "./hooks/useTheme";
 import { useKeyboardShortcut } from "./hooks/useKeyboardShortcut";
 import { ChatBubble } from "./components/chat/ChatBubble";
 import { ChatPanel } from "./components/chat/ChatPanel";
-import { calculateOverviewMetrics, calculateTaskMetrics } from "./lib/taskMetrics";
+import { calculateTaskMetrics } from "./lib/taskMetrics";
 import { readStorage, writeStorage, removeStorage } from "./lib/storage";
 import { STORAGE_KEYS } from "./lib/storageKeys";
 import type { Project } from "@aif/shared/browser";
@@ -70,13 +70,14 @@ function AppContent() {
     [projects, selectedProjectId],
   );
   const { data: projectTasks } = useTasks(selectedProjectId);
-  const { data: projectTaskOverviews } = useProjectTaskOverviews(!selectedProjectId);
+  const allProjectIds = useMemo(
+    () => (selectedProjectId ? [] : (projects ?? []).map((p) => p.id)),
+    [projects, selectedProjectId],
+  );
+  const allProjectTasks = useAllProjectTasks(allProjectIds);
   const taskMetrics = useMemo(
-    () =>
-      selectedProjectId
-        ? calculateTaskMetrics(projectTasks ?? [])
-        : calculateOverviewMetrics(projectTaskOverviews ?? []),
-    [projectTaskOverviews, projectTasks, selectedProjectId],
+    () => calculateTaskMetrics(selectedProjectId ? (projectTasks ?? []) : allProjectTasks),
+    [allProjectTasks, projectTasks, selectedProjectId],
   );
   const aggregateProjectTotals = useMemo(() => {
     if (selectedProjectId || !projects?.length) return null;
