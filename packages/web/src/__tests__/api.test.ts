@@ -28,4 +28,12 @@ describe("api client", () => {
     expect(String(url)).toContain("/tasks?projectId=project%201");
     expect(String(url)).not.toBe("/tasks");
   });
+
+  it("uses explicit project overview endpoint", async () => {
+    await api.listProjectTaskOverviews();
+
+    const fetchMock = vi.mocked(fetch);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain("/projects/overview");
+  });
 });

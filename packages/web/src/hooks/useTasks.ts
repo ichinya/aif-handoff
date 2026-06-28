@@ -1,10 +1,4 @@
-import {
-  useQuery,
-  useQueries,
-  useMutation,
-  useQueryClient,
-  type QueryClient,
-} from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import type {
   Task,
   TaskListItem,
@@ -16,6 +10,7 @@ import type {
   CreateTaskCommentInput,
 } from "@aif/shared/browser";
 import { api } from "../lib/api.js";
+import { invalidateProjectTaskOverviews } from "./useProjects.js";
 
 export function useTasks(projectId: string | null) {
   return useQuery<TaskListItem[]>({
@@ -25,34 +20,9 @@ export function useTasks(projectId: string | null) {
   });
 }
 
-/**
- * Fetch the lightweight task list for every project in parallel.
- *
- * The task list contract requires a `projectId`, so the no-project overview
- * screen (and aggregate header metrics) cannot use a single "load all" call.
- * Until a dedicated aggregate endpoint exists, we fan out one scoped request
- * per project and flatten the results here.
- */
-export function useAllProjectTasks(projectIds: string[]): TaskListItem[] {
-  const results = useQueries({
-    queries: projectIds.map((projectId) => ({
-      queryKey: ["tasks", projectId] as const,
-      queryFn: () => api.listTasks(projectId),
-    })),
-  });
-  const all: TaskListItem[] = [];
-  for (const result of results) {
-    if (result.data) {
-      for (const task of result.data) {
-        all.push(task);
-      }
-    }
-  }
-  return all;
-}
-
 function invalidateTaskCollections(queryClient: QueryClient): void {
   queryClient.invalidateQueries({ queryKey: ["tasks"] });
+  invalidateProjectTaskOverviews(queryClient);
 }
 
 export function useTask(id: string | null) {

@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { Project, TaskListItem, TaskStatus } from "@aif/shared/browser";
+import type { Project, ProjectTaskOverview, TaskStatus } from "@aif/shared/browser";
 import { STATUS_CONFIG } from "@aif/shared/browser";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -9,8 +9,8 @@ import { ProgressBar } from "@/components/ui/progress-bar";
 import { StatusDot } from "@/components/ui/status-dot";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Metric } from "@/components/ui/metric";
-import { useAllProjectTasks } from "@/hooks/useTasks";
-import { calculateTaskMetrics } from "@/lib/taskMetrics";
+import { useProjectTaskOverviews } from "@/hooks/useProjects";
+import { calculateProjectOverviewMetrics } from "@/lib/taskMetrics";
 
 const integerFmt = new Intl.NumberFormat("en-US");
 const usdFmt = new Intl.NumberFormat("en-US", {
@@ -43,44 +43,15 @@ const OVERVIEW_STATUSES: TaskStatus[] = [
 
 const PREVIEW_LIMIT = 3;
 
-function tasksByProject(tasks: TaskListItem[]): Map<string, TaskListItem[]> {
-  const map = new Map<string, TaskListItem[]>();
-  for (const task of tasks) {
-    const list = map.get(task.projectId);
-    if (list) list.push(task);
-    else map.set(task.projectId, [task]);
-  }
-  return map;
-}
-
-function emptyByStatus(): Record<TaskStatus, TaskListItem[]> {
-  return Object.fromEntries(
-    Object.keys(STATUS_CONFIG).map((s) => [s, [] as TaskListItem[]]),
-  ) as Record<TaskStatus, TaskListItem[]>;
-}
-
-function groupByStatus(tasks: TaskListItem[]): Record<TaskStatus, TaskListItem[]> {
-  const acc = emptyByStatus();
-  for (const task of tasks) acc[task.status]?.push(task);
-  return acc;
-}
-
 export function ProjectsOverview({ projects, onSelectProject }: ProjectsOverviewProps) {
-  const projectIds = useMemo(() => projects.map((p) => p.id), [projects]);
-  const allTasks = useAllProjectTasks(projectIds);
-  // Treat the per-project fan-out as "loading" until every project's list has resolved.
-  // The hook returns a merged array; we approximate loading by checking the count of
-  // distinct projects that currently have any task data vs. the requested set.
-  const tasksByProj = useMemo(() => tasksByProject(allTasks), [allTasks]);
-  const knownProjectIds = useMemo(() => {
-    const set = new Set<string>();
-    for (const task of allTasks) set.add(task.projectId);
-    return set;
-  }, [allTasks]);
-  // A project with zero tasks contributes no rows, so "all resolved" is only knowable
-  // once the query cache has been populated. Until then, show skeletons only if no
-  // project has reported yet.
-  const isLoading = projects.length > 0 && knownProjectIds.size === 0 && allTasks.length === 0;
+  const { data: projectTaskOverviews, isLoading } = useProjectTaskOverviews(projects.length > 0);
+  const overviewByProjectId = useMemo(() => {
+    const map = new Map<string, ProjectTaskOverview>();
+    for (const overview of projectTaskOverviews ?? []) {
+      map.set(overview.projectId, overview);
+    }
+    return map;
+  }, [projectTaskOverviews]);
 
   if (!projects.length) {
     return (
@@ -113,9 +84,8 @@ export function ProjectsOverview({ projects, onSelectProject }: ProjectsOverview
       ) : (
         <div className="grid grid-cols-1 gap-4">
           {projects.map((project) => {
-            const projectTasks = tasksByProj.get(project.id) ?? [];
-            const byStatus = groupByStatus(projectTasks);
-            const metrics = calculateTaskMetrics(projectTasks);
+            const overview = overviewByProjectId.get(project.id);
+            const metrics = calculateProjectOverviewMetrics(overview);
             const progress = Math.round(metrics.completionRate);
             const isComplete =
               metrics.totalTasks > 0 && metrics.completedTasks === metrics.totalTasks;
@@ -205,7 +175,8 @@ export function ProjectsOverview({ projects, onSelectProject }: ProjectsOverview
 
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
                   {OVERVIEW_STATUSES.map((status) => {
-                    const items = byStatus[status] ?? [];
+                    const count = overview?.statusCounts[status] ?? 0;
+                    const items = overview?.statusPreviews[status] ?? [];
                     const config = STATUS_CONFIG[status];
                     return (
                       <Card key={status} variant="muted" className="p-2">
@@ -217,7 +188,7 @@ export function ProjectsOverview({ projects, onSelectProject }: ProjectsOverview
                             </span>
                           </div>
                           <Badge variant="secondary" size="xs">
-                            {items.length}
+                            {count}
                           </Badge>
                         </div>
                         {items.length === 0 ? (
@@ -233,9 +204,9 @@ export function ProjectsOverview({ projects, onSelectProject }: ProjectsOverview
                                 {task.title}
                               </li>
                             ))}
-                            {items.length > PREVIEW_LIMIT && (
+                            {count > PREVIEW_LIMIT && (
                               <li className="text-2xs text-muted-foreground/60">
-                                +{items.length - PREVIEW_LIMIT} more
+                                +{count - PREVIEW_LIMIT} more
                               </li>
                             )}
                           </ul>
